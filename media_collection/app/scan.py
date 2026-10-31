@@ -220,6 +220,35 @@ def remember_skip(con, title_id, path):
     con.commit()
 
 
+def rip_item(con, title_id):
+    """The copy that stands for the file on the NAS, made the first time it is seen.
+
+    A ripped file is its own copy, so a library of nothing but files still shows
+    something on the shelf and the disc copies stay untouched.
+    """
+    found = con.execute(
+        "SELECT i.id FROM items i JOIN digital_sources d ON d.item_id = i.id"
+        " WHERE i.title_id = ? AND d.provider = 'rip'"
+        " AND i.format = 'digital' LIMIT 1",
+        (title_id,)).fetchone()
+    if found:
+        return found["id"]
+    owner = con.execute(
+        "SELECT owner_id FROM items WHERE title_id = ? ORDER BY id LIMIT 1",
+        (title_id,)).fetchone()
+    if owner:
+        owner_id = owner["owner_id"]
+    else:
+        user = con.execute("SELECT id FROM users ORDER BY id LIMIT 1").fetchone()
+        if not user:
+            return None
+        owner_id = user["id"]
+    return con.execute(
+        "INSERT INTO items (title_id, owner_id, format, visibility, notes)"
+        " VALUES (?, ?, 'digital', 'shared', 'ripped file')",
+        (title_id, owner_id)).lastrowid
+
+
 def missing(con):
     """Titles that have a copy but no ripped file linked to any of them."""
     return con.execute(
@@ -252,22 +281,46 @@ def sync_files(con, log=print, repair=False):
         if "%d|%s" % (title["id"], relative) in skipped:
             counts["skipped"] = counts.get("skipped", 0) + 1
             continue
-        item = con.execute("SELECT id FROM items WHERE title_id = ?"
-                           " ORDER BY id LIMIT 1", (title["id"],)).fetchone()
-        if not item:
+        item_id = rip_item(con, title["id"])
+        if not item_id:
             counts["unmatched"] += 1
             continue
         con.execute("INSERT INTO digital_sources (item_id, provider, path, root_id, notes)"
                     " VALUES (?, 'rip', ?, ?, ?)",
-                    (item["id"], relative, root_id, "Found in the media folder"))
+                    (item_id, relative, root_id, "Found in the media folder"))
         counts["linked"] += 1
         log("scan: %s -> %s" % (title["name"], relative))
     con.commit()
+    counts["repointed"] = repoint_rips(con, log)
     if repair:
         counts["relinked"] = _relink(con, roots, cache, skipped, log)
         con.commit()
     counts["folders"] = len(cache)
     return counts
+
+
+def repoint_rips(con, log):
+    """Move rip sources off disc copies onto the title's ripped-file copy.
+
+    Older scans hung the file on whichever copy came first, so a ripped film looked
+    like a Blu-ray with no file. Moving them keeps one copy per thing owned.
+    """
+    rows = con.execute(
+        "SELECT d.id, d.item_id, i.title_id, i.format FROM digital_sources d"
+        " JOIN items i ON i.id = d.item_id"
+        " WHERE d.provider = 'rip' AND i.format != 'digital'").fetchall()
+    moved = 0
+    for row in rows:
+        target = rip_item(con, row["title_id"])
+        if not target or target == row["item_id"]:
+            continue
+        con.execute("UPDATE digital_sources SET item_id = ? WHERE id = ?",
+                    (target, row["id"]))
+        moved += 1
+    if moved:
+        con.commit()
+        log("scan: %d ripped file(s) moved to their own copy" % moved)
+    return moved
 
 
 def _relink(con, roots, cache, skipped, log):

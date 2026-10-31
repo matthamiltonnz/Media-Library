@@ -52,6 +52,7 @@ FORMAT_LABELS = {
     "cassette": "Cassette",
     "vhs": "VHS",
     "other": "Other",
+    "rip": "Ripped file",
 }
 KINDS = {"movie": "Movie", "tv": "TV", "music": "Music", "other": "Other"}
 # the case drawn around the artwork in the thumbnail view, by the best copy held
@@ -148,7 +149,8 @@ def viewer_for(handler, con):
 
 # ------------------------------------------------------------------ views ----
 
-def library_rows(con, viewer_id, query="", kind="", owner=None, format=""):
+def library_rows(con, viewer_id, query="", kind="", owner=None, format="",
+                 rips=False):
     sql = """
         SELECT i.id, t.id AS title_id, t.name AS title, t.release_year, i.format,
                i.edition, i.upc_ean, i.region, i.visibility, i.location,
@@ -168,14 +170,27 @@ def library_rows(con, viewer_id, query="", kind="", owner=None, format=""):
     if owner:
         sql += " AND i.owner_id = ?"
         params.append(int(owner))
-    if format:
+    if format == "rip":
+        sql += (" AND EXISTS (SELECT 1 FROM digital_sources r"
+                " WHERE r.item_id = i.id AND r.provider = 'rip')")
+    elif format:
         sql += " AND i.format = ?"
         params.append(format)
+    if not rips:
+        sql += " AND NOT " + RIP_ONLY
     sql += " ORDER BY t.name COLLATE NOCASE, i.format"
     return con.execute(sql, params).fetchall()
 
 
-def visible_clause(query="", kind="", owner=None, format=""):
+# A title whose only copies are files on the NAS: hidden by default so the shelf is
+# about discs, one click away when browsing what can actually be played.
+RIP_ONLY = ("NOT EXISTS (SELECT 1 FROM items o WHERE o.title_id = t.id"
+            " AND NOT EXISTS (SELECT 1 FROM digital_sources r"
+            "   WHERE r.item_id = o.id AND r.provider = 'rip'))")
+
+
+def visible_clause(query="", kind="", owner=None, format="",
+                   rips=False):
     where = ["(i.visibility = 'shared' OR i.owner_id = ?)"]
     params = []                              # viewer id is supplied by the caller
     if query:
@@ -187,21 +202,31 @@ def visible_clause(query="", kind="", owner=None, format=""):
     if owner:
         where.append("i.owner_id = ?")
         params.append(int(owner))
-    if format:
+    if format == "rip":
+        where.append("EXISTS (SELECT 1 FROM digital_sources r"
+                     " WHERE r.item_id = i.id AND r.provider = 'rip')")
+    elif format:
         where.append("i.format = ?")
         params.append(format)
     return " AND ".join(where), params
 
 
 def library_stats(con, viewer_id, query="", kind="", owner=None,
-                  format=""):
-    clause, extra = visible_clause(query, kind, owner, format)
+                  format="", rips=False):
+    clause, extra = visible_clause(query, kind, owner, format, rips)
+    if not rips:
+        clause += " AND NOT " + RIP_ONLY
     params = [viewer_id] + extra
     base = ("FROM items i JOIN titles t ON t.id = i.title_id WHERE " + clause)
     titles = con.execute("SELECT COUNT(DISTINCT t.id) " + base, params).fetchone()[0]
     copies = con.execute("SELECT COUNT(*) " + base, params).fetchone()[0]
-    formats = con.execute("SELECT i.format AS fmt, COUNT(*) AS n " + base +
-                          " GROUP BY i.format ORDER BY n DESC", params).fetchall()
+    # a copy that is a file on the NAS counts as "ripped", not as the format of
+    # whatever disc it came from, so the tally matches what is on the shelf
+    formats = con.execute(
+        "SELECT CASE WHEN EXISTS (SELECT 1 FROM digital_sources r"
+        "                    WHERE r.item_id = i.id AND r.provider = 'rip')"
+        " THEN 'rip' ELSE i.format END AS fmt, COUNT(*) AS n " + base +
+        " GROUP BY fmt ORDER BY n DESC", params).fetchall()
     return titles, copies, formats
 
 def owner_totals(con):
@@ -330,6 +355,7 @@ $notice
 $error
 <h2>$heading$scope</h2>
 <p class="sub">$totals</p>
+$rips_toggle
 $library
 
 <h2>Add a copy</h2>
@@ -369,7 +395,7 @@ ROW = Template("""<tr>
 
 
 def render_index(con, viewer, base, error=None, query="", pending=0, merged=0,
-                 view="list", kind="", owner=None, format=""):
+                 view="list", kind="", owner=None, format="", rips=False):
     bits = []
     if query:
         bits.append("q=" + quote(query))
@@ -382,10 +408,19 @@ def render_index(con, viewer, base, error=None, query="", pending=0, merged=0,
     if format:
         bits.append("format=" + quote(format))
     here = "?" + "&".join(bits) if bits else ""
+    bits_rips = [bit for bit in bits if not bit.startswith("rips=")]
+    if not rips:
+        bits_rips.append("rips=1")
+    rips_link = base + ("?" + "&".join(bits_rips) if bits_rips else "")
+    rips_toggle = ('<p class="sub"><a href="%s">%s</a></p>'
+                   % (html.escape(rips_link),
+                      "Hide titles that are only ripped files" if rips
+                      else "Show titles that are only ripped files"))
 
-    rows = library_rows(con, viewer["id"], query, kind, owner, format)
+    rows = library_rows(con, viewer["id"], query, kind, owner, format,
+                          rips)
     titles, copies, formats = library_stats(con, viewer["id"], query,
-                                            kind, owner, format)
+                                            kind, owner, format, rips)
     heading = "%d title%s · %d cop%s" % (titles, "" if titles == 1 else "s", copies,
                                         "y" if copies == 1 else "ies")
     def tally_link(fmt):
@@ -454,7 +489,8 @@ def render_index(con, viewer, base, error=None, query="", pending=0, merged=0,
     else:
         notice = ""
     if view == "grid":
-        clause, extra = visible_clause(query, kind, owner, format)
+        clause, extra = visible_clause(query, kind, owner, format,
+                                       rips)
         cards = con.execute(
             "SELECT t.id, t.name, t.release_year, t.poster_url, t.kind,"
             " (SELECT l.jf_id FROM jellyfin_links l"
@@ -529,6 +565,7 @@ def render_index(con, viewer, base, error=None, query="", pending=0, merged=0,
                % (html.escape(base), kind,
                   "&amp;owner=%d" % owner if owner else "") if query else ""),
         view=view,
+        rips_toggle=rips_toggle,
         viewtoggle=(' · <a href="%s?view=%s&amp;kind=%s%s%s%s">%s</a>'
                     % (html.escape(base), "list" if view == "grid" else "grid",
                        html.escape(kind),
@@ -837,6 +874,7 @@ class Handler(BaseHTTPRequestHandler):
             owner = int(owner_raw) if owner_raw.isdigit() else None
             fmt = (parse_qs(urlparse(self.path).query).get("format")
                    or [""])[0]
+            rips = bool(parse_qs(urlparse(self.path).query).get("rips"))
             merged = (parse_qs(urlparse(self.path).query).get("merged") or ["0"])[0]
             if route.rstrip("/").endswith("/artists"):
                 want = (parse_qs(urlparse(self.path).query).get("view")
@@ -870,7 +908,7 @@ class Handler(BaseHTTPRequestHandler):
                 view="grid" if view == "grid" else "list",
                 owner=owner,
                 kind=kind if kind in ("movie", "tv", "music", "other") else "movie",
-                format=fmt))
+                format=fmt, rips=rips))
         finally:
             con.close()
 

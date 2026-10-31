@@ -95,6 +95,18 @@ clear it. The tallies keep showing the whole library so you can switch between
 them. Every card and list row carries the filters it was opened with, so **Back to
 the catalogue** returns to the same kind, owner, search and format.
 
+## Ripped files are copies too
+
+A file found on the NAS becomes its own copy of the title, badged **Ripped file ·
+whoever owns the disc**, so a library of nothing but files still fills the shelf and
+a disc keeps its own row untouched. Old scans had hung the file off whichever copy
+came first, which hid it; the scan now moves those onto their own copy
+(`repoint_rips`) on every run.
+
+Because the shelf is for managing discs, titles whose only copies are files are
+hidden by default - the link under the tallies (*Show titles that are only ripped
+files*) brings them back, and the **Ripped file** tally does the same with a click.
+
 ## Play
 
 A title page opens on **About**: one badge per copy (format, store and owner, so

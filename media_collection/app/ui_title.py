@@ -54,13 +54,24 @@ def _links(row):
     return " · ".join(links)
 
 
-def _copy_title(item, labels, store=None):
+def _copy_title(item, labels, store=None, ripped=False):
     """'Blu-ray · Matt' - what a copy is, in one phrase."""
-    bits = [labels.get(item["format"], item["format"] or "copy")]
-    if store:
-        bits.append(store)
+    if ripped and not store:
+        bits = ["Ripped file"]              # a file with no disc or purchase
+    else:
+        bits = [labels.get(item["format"], item["format"] or "copy")]
+        if store:
+            bits.append(store)
+        if ripped:
+            bits.append("ripped file")
     bits.append(item["owner_name"] or "unowned")
     return " · ".join(bits)
+
+
+def _ripped(digital):
+    """{item_id} for the copies that are a file on the NAS."""
+    return {source["item_id"] for source in digital
+            if source["provider"] == "rip"}
 
 
 def _stores(digital):
@@ -78,13 +89,11 @@ def _stores(digital):
 def _badges(items, digital, labels, base=None, title_id=None):
     """One badge per copy; pressing one opens that copy on the Copies tab."""
     stores = _stores(digital)
+    ripped = _ripped(digital)
     badges = []
     for item in items:
-        bits = [labels.get(item["format"], item["format"] or "copy")]
-        if stores.get(item["id"]):
-            bits.append(stores[item["id"]])
-        bits.append(item["owner_name"] or "unowned")
-        text = _text(" · ".join(bits))
+        text = _text(_copy_title(item, labels, stores.get(item["id"]),
+                                 item["id"] in ripped))
         if base and title_id:
             badges.append('<a class="badge" href="%stitle/%d?tab=copies#copy-%d"'
                           ' title="Show this copy">%s</a>'
@@ -222,9 +231,9 @@ def _copy_fields(item, formats, labels, store):
              _text(item["notes"]))
 
 
-def _copy_line(item, labels, store):
+def _copy_line(item, labels, store, ripped=False):
     """One line that says what the copy is and where it came from."""
-    head = _copy_title(item, labels, store)
+    head = _copy_title(item, labels, store, ripped)
     bits = [value for value in (item["edition"], item["location"],
                                 item["condition"]) if value]
     detail = " · ".join(_text(bit) for bit in bits)
@@ -264,7 +273,9 @@ def _copies_tab(base, row, items, digital, formats, labels, users,
             '<form method="post" action="%sitems/%d">%s'
             '<p><button type="submit">Save copy</button></p></form>%s'
             '</details>'
-            % (item["id"], _copy_line(item, labels, store), _text(base),
+            % (item["id"], _copy_line(item, labels, store,
+                                      item["id"] in _ripped(digital)),
+               _text(base),
                item["id"], _copy_fields(item, formats, labels, store),
                remove))
 
