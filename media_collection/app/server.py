@@ -25,6 +25,8 @@ import metadata
 import playback
 import refresh_job
 import scan
+import artists
+import ui_artists
 import ui_admin
 import ui_import
 import ui_title
@@ -146,7 +148,7 @@ def viewer_for(handler, con):
 
 # ------------------------------------------------------------------ views ----
 
-def library_rows(con, viewer_id, query="", kind="", owner=None):
+def library_rows(con, viewer_id, query="", kind="", owner=None, format=""):
     sql = """
         SELECT i.id, t.id AS title_id, t.name AS title, t.release_year, i.format,
                i.edition, i.upc_ean, i.region, i.visibility, i.location,
@@ -166,11 +168,14 @@ def library_rows(con, viewer_id, query="", kind="", owner=None):
     if owner:
         sql += " AND i.owner_id = ?"
         params.append(int(owner))
+    if format:
+        sql += " AND i.format = ?"
+        params.append(format)
     sql += " ORDER BY t.name COLLATE NOCASE, i.format"
     return con.execute(sql, params).fetchall()
 
 
-def visible_clause(query="", kind="", owner=None):
+def visible_clause(query="", kind="", owner=None, format=""):
     where = ["(i.visibility = 'shared' OR i.owner_id = ?)"]
     params = []                              # viewer id is supplied by the caller
     if query:
@@ -182,11 +187,15 @@ def visible_clause(query="", kind="", owner=None):
     if owner:
         where.append("i.owner_id = ?")
         params.append(int(owner))
+    if format:
+        where.append("i.format = ?")
+        params.append(format)
     return " AND ".join(where), params
 
 
-def library_stats(con, viewer_id, query="", kind="", owner=None):
-    clause, extra = visible_clause(query, kind, owner)
+def library_stats(con, viewer_id, query="", kind="", owner=None,
+                  format=""):
+    clause, extra = visible_clause(query, kind, owner, format)
     params = [viewer_id] + extra
     base = ("FROM items i JOIN titles t ON t.id = i.title_id WHERE " + clause)
     titles = con.execute("SELECT COUNT(DISTINCT t.id) " + base, params).fetchone()[0]
@@ -360,13 +369,33 @@ ROW = Template("""<tr>
 
 
 def render_index(con, viewer, base, error=None, query="", pending=0, merged=0,
-                 view="list", kind="", owner=None):
-    rows = library_rows(con, viewer["id"], query, kind, owner)
-    titles, copies, formats = library_stats(con, viewer["id"], query, kind, owner)
+                 view="list", kind="", owner=None, format=""):
+    rows = library_rows(con, viewer["id"], query, kind, owner, format)
+    titles, copies, formats = library_stats(con, viewer["id"], query,
+                                            kind, owner, format)
     heading = "%d title%s · %d cop%s" % (titles, "" if titles == 1 else "s", copies,
                                         "y" if copies == 1 else "ies")
-    totals = " · ".join("%s %d" % (FORMAT_LABELS.get(row["fmt"], row["fmt"]), row["n"])
-                        for row in formats) or "nothing yet"
+    def tally_link(fmt):
+        bits = []
+        if query:
+            bits.append("q=" + quote(query))
+        if kind:
+            bits.append("kind=" + quote(kind))
+        if owner:
+            bits.append("owner=%d" % owner)
+        if view and view != "list":
+            bits.append("view=" + quote(view))
+        if fmt:
+            bits.append("format=" + quote(fmt))
+        return base + ("?" + "&".join(bits) if bits else "")
+
+    totals = " · ".join(
+        '<a class="tally%s" href="%s">%s %d</a>'
+        % (" current" if row["fmt"] == format else "",
+           html.escape(tally_link(row["fmt"])),
+           html.escape(FORMAT_LABELS.get(row["fmt"], row["fmt"])),
+           row["n"])
+        for row in formats) or "nothing yet"
     mode_counts = {row["kind"]: row["n"] for row in con.execute(
         "SELECT t.kind AS kind, COUNT(*) AS n FROM items i"
         " JOIN titles t ON t.id = i.title_id"
@@ -412,7 +441,7 @@ def render_index(con, viewer, base, error=None, query="", pending=0, merged=0,
     else:
         notice = ""
     if view == "grid":
-        clause, extra = visible_clause(query, kind, owner)
+        clause, extra = visible_clause(query, kind, owner, format)
         cards = con.execute(
             "SELECT t.id, t.name, t.release_year, t.poster_url, t.kind,"
             " (SELECT l.jf_id FROM jellyfin_links l"
@@ -486,11 +515,15 @@ def render_index(con, viewer, base, error=None, query="", pending=0, merged=0,
                % (html.escape(base), kind,
                   "&amp;owner=%d" % owner if owner else "") if query else ""),
         view=view,
-        viewtoggle=' · <a href="%s?view=%s&amp;kind=%s%s%s">%s</a>'
-                   % (html.escape(base), "list" if view == "grid" else "grid", kind,
-                      "&amp;q=" + html.escape(query) if query else "",
-                      "&amp;owner=%d" % owner if owner else "",
-                      "List view" if view == "grid" else "Thumbnails"),
+        viewtoggle=(' · <a href="%s?view=%s&amp;kind=%s%s%s%s">%s</a>'
+                    % (html.escape(base), "list" if view == "grid" else "grid",
+                       html.escape(kind),
+                       "&amp;q=" + html.escape(query) if query else "",
+                       "&amp;owner=%d" % owner if owner else "",
+                       "&amp;format=" + html.escape(format) if format else "",
+                       "List view" if view == "grid" else "Thumbnails")
+                    + (' · <a href="%sartists">By artist</a>'
+                       % html.escape(base) if kind == "music" else "")),
         library=library,
         format_options="".join(
             '<option value="{0}">{1}</option>'.format(f, FORMAT_LABELS[f]) for f in FORMATS
@@ -786,7 +819,24 @@ class Handler(BaseHTTPRequestHandler):
             kind = (parse_qs(urlparse(self.path).query).get("kind") or [""])[0]
             owner_raw = (parse_qs(urlparse(self.path).query).get("owner") or [""])[0]
             owner = int(owner_raw) if owner_raw.isdigit() else None
+            fmt = (parse_qs(urlparse(self.path).query).get("format")
+                   or [""])[0]
             merged = (parse_qs(urlparse(self.path).query).get("merged") or ["0"])[0]
+            if route.rstrip("/").endswith("/artists"):
+                return self.respond(200, ui_artists.render_list(
+                    base, artists.all_artists(con, viewer["id"])))
+
+            match = re.search(r"/artist/(\d+)/?$", route)
+            if match:
+                artist = artists.get(con, int(match.group(1)))
+                if artist is None:
+                    return self.respond(404, "No such artist",
+                                        "text/plain; charset=utf-8")
+                return self.respond(200, ui_artists.render_artist(
+                    base, artist,
+                    artists.titles_for(con, artist["id"], viewer["id"]),
+                    FORMAT_LABELS))
+
             # detail page, always last so /title/<id>/metadata is handled in POST
             detail = re.search(r"/title/(\d+)/?$", route)
             if detail:
@@ -798,7 +848,8 @@ class Handler(BaseHTTPRequestHandler):
                 merged=int(merged) if merged.isdigit() else 0,
                 view="grid" if view == "grid" else "list",
                 owner=owner,
-                kind=kind if kind in ("movie", "tv", "music", "other") else "movie"))
+                kind=kind if kind in ("movie", "tv", "music", "other") else "movie",
+                format=fmt))
         finally:
             con.close()
 
@@ -1049,10 +1100,16 @@ class Handler(BaseHTTPRequestHandler):
                     " WHERE id = ?", (title_id,)).fetchone()
                 new_year = int(year) if len(year) == 4 else None
                 new_tmdb = int(tmdb) if tmdb else None
+                new_mb = (field(form, "musicbrainz_id") or "").strip() or None
                 con.execute(
                     "UPDATE titles SET name = ?, release_year = ?, kind = ?,"
-                    " imdb_id = ?, tmdb_id = ? WHERE id = ?",
-                    (name, new_year, kind, new_imdb, new_tmdb, title_id))
+                    " musicbrainz_id = ? WHERE id = ?",
+                    (name, new_year, kind, new_mb, title_id))
+                if kind != "music":
+                    con.execute(
+                        "UPDATE titles SET imdb_id = ?, tmdb_id = ?"
+                        " WHERE id = ?",
+                        (new_imdb, new_tmdb, title_id))
                 con.commit()
 
                 message = "Title updated."

@@ -69,6 +69,22 @@ it, or add another one (owner included) without leaving the page. A digital copy
 records the store it was bought from - iTunes, Apple TV or other - next to what it
 cost and when; Kodi is no longer offered because it sits outside Home Assistant.
 
+## By artist
+
+Music titles are stored as "Artist — Album", and that name is split once into an
+`artists` row per act (`artists.py --link`, re-run on every add-on start and after
+a music import). The Music view then offers **By artist**: every act with albums
+on the shelf, how many, and the years covered. Each act opens a page with their
+albums, what each one is owned as, and a MusicBrainz link, so a music title edits
+the **MusicBrainz ID** instead of the IMDb/TMDb pair.
+
+## Filtering
+
+The format tally under the heading ("Blu-ray 172 · Digital 169 · 4K Blu-ray 38") is
+clickable: press a format to see only those copies, press the same one again to
+clear it. The tallies keep showing the whole library so you can switch between
+them.
+
 ## Play
 
 A title page opens on **About**: one badge per copy (format, store and owner, so

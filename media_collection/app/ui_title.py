@@ -75,8 +75,8 @@ def _stores(digital):
     return found
 
 
-def _badges(items, digital, labels):
-    """One badge per copy: format, store and owner, above the Play button."""
+def _badges(items, digital, labels, base=None, title_id=None):
+    """One badge per copy; pressing one opens that copy on the Copies tab."""
     stores = _stores(digital)
     badges = []
     for item in items:
@@ -84,7 +84,13 @@ def _badges(items, digital, labels):
         if stores.get(item["id"]):
             bits.append(stores[item["id"]])
         bits.append(item["owner_name"] or "unowned")
-        badges.append('<span class="badge">%s</span>' % _text(" · ".join(bits)))
+        text = _text(" · ".join(bits))
+        if base and title_id:
+            badges.append('<a class="badge" href="%stitle/%d?tab=copies#copy-%d"'
+                          ' title="Show this copy">%s</a>'
+                          % (_text(base), title_id, item["id"], text))
+        else:
+            badges.append('<span class="badge">%s</span>' % text)
     return "".join(badges)
 
 
@@ -95,7 +101,7 @@ def _play_block(base, row, items, digital, players, last_player,
                 if source["provider"] == "rip" and source["path"]
                 and source["root_path"]]
     jellyfin_ready = bool(jellyfin_link and jellyfin_configured)
-    badges = _badges(items, digital, labels)
+    badges = _badges(items, digital, labels, base, row["id"])
     head = ('<div class="badges">%s</div>' % badges if badges
             else '<p class="muted">No copies recorded yet.</p>')
     if not playable and not jellyfin_ready:
@@ -244,12 +250,13 @@ def _copies_tab(base, row, items, digital, formats, labels, users,
             remove = ('<p class="muted">Shared copy - only %s can delete'
                       ' it.</p>' % _text(item["owner_name"] or "its owner"))
         parts.append(
-            '<details class="copy"><summary>%s</summary>'
+            '<details class="copy" id="copy-%d"><summary>%s</summary>'
             '<form method="post" action="%sitems/%d">%s'
             '<p><button type="submit">Save copy</button></p></form>%s'
             '</details>'
-            % (_copy_line(item, labels, store), _text(base), item["id"],
-               _copy_fields(item, formats, labels, store), remove))
+            % (item["id"], _copy_line(item, labels, store), _text(base),
+               item["id"], _copy_fields(item, formats, labels, store),
+               remove))
 
     owner_options = "".join('<option value="%d"%s>%s</option>'
                             % (user["id"],
@@ -275,6 +282,8 @@ def _copies_tab(base, row, items, digital, formats, labels, users,
         % (_text(base), _text(row["name"]), _text(row["kind"]),
            _text(row["release_year"] or ""), owner_options,
            _copy_fields(blank, formats, labels, "")))
+    parts.append('<script>var target = document.querySelector("details.copy:target");'
+                 'if (target) { target.open = true; }</script>')
     return "".join(parts)
 
 
@@ -285,20 +294,25 @@ def _title_form(base, row):
                       % (kind, " selected" if kind == row["kind"] else "",
                          _text(label))
                       for kind, label in kinds)
+    if row["kind"] == "music":
+        ids = ('\n    <label>MusicBrainz ID<input name="musicbrainz_id"'
+               ' value="%s" placeholder="a8fb6ac6-..."></label>'
+               % _text(row["musicbrainz_id"]))
+    else:
+        ids = ('\n    <label>IMDb ID<input name="imdb_id" value="%s">'
+               '</label>\n    <label>TMDb ID<input name="tmdb_id" value="%s">'
+               '</label>' % (_text(row["imdb_id"]), _text(row["tmdb_id"] or "")))
     return """
 <h2>Title</h2>
 <form method="post" action="%stitle/%d">
   <div class="grid">
     <label>Name<input name="name" value="%s"></label>
     <label>Year<input name="release_year" value="%s"></label>
-    <label>Kind<select name="kind">%s</select></label>
-    <label>IMDb ID<input name="imdb_id" value="%s"></label>
-    <label>TMDb ID<input name="tmdb_id" value="%s"></label>
+    <label>Kind<select name="kind">%s</select></label>%s
   </div>
   <p><button type="submit">Save title</button></p>
 </form>""" % (_text(base), row["id"], _text(row["name"]),
-             _text(row["release_year"] or ""), options, _text(row["imdb_id"]),
-             _text(row["tmdb_id"] or ""))
+             _text(row["release_year"] or ""), options, ids)
 
 
 def render(base, row, items, digital, formats, labels, summary=None, error=None,
@@ -310,6 +324,12 @@ def render(base, row, items, digital, formats, labels, summary=None, error=None,
         parts.append('<p class="banner good">%s</p>' % _text(summary))
     if error:
         parts.append('<p class="banner bad">%s</p>' % _text(error))
+
+    cover = (base + "art/" + jellyfin_link["jf_id"] if jellyfin_link
+             else (row["poster_url"] or ""))
+    if cover:
+        parts.append('<img class="cover" src="%s" alt="" loading="lazy">'
+                     % _text(cover))
 
     facts = _facts(row)
     if facts:

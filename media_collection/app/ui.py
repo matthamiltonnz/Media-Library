@@ -52,6 +52,10 @@ SHELL = """<!doctype html>
             text-decoration: none; }
   .tabs a.on { background: #8882; font-weight: 600; }
   button.primary { font-size: 1rem; padding: .5rem 1.6rem; }
+  .tally { text-decoration: none; border-bottom: 1px dotted currentColor; }
+  .tally.current { font-weight: 700; border-bottom-style: solid; }
+  img.cover { float: right; width: 170px; max-width: 38%; border-radius: 8px;
+              margin: 0 0 .8rem 1.2rem; box-shadow: 0 6px 18px #0003; }
   button.danger { border-color: #b4453c; color: #e8837a; }
   dialog.sheet { border: 1px solid #8886; border-radius: 10px; padding: 1.2rem 1.4rem;
                  max-width: 34rem; width: 92%; background: Canvas; color: CanvasText; }

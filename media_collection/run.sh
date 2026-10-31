@@ -44,6 +44,11 @@ python3 "$APP/music_import.py" "$DB" ${MUSIC_PATH:+"$MUSIC_PATH"} || echo "music
 
 # Same for TV: <Show (Year)>/<Season NN> becomes one title, one copy per season.
 python3 "$APP/tv_import.py" "$DB" || echo "tv scan skipped"
+
+# Albums are named "Artist — Album", so their artist can be linked once here and
+# the artist pages then read straight from artists/titles.
+python3 "$APP/artists.py" "$DB" --link || echo "artist link skipped"
+
 # Mitchell's films come from their own folder, one folder per film. The format is
 # read from the file name (2160p -> 4K, 1080p -> Blu-ray); disc details wait for
 # the Blu-ray.com export.
