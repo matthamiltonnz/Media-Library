@@ -107,8 +107,7 @@ def render(base, row, items, digital, formats, labels, summary=None, error=None,
 
     parts.append(
         '<form method="post" action="%stitle/%d/metadata">'
-        "<button type=\"submit\">Refresh metadata</button>"
-        ' <span class="muted">Wikipedia + Wikidata — no API key needed</span></form>'
+        "<button type=\"submit\">Refresh metadata</button></form>"
         % (base, row["id"]))
 
     parts.append("<h2>Edit title</h2>")
