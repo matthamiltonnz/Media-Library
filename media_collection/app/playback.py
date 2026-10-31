@@ -15,6 +15,13 @@ import urllib.request
 API = "http://supervisor/core/api"
 MEDIA_ROOT = "/media"                  # HA's `local` media source
 CACHE_SECONDS = 30
+MEDIA_EXTENSIONS = (".mkv", ".mp4", ".m4v", ".avi", ".mov", ".ts", ".m2ts",
+                    ".iso", ".wmv", ".mpg", ".mpeg", ".flac", ".mp3", ".m4a",
+                    ".aac", ".ogg", ".opus", ".wav", ".wma", ".ape", ".aiff")
+
+
+class PlaybackError(Exception):
+    """Something that stops Home Assistant starting the file."""
 _cache = {"at": 0.0, "players": []}
 TOKEN_FILES = ("/run/s6/container_environment/SUPERVISOR_TOKEN",
                "/run/s6/container_environment/HASSIO_TOKEN")
@@ -92,26 +99,74 @@ def content_type(kind):
     return "music" if kind == "music" else "video"
 
 
-def play(entity_id, uri, kind="music"):
-    """Ask HA to play `uri` on `entity_id`. Returns a message for the page."""
-    if not token():
-        return "Home Assistant API access is not enabled for this add-on."
-    if not entity_id:
-        return "Pick a player first."
-    if not uri:
-        return "That source is not inside /media, so HA cannot read it."
+def _files(absolute):
+    """The video/audio files a source points at, in play order."""
+    if os.path.isfile(absolute):
+        return [absolute]
+    found = []
     try:
-        _call("/services/media_player/play_media", "POST", {
-            "entity_id": entity_id,
-            "media_content_id": uri,
-            "media_content_type": content_type(kind),
-        })
+        for name in sorted(os.listdir(absolute)):
+            low = name.lower()
+            if low.startswith("sample") or not low.endswith(MEDIA_EXTENSIONS):
+                continue
+            full = os.path.join(absolute, name)
+            if os.path.isfile(full):
+                found.append(full)
+    except OSError:
+        return []
+    return found
+
+
+def _play_one(entity_id, uri, kind, enqueue=None):
+    payload = {"entity_id": entity_id, "media_content_id": uri,
+               "media_content_type": content_type(kind)}
+    if enqueue:
+        payload["enqueue"] = enqueue
+    _call("/services/media_player/play_media", "POST", payload)
+
+
+def play(entity_id, root_path, rel_path, kind="music"):
+    """Start the file behind a source, queueing the rest of the folder.
+
+    Home Assistant's `local` media source resolves files, not folders, so a
+    source that points at an album or a film folder starts its first track and
+    adds the rest of it to the queue where the player has one.
+    """
+    if not token():
+        raise PlaybackError("Home Assistant API access is not enabled for this add-on.")
+    if not entity_id:
+        raise PlaybackError("Pick a player first.")
+    absolute = os.path.normpath(os.path.join(root_path or "", rel_path or ""))
+    files = _files(absolute)
+    if not files:
+        raise PlaybackError("%s holds no video or audio file, so there is nothing "
+                            "to play." % (rel_path or absolute))
+    uris = []
+    for name in files:
+        uri = media_uri(os.path.dirname(name), os.path.basename(name))
+        if uri is None:
+            raise PlaybackError("%s is outside /media, so Home Assistant cannot read it."
+                                % name)
+        uris.append(uri)
+    try:
+        _play_one(entity_id, uris[0], kind)
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", "replace")[:200]
-        return "Home Assistant refused that (%s): %s" % (exc.code, detail)
+        raise PlaybackError("Home Assistant refused that (%s): %s" % (exc.code, detail))
     except Exception as exc:
-        return "Could not reach Home Assistant: %s" % exc
-    return "Sent to %s" % entity_id
+        raise PlaybackError("Could not reach Home Assistant: %s" % exc)
+
+    queued = 0
+    for uri in uris[1:]:
+        try:
+            _play_one(entity_id, uri, kind, enqueue="add")
+            queued += 1
+        except Exception:
+            break                                # no queue on this player
+    if queued:
+        return "Playing %s and %d more from %s" % (
+            os.path.basename(files[0]), queued, rel_path)
+    return "Playing %s" % os.path.basename(files[0])
 
 
 def last_player(con):

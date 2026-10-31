@@ -67,7 +67,10 @@ media player Home Assistant exposes (48 of them on this install, with their curr
 state), press **Play**. The add-on asks Home Assistant to play
 `media-source://media_source/local/<path under /media>` through
 `media_player.play_media`, so HA resolves the file itself and hands the player
-whatever it understands (cast, DLNA, Kodi…). No streaming server runs in the add-on.
+whatever it understands (cast, DLNA, Kodi…). HA only resolves files, not folders,
+so a source that points at an album or a film folder plays its first track and
+queues the rest where the player has a queue. Errors come back in the red banner.
+No streaming server runs in the add-on.
 
 That needs `homeassistant_api: true` in `config.yaml`; the token is read from
 `/run/s6/container_environment/SUPERVISOR_TOKEN` because the base image starts the

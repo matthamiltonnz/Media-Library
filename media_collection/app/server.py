@@ -947,12 +947,13 @@ class Handler(BaseHTTPRequestHandler):
                 if source is None:
                     return self.title_page(con, viewer, base, title_id,
                                            error="Pick a playback source first.")
-                message = playback.play(entity_id,
-                                        playback.media_uri(source["root_path"],
-                                                           source["path"]),
-                                        row["kind"] if row else "movie")
-                if message.startswith("Sent"):
-                    playback.remember_player(con, entity_id)
+                try:
+                    message = playback.play(entity_id, source["root_path"],
+                                            source["path"],
+                                            row["kind"] if row else "movie")
+                except playback.PlaybackError as exc:
+                    return self.title_page(con, viewer, base, title_id, error=str(exc))
+                playback.remember_player(con, entity_id)
                 return self.title_page(con, viewer, base, title_id, summary=message)
 
             match = re.search(r"/title/(\d+)/jellyfin/?$", route)
