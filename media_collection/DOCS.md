@@ -104,6 +104,15 @@ over a few hundred albums takes roughly half an hour; the job pauses and resumes
 `429`/`503` like the film lookups do. There is no API key to configure. Albums with
 no MusicBrainz match are left untouched and reported back on the title page.
 
+### Bonus video discs and vinyl
+
+A CD that came with a bonus DVD is two copies of one title: the FLAC files give the
+**CD** copy, and the videos under `Music/Videos/<Artist>/<Album>` are attached by hand
+as a **DVD** copy (`edition` = *Bonus video disc*) with its own rip source, because the
+folder layout there doesn't say which album a disc belongs to. Vinyl is recorded as a
+**Vinyl** copy pointing at its rip (`edition` = *Vinyl rip · MP3* when the files are
+lossy) — the scanner can only see the codec, not the plastic.
+
 ### Bulk import of a ripped music tree
 
 `app/music_import.py` walks `<root>/<Owner's Music>/<Artist>/<Album>` and creates one
