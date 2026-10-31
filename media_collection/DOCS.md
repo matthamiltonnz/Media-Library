@@ -258,7 +258,10 @@ catalogue fills that gap itself:
   found, so adding a missing copy is a single click rather than a typed path.
 * **Jellyfin**: paste the server URL and an API key (Dashboard → API Keys) under
   Admin → Jellyfin, press *Sync with Jellyfin*, and every copy is linked to the item
-  Jellyfin already holds. The title page then offers *Play in Jellyfin*, which sends
+  Jellyfin already holds. The sync also runs once at start-up and whenever you press
+  the button, so films added since the last one get their button without a visit to
+  Admin; names are matched loosely (`10,000 B.C.` finds *10,000 BC*, and a catalogue
+  subtitle may be dropped). The title page then offers *Play in Jellyfin*, which sends
   the film or album straight to a connected client. The key is stored in the
   database, so it survives upgrades; `jellyfin_url` / `jellyfin_api_key` in the
   add-on options still win when they are set.

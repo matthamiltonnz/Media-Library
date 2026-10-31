@@ -867,13 +867,12 @@ class Handler(BaseHTTPRequestHandler):
                     + quote("Jellyfin settings saved - press Sync to match the copies.")})
 
             if route.rstrip("/").endswith("/jellyfin/sync"):
-                try:
-                    counts = jellyfin.sync_links(con)
-                    message = ("Jellyfin: %(copies)d copies, %(by_path)d matched by folder,"
-                               " %(by_name)d by name, %(unmatched)d not in Jellyfin."
-                               % counts)
-                except jellyfin.JellyfinError as exc:
-                    message = "Jellyfin sync failed: %s" % exc
+                if jellyfin.start_sync(DB_PATH):
+                    message = "Jellyfin sync started - the links refresh in the background."
+                else:
+                    message = "A Jellyfin sync is already running."
+                return self.respond(303, "", extra={
+                    "Location": base + "admin?jellyfin=" + quote(message)})
                 return self.respond(303, "", extra={
                     "Location": base + "admin?jellyfin=" + quote(message)})
 
@@ -1132,6 +1131,7 @@ def main():
         raise SystemExit("database missing at %s - run migrate.sh first" % DB_PATH)
     log("media collection listening on :%d (db=%s)" % (PORT, DB_PATH))
     scan.start(DB_PATH)
+    jellyfin.start_sync(DB_PATH)
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
 
 

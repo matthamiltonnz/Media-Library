@@ -12,6 +12,9 @@ are matched by folder, films by name + year. Only the standard library is used.
 import json
 import os
 import re
+import sqlite3
+import threading
+import time
 import unicodedata
 import urllib.error
 import urllib.parse
@@ -147,8 +150,12 @@ def _index(base, key):
         if path:
             by_path[path] = (jf_id, "movie")
         name = _norm(item.get("Name"))
-        by_name.setdefault(("movie", name, _year(item.get("ProductionYear"))), (jf_id, "movie"))
+        movie_year = _year(item.get("ProductionYear"))
+        by_name.setdefault(("movie", name, movie_year), (jf_id, "movie"))
         by_name.setdefault(("movie", name, 0), (jf_id, "movie"))
+        compact = name.replace(" ", "")
+        by_name.setdefault(("movie", compact, movie_year), (jf_id, "movie"))
+        by_name.setdefault(("movie", compact, 0), (jf_id, "movie"))
 
     for item in _walk(base, key, "Episode", "Path,SeasonId,SeriesId", user_id):
         jf_id, path = item.get("Id"), _key(item.get("Path"))
@@ -190,12 +197,34 @@ def _index(base, key):
             "details": details, "counts": counts}
 
 
+def _name_keys(name):
+    """Loose spellings of a name, in the order we trust them.
+
+    '10,000 B.C.' and Jellyfin's '10,000 BC' differ only in punctuation, and a
+    catalogue that keeps a subtitle ('Tintin: Secret of the Unicorn') should
+    still find the plain name.
+    """
+    keys = []
+    for text in (name, (name or "").split(":")[0]):
+        folded = _norm(text)
+        if not folded:
+            continue
+        for key in (folded, folded.replace(" ", "")):
+            if key not in keys:
+                keys.append(key)
+    return keys
+
+
 def _name_match(index, name, year, kind):
     """A Jellyfin item for a title we could not match by folder."""
     by_name = index["by_name"]
     if kind == "movie":
-        return (by_name.get(("movie", _norm(name), _year(year)))
-                or by_name.get(("movie", _norm(name), 0)))
+        for key in _name_keys(name):
+            found = (by_name.get(("movie", key, _year(year)))
+                     or by_name.get(("movie", key, 0)))
+            if found:
+                return found
+        return None
     if kind == "music":
         artist, _, album = (name or "").partition(" — ")
         if album:
@@ -305,4 +334,42 @@ def status(con):
             "kinds": kinds,
             "synced_at": con.execute("SELECT MAX(synced_at) FROM jellyfin_links").fetchone()[0]}
 
-    return None
+
+
+_LOCK = threading.Lock()
+STATE = {"running": False, "counts": {}, "started": None, "finished": None}
+
+
+def sync_status():
+    return dict(STATE)
+
+
+def start_sync(db_path):
+    """Refresh the links in the background, so new rips just have a Play button."""
+    with _LOCK:
+        if STATE["running"]:
+            return False
+        STATE.update({"running": True, "counts": {}, "finished": None,
+                      "started": time.strftime("%Y-%m-%d %H:%M:%S")})
+    threading.Thread(target=_run_sync, args=(db_path,), daemon=True).start()
+    return True
+
+
+def _run_sync(db_path):
+    con = sqlite3.connect(db_path, timeout=30)
+    con.row_factory = sqlite3.Row
+    try:
+        if not config(con)[1]:
+            counts = {}                     # no key yet: nothing to refresh
+        else:
+            counts = sync_links(con, log=lambda message: None)
+            print("jellyfin: linked %(copies)d copies, %(unmatched)d still unknown"
+                  % counts)
+    except Exception as exc:                      # never take the server down
+        print("jellyfin: sync failed: %s" % exc)
+        counts = {"error": str(exc)}
+    finally:
+        con.close()
+    with _LOCK:
+        STATE.update({"running": False, "counts": counts,
+                      "finished": time.strftime("%Y-%m-%d %H:%M:%S")})
