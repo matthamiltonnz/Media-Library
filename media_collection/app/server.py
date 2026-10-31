@@ -234,15 +234,18 @@ PAGE = Template("""<!doctype html>
   /* Blu-ray, 3D and 4K cases: coloured plastic with a printed band across the top,
      the way the real boxes look (blue / blue with 3D / black with 4K Ultra HD) */
   .thumb.case-blu, .thumb.case-3d, .thumb.case-4k, .thumb.case-dvd {
-      aspect-ratio: 5 / 7; padding: 24% 6% 10%; border-radius: 5px;
+      aspect-ratio: 5 / 7; padding: 0 0 0 12%; border-radius: 5px;
+      overflow: hidden;
       box-shadow: inset 0 0 0 1px #ffffff2e, 0 6px 14px #0006; }
   .thumb.case-blu::before, .thumb.case-3d::before,
   .thumb.case-4k::before, .thumb.case-dvd::before {
-      position: absolute; left: 0; right: 0; top: 0; height: 20%;
+      position: absolute; left: 0; top: 0; bottom: 0; width: 12%;
       display: flex; align-items: center; justify-content: center;
-      font-size: .62rem; font-weight: 700; letter-spacing: .04em; color: #fff;
-      border-bottom: 1px solid #ffffff33;
-      background: linear-gradient(180deg, #ffffff26, #ffffff0a); }
+      writing-mode: vertical-rl; transform: rotate(180deg);
+      font-size: .55rem; font-weight: 700; letter-spacing: .06em; color: #fff;
+      text-shadow: 0 1px 2px #0006;
+      border-right: 1px solid #ffffff33;
+      background: linear-gradient(90deg, #ffffff26, #ffffff0a); }
   .thumb.case-blu { background: linear-gradient(180deg, #4fa6e3, #1e6cb8 32%, #0a3d7e); }
   .thumb.case-blu::before { content: "Blu-ray"; font-style: italic; }
   .thumb.case-3d { background: linear-gradient(180deg, #4fa6e3, #1e6cb8 32%, #0a3566); }
@@ -253,7 +256,7 @@ PAGE = Template("""<!doctype html>
   .thumb.case-dvd::before { content: "DVD"; letter-spacing: .2em; }
   .thumb.case-blu img, .thumb.case-3d img,
   .thumb.case-4k img, .thumb.case-dvd img {
-      border-radius: 2px; box-shadow: 0 3px 10px #000a; }
+      border-radius: 0; box-shadow: none; }
   /* a CD sits in a clear jewel case: hinge on the left, inlay under the plastic */
   .thumb.case-jewel { aspect-ratio: 1 / 1; padding: 0 0 0 12%; border-radius: 3px;
       overflow: hidden;
