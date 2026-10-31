@@ -90,7 +90,8 @@ def _item_row(base, item, formats, labels):
 
 
 def render(base, row, items, digital, formats, labels, summary=None, error=None,
-           ripped_root="", roots=(), owner=None, players=(), last_player=""):
+           ripped_root="", roots=(), owner=None, players=(), last_player="",
+           jellyfin_link=None, jellyfin_sessions=(), path_suggestion=""):
     parts = []
     if summary:
         parts.append('<p class="banner good">%s</p>' % _text(summary))
@@ -171,7 +172,28 @@ def render(base, row, items, digital, formats, labels, summary=None, error=None,
      source, so whatever that player supports just plays.</span></p>
 </form>""")
 
-    parts.append("<h2>Playback sources</h2>")
+    if jellyfin_link:
+        parts.append("<h2>Play in Jellyfin</h2>")
+        if jellyfin_sessions:
+            session_options = "".join(
+                '<option value="%s">%s</option>'
+                % (_text(session["id"]),
+                   _text(session["name"] + (" · %s" % session["client"]
+                                            if session["client"] else "")))
+                for session in jellyfin_sessions)
+            parts.append(f"""
+<form method="post" action="{base}title/{row['id']}/jellyfin">
+  <div class="grid">
+    <label>Device<select name="session_id">{session_options}</select></label>
+  </div>
+  <p><button type="submit">Play</button>
+     <span class="muted">{_text(jellyfin_link['jf_name'] or 'Linked item')}
+     ({_text(jellyfin_link['jf_kind'])}) straight from the Jellyfin server.</span></p>
+</form>""")
+        else:
+            parts.append('<p class="muted">This copy is linked to Jellyfin, but no device with '
+                         'remote control is connected right now.</p>')
+
     parts.append('<p class="sub">Where this title can be played from — a ripped file on '
                  'the NAS, a Jellyfin/Kodi item, an iTunes purchase. Ripped files are '
                  'stored relative to <code>%s</code>.</p>' % _text(ripped_root))
@@ -216,19 +238,25 @@ def render(base, row, items, digital, formats, labels, summary=None, error=None,
         path_hint = {"music": "Artist/Album (Year)",
                      "tv": "Show/Season 1/Show S01E01.mkv"}.get(
                          kind, "Movie (Year)/Movie.mkv")
+        found_note = (
+            '<p class="muted">Already on the NAS: <code>%s</code> - add it as it stands '
+            'and the file plays straight away.</p>' % _text(path_suggestion)
+            if path_suggestion else "")
         parts.append(f"""
 <form method="post" action="{base}title/{row['id']}/sources">
   <div class="grid">
     <label>Copy<select name="item_id">{copy_options}</select></label>
     <label>Provider<select name="provider">{provider_options}</select></label>
     <label>NAS root<select name="root_id">{root_options}</select></label>
-    <label>Path inside the root<input name="path" placeholder="{path_hint}"></label>
+    <label>Path inside the root<input name="path" placeholder="{path_hint}"
+      value="{_text(path_suggestion)}"></label>
     <label>Library id<input name="library_id" placeholder="Jellyfin library / Kodi source"></label>
     <label>Item id<input name="external_id" placeholder="Jellyfin item / Kodi db id"></label>
     <label>Notes<input name="notes"></label>
   </div>
   <p><button type="submit">Add playback source</button>
      <span class="muted">The full path is the root plus what you type here.</span></p>
+  {found_note}
 </form>""")
 
     kind = row["kind"] if "kind" in row.keys() else "movie"

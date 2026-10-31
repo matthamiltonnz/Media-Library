@@ -227,6 +227,25 @@ ignoring people and companies ("film director", "film studio") so a title like
 plot/poster and re-fetches immediately; clearing the id removes the metadata and
 leaves a "Search IMDb for …" link.
 
+## Media folders and Jellyfin
+
+A copy is a *thing you own*; a playback source is *where its file lives*. The
+catalogue fills that gap itself:
+
+* **Scan the media folders** (Admin) walks what is under the media roots and links
+  titles that have a copy but no file yet. Films and shows are matched by folder
+  name and year, albums by `Music/owner/artist/album`, so punctuation and subtitles
+  (`10,000 B.C.` vs `10 000 bc`) do not hide anything. The same scan runs once when
+  the add-on starts; it reads a handful of folders, not the whole share.
+* **Path inside the root** on a title page is pre-filled with the folder the scan
+  found, so adding a missing copy is a single click rather than a typed path.
+* **Jellyfin**: paste the server URL and an API key (Dashboard → API Keys) under
+  Admin → Jellyfin, press *Sync with Jellyfin*, and every copy is linked to the item
+  Jellyfin already holds. The title page then offers *Play in Jellyfin*, which sends
+  the film or album straight to a connected client. The key is stored in the
+  database, so it survives upgrades; `jellyfin_url` / `jellyfin_api_key` in the
+  add-on options still win when they are set.
+
 ## Updating a running install
 
 `/data/media.db` is created once — later versions of the bundled catalogue never

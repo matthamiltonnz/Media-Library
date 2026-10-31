@@ -131,7 +131,7 @@ def _roots_block(base, roots):
 
 
 def render(base, viewer, stats, pending=0, message=None, refresh=None, duplicates=0,
-           roots=()):
+           roots=(), jellyfin=None, scan_message=""):
     parts = []
     if message:
         parts.append('<p class="banner good">%s</p>' % html.escape(message))
@@ -176,5 +176,61 @@ def render(base, viewer, stats, pending=0, message=None, refresh=None, duplicate
 
     parts.append(_refresh_block(base, refresh))
     parts.append(_roots_block(base, roots))
+    parts.append(_scan_block(base, scan_message))
+    if jellyfin is not None:
+        parts.append(_jellyfin_block(base, jellyfin))
 
     return ui.page(base, "Library admin", "".join(parts))
+
+
+def _scan_block(base, message):
+    """Re-walk the media folders so new rips pick up their titles by themselves."""
+    return """
+<h2>Media folders</h2>
+%s
+<form method="post" action="%sscan">
+  <p><button type="submit">Scan the media folders</button>
+     <span class="muted">Finds files that are already ripped but not yet linked to
+     a title - films and shows by folder name and year, albums by artist.</span></p>
+</form>""" % ("<p class=\"sub\">%s</p>" % html.escape(message) if message else
+              '<p class="muted">Not scanned since the add-on started.</p>',
+              html.escape(base))
+
+
+def _jellyfin_block(base, status):
+    """Jellyfin: how much of the catalogue the server can already play."""
+    kinds = status.get("kinds") or {}
+    detail = ", ".join("%d %s" % (count, kind)
+                       for kind, count in sorted(kinds.items())) or "nothing yet"
+    if not status.get("configured"):
+        state = ('<p class="sub">No API key yet - put <code>jellyfin_api_key</code> in the '
+                 'add-on options (Settings, Add-ons, Media Collection, Configuration).</p>')
+    else:
+        last = (" Last sync %s." % html.escape(status["synced_at"])
+                if status.get("synced_at") else " Not synced yet.")
+        state = ('<p class="sub">%s - %d of %d copies linked (%s).%s</p>'
+                 % (html.escape(status.get("url") or ""), status.get("linked") or 0,
+                    status.get("copies") or 0, html.escape(detail), last))
+    return """
+<h2>Jellyfin</h2>%s
+<form method="post" action="%sjellyfin/sync">
+  <p><button type="submit">Sync with Jellyfin</button>
+     <span class="muted">Links every copy to the item Jellyfin already holds: albums and
+     TV seasons by folder, films by name and year.</span></p>
+</form>
+<details>
+  <summary>Server and API key</summary>
+  <form method="post" action="%sjellyfin/save">
+    <div class="grid">
+      <label>Server URL<input name="jellyfin_url" value="%s"
+        placeholder="http://192.168.1.10:8096"></label>
+      <label>API key<input name="jellyfin_api_key" type="password"
+        placeholder="%s"></label>
+    </div>
+    <p><button type="submit">Save</button>
+       <span class="muted">Jellyfin makes a key under Dashboard, API Keys. Leave the key
+       empty to keep the one already stored.</span></p>
+  </form>
+</details>""" % (state, html.escape(base), html.escape(base),
+                html.escape(status.get("url") or ""),
+                "stored - type to replace" if status.get("configured") else "paste the key")

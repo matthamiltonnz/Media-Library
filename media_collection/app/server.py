@@ -19,10 +19,12 @@ from urllib.parse import parse_qs, quote, urlparse
 
 import dedupe
 import importer
+import jellyfin
 import merger
 import metadata
 import playback
 import refresh_job
+import scan
 import ui_admin
 import ui_import
 import ui_title
@@ -674,10 +676,15 @@ class Handler(BaseHTTPRequestHandler):
                     message = "Merged %d item(s) from the bundled catalogue." % int(merged)
                 elif deduped.isdigit() and int(deduped):
                     message = "Folded %d duplicate title(s)." % int(deduped)
+                elif params.get("jellyfin"):
+                    message = params["jellyfin"][0]
+                elif params.get("scan") and scan.summary():
+                    message = scan.summary()
                 return self.respond(200, ui_admin.render(
                     base, viewer, stats(con), merger.pending_count(con), message,
                     refresh_job.status(), len(dedupe.groups(con)),
-                    con.execute("SELECT * FROM media_roots ORDER BY medium, label").fetchall()))
+                    con.execute("SELECT * FROM media_roots ORDER BY medium, label").fetchall(),
+                    jellyfin.status(con), scan.summary()))
 
             if route.rstrip("/").endswith("/export.csv"):
                 return self.respond(
@@ -748,10 +755,23 @@ class Handler(BaseHTTPRequestHandler):
             " WHERE i.title_id = ? ORDER BY d.provider", (title_id,)).fetchall()
         roots = con.execute("SELECT id, label, path, medium FROM media_roots"
                             " ORDER BY medium, label").fetchall()
+        try:
+            jellyfin_link = jellyfin.link_for_title(con, title_id)
+            jellyfin_sessions = jellyfin.sessions(con) if jellyfin_link else []
+        except Exception as exc:                     # never break the page for this
+            print("jellyfin: %s" % exc)
+            jellyfin_link, jellyfin_sessions = None, []
+        try:
+            path_suggestion = scan.suggest(con, title_id)
+        except Exception as exc:                     # a missing share must not 500 the page
+            print("scan: %s" % exc)
+            path_suggestion = ""
         return self.respond(200, ui_title.render(
             base, row, items, digital, FORMATS, FORMAT_LABELS, summary=summary,
             error=error, ripped_root=RIPPED_ROOT, roots=roots, owner=owner,
-            players=playback.players(), last_player=playback.last_player(con)))
+            players=playback.players(), last_player=playback.last_player(con),
+            jellyfin_link=jellyfin_link, jellyfin_sessions=jellyfin_sessions,
+            path_suggestion=path_suggestion))
 
     def do_POST(self):
         form = parse_body(self)
@@ -813,6 +833,33 @@ class Handler(BaseHTTPRequestHandler):
             if route.rstrip("/").endswith("/admin/refresh"):
                 refresh_job.start(DB_PATH, force=bool(field(form, "force")))
                 return self.respond(303, "", extra={"Location": base + "admin"})
+
+            if route.rstrip("/").endswith("/admin/scan"):
+                scan.start(DB_PATH)
+                return self.respond(303, "", extra={"Location": base + "admin?scan=1"})
+
+            if route.rstrip("/").endswith("/jellyfin/save"):
+                url = field(form, "jellyfin_url").strip()
+                key = field(form, "jellyfin_api_key").strip()
+                for name, value in (("jellyfin_url", url), ("jellyfin_api_key", key)):
+                    if value:
+                        con.execute("INSERT OR REPLACE INTO settings (key, value)"
+                                    " VALUES (?, ?)", (name, value))
+                con.commit()
+                return self.respond(303, "", extra={
+                    "Location": base + "admin?jellyfin="
+                    + quote("Jellyfin settings saved - press Sync to match the copies.")})
+
+            if route.rstrip("/").endswith("/jellyfin/sync"):
+                try:
+                    counts = jellyfin.sync_links(con)
+                    message = ("Jellyfin: %(copies)d copies, %(by_path)d matched by folder,"
+                               " %(by_name)d by name, %(unmatched)d not in Jellyfin."
+                               % counts)
+                except jellyfin.JellyfinError as exc:
+                    message = "Jellyfin sync failed: %s" % exc
+                return self.respond(303, "", extra={
+                    "Location": base + "admin?jellyfin=" + quote(message)})
 
             if route.rstrip("/").endswith("/merge"):
                 result = merger.merge(con)
@@ -892,6 +939,18 @@ class Handler(BaseHTTPRequestHandler):
                 if message.startswith("Sent"):
                     playback.remember_player(con, entity_id)
                 return self.title_page(con, viewer, base, title_id, summary=message)
+
+            match = re.search(r"/title/(\d+)/jellyfin/?$", route)
+            if match:
+                title_id = int(match.group(1))
+                link = jellyfin.link_for_title(con, title_id)
+                try:
+                    summary = jellyfin.play(con, field(form, "session_id"),
+                                            link["jf_id"] if link else "")
+                    return self.title_page(con, viewer, base, title_id, summary=summary)
+                except jellyfin.JellyfinError as exc:
+                    return self.title_page(con, viewer, base, title_id,
+                                           error="Jellyfin: %s" % exc)
 
             match = re.search(r"/title/(\d+)/?$", route)
             if match:
@@ -1053,6 +1112,7 @@ def main():
     if not os.path.exists(DB_PATH):
         raise SystemExit("database missing at %s - run migrate.sh first" % DB_PATH)
     log("media collection listening on :%d (db=%s)" % (PORT, DB_PATH))
+    scan.start(DB_PATH)
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
 
 
