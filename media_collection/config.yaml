@@ -1,5 +1,5 @@
 name: Media Collection
-version: "0.9.15"
+version: "0.9.17"
 slug: media_collection
 description: >-
   Shared family media catalogue. Every disc has one owner, and every shared copy
@@ -16,6 +16,7 @@ startup: application
 boot: auto
 ingress: true
 ingress_port: 8099
+homeassistant_api: true
 map:
   - media:ro
 panel_icon: mdi:movie-open

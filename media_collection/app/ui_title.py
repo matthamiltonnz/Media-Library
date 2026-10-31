@@ -90,7 +90,7 @@ def _item_row(base, item, formats, labels):
 
 
 def render(base, row, items, digital, formats, labels, summary=None, error=None,
-           ripped_root="", roots=(), owner=None):
+           ripped_root="", roots=(), owner=None, players=(), last_player=""):
     parts = []
     if summary:
         parts.append('<p class="banner good">%s</p>' % _text(summary))
@@ -137,6 +137,39 @@ def render(base, row, items, digital, formats, labels, summary=None, error=None,
         parts.append("".join(_item_row(base, item, formats, labels) for item in items))
     else:
         parts.append('<p class="muted">No copies recorded.</p>')
+
+    playable = [source for source in digital
+                if source["provider"] == "rip" and source["path"]
+                and source["root_path"]]
+    if playable:
+        parts.append("<h2>Play</h2>")
+        if not players:
+            parts.append('<p class="muted">No media players are exposed to Home '
+                         'Assistant yet — add the integration, then reload.</p>')
+        else:
+            source_options = "".join(
+                '<option value="%d">%s — %s</option>'
+                % (source["id"],
+                   _text(source["root_label"] or "root"),
+                   _text(source["path"]))
+                for source in playable)
+            player_options = "".join(
+                '<option value="%s"%s>%s%s</option>'
+                % (_text(player["entity_id"]),
+                   " selected" if player["entity_id"] == last_player else "",
+                   _text(player["name"]),
+                   " (%s)" % _text(player["state"]) if player["state"] else "")
+                for player in players)
+            parts.append(f"""
+<form method="post" action="{base}title/{row['id']}/play">
+  <div class="grid">
+    <label>Source<select name="source_id">{source_options}</select></label>
+    <label>Player<select name="entity_id">{player_options}</select></label>
+  </div>
+  <p><button type="submit">Play</button>
+     <span class="muted">Home Assistant reads the file through its local media
+     source, so whatever that player supports just plays.</span></p>
+</form>""")
 
     parts.append("<h2>Playback sources</h2>")
     parts.append('<p class="sub">Where this title can be played from — a ripped file on '

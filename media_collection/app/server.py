@@ -21,6 +21,7 @@ import dedupe
 import importer
 import merger
 import metadata
+import playback
 import refresh_job
 import ui_admin
 import ui_import
@@ -302,22 +303,28 @@ def render_index(con, viewer, base, error=None, query="", pending=0, merged=0,
            mode_counts.get(value, 0))
         for value, label in (MODES + (("other", "Other"),)
                              if mode_counts.get("other") else MODES))
+    # every household member appears, even with nothing in this mode, so a shared
+    # library never disappears from the filter
     owner_rows = con.execute(
-        "SELECT u.id, u.display_name, COUNT(*) AS n FROM items i"
-        " JOIN users u ON u.id = i.owner_id JOIN titles t ON t.id = i.title_id"
+        "SELECT u.id, u.display_name FROM users u WHERE EXISTS ("
+        "  SELECT 1 FROM items i WHERE i.owner_id = u.id"
+        "  AND (i.visibility = 'shared' OR i.owner_id = ?))"
+        " ORDER BY u.display_name COLLATE NOCASE", (viewer["id"],)).fetchall()
+    owner_counts = {row["owner_id"]: row["n"] for row in con.execute(
+        "SELECT i.owner_id AS owner_id, COUNT(*) AS n FROM items i"
+        " JOIN titles t ON t.id = i.title_id"
         " WHERE (i.visibility = 'shared' OR i.owner_id = ?)%s"
-        " GROUP BY u.id ORDER BY u.display_name COLLATE NOCASE"
-        % (" AND t.kind = ?" if kind else ""),
-        [viewer["id"]] + ([kind] if kind else [])).fetchall()
+        " GROUP BY i.owner_id" % (" AND t.kind = ?" if kind else ""),
+        [viewer["id"]] + ([kind] if kind else []))}
     owner_tabs = "".join(
         ['<a class="%s" href="%s?kind=%s%s">Everyone<span class="n">%d</span></a>'
          % ("" if owner else "current", html.escape(base), kind,
             "&amp;view=grid" if view == "grid" else "",
-            sum(row["n"] for row in owner_rows))]
+            sum(owner_counts.values()))]
         + ['<a class="%s" href="%s?kind=%s&amp;owner=%d%s">%s<span class="n">%d</span></a>'
            % ("current" if owner == row["id"] else "", html.escape(base), kind,
               row["id"], "&amp;view=grid" if view == "grid" else "",
-              html.escape(row["display_name"]), row["n"])
+              html.escape(row["display_name"]), owner_counts.get(row["id"], 0))
            for row in owner_rows])
     if merged:
         notice = ('<p class="banner good">Merged %d item(s) from the bundled catalogue — '
@@ -699,17 +706,17 @@ class Handler(BaseHTTPRequestHandler):
             "SELECT * FROM items WHERE title_id = ? AND (visibility = 'shared' OR owner_id = ?)"
             " ORDER BY format, id", (title_id, viewer["id"])).fetchall()
         digital = con.execute(
-            "SELECT d.*, i.format AS copy_format, r.label AS root_label"
+            "SELECT d.*, i.format AS copy_format, r.label AS root_label,"
+            " r.path AS root_path"
             " FROM digital_sources d JOIN items i ON i.id = d.item_id"
             " LEFT JOIN media_roots r ON r.id = d.root_id"
             " WHERE i.title_id = ? ORDER BY d.provider", (title_id,)).fetchall()
         roots = con.execute("SELECT id, label, path, medium FROM media_roots"
                             " ORDER BY medium, label").fetchall()
-        return self.respond(200, ui_title.render(base, row, items, digital, FORMATS,
-                                                 FORMAT_LABELS, summary=summary,
-                                                 error=error,
-                                                 ripped_root=RIPPED_ROOT, roots=roots,
-                                                 owner=owner))
+        return self.respond(200, ui_title.render(
+            base, row, items, digital, FORMATS, FORMAT_LABELS, summary=summary,
+            error=error, ripped_root=RIPPED_ROOT, roots=roots, owner=owner,
+            players=playback.players(), last_player=playback.last_player(con)))
 
     def do_POST(self):
         form = parse_body(self)
@@ -828,6 +835,28 @@ class Handler(BaseHTTPRequestHandler):
                 title_id = int(match.group(1))
                 return self.title_page(con, viewer, base, title_id,
                                        summary=metadata.refresh(con, title_id))
+
+            match = re.search(r"/title/(\d+)/play/?$", route)
+            if match:
+                title_id = int(match.group(1))
+                entity_id = field(form, "entity_id")
+                source_id = field(form, "source_id")
+                row = con.execute("SELECT kind FROM titles WHERE id = ?",
+                                  (title_id,)).fetchone()
+                source = con.execute(
+                    "SELECT d.path, r.path AS root_path FROM digital_sources d"
+                    " LEFT JOIN media_roots r ON r.id = d.root_id WHERE d.id = ?",
+                    (source_id,)).fetchone() if source_id.isdigit() else None
+                if source is None:
+                    return self.title_page(con, viewer, base, title_id,
+                                           error="Pick a playback source first.")
+                message = playback.play(entity_id,
+                                        playback.media_uri(source["root_path"],
+                                                           source["path"]),
+                                        row["kind"] if row else "movie")
+                if message.startswith("Sent"):
+                    playback.remember_player(con, entity_id)
+                return self.title_page(con, viewer, base, title_id, summary=message)
 
             match = re.search(r"/title/(\d+)/?$", route)
             if match:

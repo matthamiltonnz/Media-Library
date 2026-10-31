@@ -60,6 +60,20 @@ the table. The choice is carried through searches.
 title is created with its plot/poster/year straight away, landing you on its
 detail page.
 
+## Play
+
+A title with a ripped file also gets a **Play** block: pick the source, pick any
+media player Home Assistant exposes (48 of them on this install, with their current
+state), press **Play**. The add-on asks Home Assistant to play
+`media-source://media_source/local/<path under /media>` through
+`media_player.play_media`, so HA resolves the file itself and hands the player
+whatever it understands (cast, DLNA, Kodi…). No streaming server runs in the add-on.
+
+That needs `homeassistant_api: true` in `config.yaml`; the token is read from
+`/run/s6/container_environment/SUPERVISOR_TOKEN` because the base image starts the
+service with a stripped environment. The last player used is remembered in the
+`settings` table, and failures are reported back on the title page.
+
 ## Playback sources (rips on the NAS)
 
 Each copy can record where it can be played from: open a title → **Playback
@@ -141,10 +155,9 @@ when the Supervisor passes it through).
 ## Browsing
 
 The catalogue page opens in one **mode at a time** — **Movies**, **TV** or **Music**
-(an *Other* pill appears only if such titles exist). The switch sits above the search
-box, shows how many copies each mode holds, and there is no "everything" view: films,
-episodes and albums are never mixed. Under it, a second row of pills narrows the view
-to **Everyone** or a single household member, with that person's copy count inside the
+(an *Other* pill appears only if such titles exist). Under it, a second row of pills
+lists **Everyone** and every household member who owns a copy (even with nothing in
+the current mode, where the count shows 0), each with their copy count inside the
 current mode; other people's private copies never appear, whichever filter is active.
 Within a mode the page shows the title/copy
 counts with a per-format breakdown (CD, 3D Blu-ray, Blu-ray, 4K Blu-ray, Digital, …),
