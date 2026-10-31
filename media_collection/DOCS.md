@@ -239,7 +239,8 @@ the search box, the list/poster toggle and the **Add a copy** form — which cre
 new title in the mode you are in. The **Library admin** link sits at the foot of the page.
 
 The poster view draws each title inside a **virtual case** picked from the best copy
-held — a clear CD jewel case with its left hinge, a vinyl sleeve, a blue Blu-ray case,
+held — a clear CD jewel case with its left hinge, a vinyl sleeve (the cover edge to edge,
+no drawn frame), a blue Blu-ray case,
 the same blue with a "Blu-ray 3D" band for 3D, and a black case lettered
 "4K ULTRA HD" — so square album art is never cropped into a poster shape and the
 shelf presence is visible at a glance. The case is a two-column layout, spine first and

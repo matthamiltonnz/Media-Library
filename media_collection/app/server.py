@@ -314,10 +314,10 @@ PAGE = Template("""<!doctype html>
   .thumb.case-jewel::before { content: ""; position: absolute; left: 12%; top: 0;
       bottom: 0; width: 1px; background: #ffffffcc; }
   .thumb.case-jewel img { border: 0; box-shadow: none; }
-  /* vinyl keeps its printed sleeve */
-  .thumb.case-sleeve { aspect-ratio: 1 / 1; padding: 6%; border-radius: 3px;
-                       background: linear-gradient(160deg, #242424, #0e0e0e); }
-  .thumb.case-sleeve img { box-shadow: 0 6px 16px #000a; }
+  /* a vinyl sleeve is the artwork, edge to edge - no frame around it */
+  .thumb.case-sleeve { aspect-ratio: 1 / 1; border-radius: 3px;
+                       overflow: hidden; padding: 0; background: none; }
+  .thumb.case-sleeve img { box-shadow: none; }
   .thumb.case-digital { background: #8881; }
   .card .cap { padding: .4rem .5rem; font-size: .82rem; display: grid; gap: .15rem; }
   .card .cap .muted { font-size: .74rem; }
