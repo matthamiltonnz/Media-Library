@@ -89,6 +89,46 @@ def default_root(con):
     return fallback
 
 
+def resolve_root(con, given, dry_run, label):
+    """(root_id, root_path, tv_dir) - the media root and the TV folder inside it.
+
+    The media root is the Home Assistant media folder (/media/QNAP); 'TV' plus the
+    show/season folders form the playback-source path under it.
+    """
+    rows = con.execute("SELECT id, path FROM media_roots"
+                       " ORDER BY length(path) DESC").fetchall()
+    if given:
+        tv_dir = given.rstrip("/")
+    else:
+        tv_dir = None
+        for row in rows:
+            candidate = os.path.join(row["path"].rstrip("/"), "TV")
+            if os.path.isdir(candidate):
+                tv_dir = candidate
+                break
+        if tv_dir is None:
+            row = default_root(con)
+            if row is None:
+                return None, None, None
+            return row["id"], row["path"].rstrip("/"), row["path"].rstrip("/")
+
+    for row in rows:
+        root = row["path"].rstrip("/")
+        if tv_dir == root or tv_dir.startswith(root + "/"):
+            return row["id"], root, tv_dir
+
+    root_path = os.path.dirname(tv_dir)
+    if dry_run:
+        return None, root_path, tv_dir
+    if con.execute("SELECT 1 FROM media_roots WHERE label = ?",
+                   (label,)).fetchone():
+        label = "%s (%s)" % (label, os.path.basename(root_path) or root_path)
+    root_id = con.execute(
+        "INSERT INTO media_roots (label, path, medium) VALUES (?, ?, 'video')",
+        (label, root_path)).lastrowid
+    return root_id, root_path, tv_dir
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("db")
@@ -101,32 +141,15 @@ def main():
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA foreign_keys = ON")
 
-    if args.root:
-        root_path = args.root.rstrip("/")
-        row = con.execute("SELECT id FROM media_roots WHERE path = ?",
-                          (root_path,)).fetchone()
-        if row:
-            root_id = row["id"]
-        elif args.dry_run:
-            root_id = None
-        else:
-            label = args.root_label
-            if con.execute("SELECT 1 FROM media_roots WHERE label = ?",
-                           (label,)).fetchone():
-                label = "%s (%s)" % (label, os.path.basename(root_path) or root_path)
-            root_id = con.execute(
-                "INSERT INTO media_roots (label, path, medium)"
-                " VALUES (?, ?, 'video')", (label, root_path)).lastrowid
-    else:
-        row = default_root(con)
-        if row is None:
-            print("tv: no TV root registered, nothing to do")
-            return 0
-        root_id, root_path = row["id"], row["path"].rstrip("/")
-
-    if not os.path.isdir(root_path):
-        print("tv: %s is not mounted, nothing to do" % root_path)
+    root_id, root_path, tv_dir = resolve_root(con, args.root, args.dry_run,
+                                             args.root_label)
+    if tv_dir is None:
+        print("tv: no TV folder under the media roots, nothing to do")
         return 0
+    if not os.path.isdir(tv_dir):
+        print("tv: %s is not mounted, nothing to do" % tv_dir)
+        return 0
+    prefix = os.path.relpath(tv_dir, root_path).replace(os.sep, "/")
 
     owner = con.execute("SELECT id FROM users ORDER BY id LIMIT 1").fetchone()
     if owner is None:
@@ -135,8 +158,8 @@ def main():
     owner_id = owner["id"]
 
     shows = copies = 0
-    for name in sorted(os.listdir(root_path)):
-        show_path = os.path.join(root_path, name)
+    for name in sorted(os.listdir(tv_dir)):
+        show_path = os.path.join(tv_dir, name)
         if not os.path.isdir(show_path) or is_junk(name):
             continue
         title_name, year = parse_show(name)
@@ -146,7 +169,8 @@ def main():
         shows += 1
         for label, path, count, exts in found:
             inside = os.path.relpath(path, show_path)
-            rel = name if inside == "." else "/".join([name, inside])
+            rel = "/".join(part for part in (prefix, name, inside)
+                           if part and part != ".")
             already = con.execute(
                 "SELECT 1 FROM digital_sources WHERE root_id = ? AND path = ?",
                 (root_id, rel)).fetchone() if root_id else None
@@ -168,7 +192,7 @@ def main():
             item_id = con.execute(
                 "INSERT INTO items (title_id, owner_id, format, edition, location,"
                 " visibility) VALUES (?, ?, 'digital', ?, ?, 'shared')",
-                (title_id, owner_id, edition, name)).lastrowid
+                (title_id, owner_id, edition, None)).lastrowid
             con.execute("INSERT INTO digital_sources (item_id, provider, path, root_id)"
                         " VALUES (?, 'rip', ?, ?)", (item_id, rel, root_id))
 

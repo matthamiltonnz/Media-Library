@@ -81,6 +81,47 @@ def parse_album(folder):
     return (clean or folder), int(match.group(1))
 
 
+def resolve_root(con, given, dry_run, label):
+    """(root_id, root_path, music_dir) - the media root and the Music folder inside it.
+
+    The media root is the Home Assistant media folder (/media/QNAP); 'Music' plus the
+    owner/artist/album folders form the playback-source path under it.
+    """
+    rows = con.execute("SELECT id, path FROM media_roots"
+                       " ORDER BY length(path) DESC").fetchall()
+    if given:
+        music_dir = given.rstrip("/")
+    else:
+        music_dir = None
+        for row in rows:
+            candidate = os.path.join(row["path"].rstrip("/"), "Music")
+            if os.path.isdir(candidate):
+                music_dir = candidate
+                break
+        if music_dir is None:
+            row = con.execute("SELECT id, path FROM media_roots"
+                              " WHERE medium = 'music' ORDER BY id LIMIT 1").fetchone()
+            if row is None:
+                return None, None, None
+            return row["id"], row["path"].rstrip("/"), row["path"].rstrip("/")
+
+    for row in rows:
+        root = row["path"].rstrip("/")
+        if music_dir == root or music_dir.startswith(root + "/"):
+            return row["id"], root, music_dir
+
+    root_path = os.path.dirname(music_dir)
+    if dry_run:
+        return None, root_path, music_dir
+    if con.execute("SELECT 1 FROM media_roots WHERE label = ?",
+                   (label,)).fetchone():
+        label = "%s (%s)" % (label, os.path.basename(root_path) or root_path)
+    root_id = con.execute(
+        "INSERT INTO media_roots (label, path, medium) VALUES (?, ?, 'video')",
+        (label, root_path)).lastrowid
+    return root_id, root_path, music_dir
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("db")
@@ -95,40 +136,22 @@ def main():
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA foreign_keys = ON")
 
-    if args.root:
-        root_path = args.root.rstrip("/")
-    else:
-        row = con.execute("SELECT path FROM media_roots WHERE medium = 'music'"
-                          " ORDER BY id LIMIT 1").fetchone()
-        if not row:
-            print("music: no music root registered, nothing to do")
-            return 0
-        root_path = row["path"].rstrip("/")
-
-    if not os.path.isdir(root_path):
-        print("music: %s is not mounted, nothing to do" % root_path)
+    root_id, root_path, music_dir = resolve_root(con, args.root, args.dry_run,
+                                                 args.root_label)
+    if music_dir is None:
+        print("music: no music folder under the media roots, nothing to do")
         return 0
-
-    root = con.execute("SELECT id FROM media_roots WHERE path = ?", (root_path,)).fetchone()
-    if root:
-        root_id = root["id"]
-    elif args.dry_run:
-        root_id = None
-    else:
-        label = args.root_label
-        if con.execute("SELECT 1 FROM media_roots WHERE label = ?",
-                       (label,)).fetchone():
-            label = "%s (%s)" % (label, os.path.basename(root_path) or root_path)
-        root_id = con.execute(
-            "INSERT INTO media_roots (label, path, medium) VALUES (?, ?, 'music')",
-            (label, root_path)).lastrowid
+    if not os.path.isdir(music_dir):
+        print("music: %s is not mounted, nothing to do" % music_dir)
+        return 0
+    prefix = os.path.relpath(music_dir, root_path).replace(os.sep, "/")
 
     albums = copies = owners = 0
-    for owner_dir in sorted(os.listdir(root_path)):
+    for owner_dir in sorted(os.listdir(music_dir)):
         if is_junk(owner_dir):
             continue
         owner = parse_owner(owner_dir)
-        owner_path = os.path.join(root_path, owner_dir)
+        owner_path = os.path.join(music_dir, owner_dir)
         if not owner or not os.path.isdir(owner_path):
             continue
 
@@ -161,7 +184,8 @@ def main():
                 if not fmt:
                     continue
 
-                rel_path = "/".join([owner_dir, artist, album])
+                rel_path = "/".join(part for part in (prefix, owner_dir, artist, album)
+                                    if part and part != ".")
                 already = con.execute(
                     "SELECT 1 FROM digital_sources WHERE root_id = ? AND path = ?",
                     (root_id, rel_path)).fetchone() if root_id else None
@@ -185,7 +209,7 @@ def main():
                 item_id = con.execute(
                     "INSERT INTO items (title_id, owner_id, format, edition,"
                     " location, visibility) VALUES (?, ?, ?, ?, ?, 'shared')",
-                    (title_id, owner_id, fmt, edition or None, owner_dir)).lastrowid
+                    (title_id, owner_id, fmt, edition or None, None)).lastrowid
                 con.execute(
                     "INSERT INTO digital_sources (item_id, provider, path, root_id)"
                     " VALUES (?, 'rip', ?, ?)", (item_id, rel_path, root_id))

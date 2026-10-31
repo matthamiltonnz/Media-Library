@@ -143,7 +143,13 @@ skipped. Re-running it adds nothing, so it is safe after every new rip:
 ```bash
 python3 /app/music_import.py /data/media.db "/media/QNAP/Music"            # import
 python3 /app/music_import.py /data/media.db "/media/QNAP/Music" --dry-run  # count only
+python3 /app/tv_import.py /data/media.db "/media/QNAP/TV"                 # TV seasons
 ```
+
+The media root is the Home Assistant media folder (`/media/QNAP`); everything below it
+(`Music/...`, `Movies/...`, `TV/...`) is stored in the source path, which is exactly what
+HA's `local` media source resolves. `location` on a copy is a shelf, so the importers
+leave it empty - fill it in when you know where the disc actually lives.
 
 Run it inside the running add-on with `docker exec app_local_media_collection …`.
 Owner folders map to users by display name; a missing person is created. Without a
