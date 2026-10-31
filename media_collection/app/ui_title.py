@@ -152,8 +152,9 @@ def render(base, row, items, digital, formats, labels, summary=None, error=None,
     if playable:
         parts.append("<h2>Play</h2>")
         if not players:
-            parts.append('<p class="muted">No media players are exposed to Home '
-                         'Assistant yet — add the integration, then reload.</p>')
+            parts.append('<p class="muted">No player to send this to — either Home '
+                         'Assistant has no media players, or the ones ticked in '
+                         f'<a href="{base}admin">Admin</a> are offline right now.</p>')
         else:
             source_options = "".join(
                 '<option value="%d">%s — %s</option>'
@@ -168,6 +169,11 @@ def render(base, row, items, digital, formats, labels, summary=None, error=None,
                    _text(player["name"]),
                    " (%s)" % _text(player["state"]) if player["state"] else "")
                 for player in players)
+            player_hint = ""
+            if len(players) > 10:
+                player_hint = ('<p class="muted">%d players listed — tick the ones'
+                               ' you use in <a href="%sadmin">Admin</a> to shorten'
+                               ' this list.</p>' % (len(players), base))
             parts.append(f"""
 <form method="post" action="{base}title/{row['id']}/play">
   <div class="grid">
@@ -176,7 +182,7 @@ def render(base, row, items, digital, formats, labels, summary=None, error=None,
   </div>
   <p><button type="submit">Play</button>
      <span class="muted">Home Assistant reads the file through its local media
-     source, so whatever that player supports just plays.</span></p>
+     source, so whatever that player supports just plays.</span></p>{player_hint}
 </form>""")
 
 

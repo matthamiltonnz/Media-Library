@@ -62,9 +62,12 @@ detail page.
 
 ## Play
 
-A title with a ripped file also gets a **Play** block: pick the source, pick any
-media player Home Assistant exposes (48 of them on this install, with their current
-state), press **Play**. The add-on asks Home Assistant to play
+A title with a ripped file also gets a **Play** block: pick the source, pick a
+media player, press **Play**. Only players that accept a file (they advertise
+`play_media`) and are reachable are listed, those already playing come first, and
+**Admin → Players** narrows the list to the handful you actually use instead of
+every phone, TV and Music Assistant copy Home Assistant knows about. The add-on
+asks Home Assistant to play
 `media-source://media_source/local/<path under /media>` through
 `media_player.play_media`, so HA resolves the file itself and hands the player
 whatever it understands (cast, DLNA, Kodi…). HA only resolves files, not folders,

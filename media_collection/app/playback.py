@@ -18,6 +18,8 @@ CACHE_SECONDS = 30
 MEDIA_EXTENSIONS = (".mkv", ".mp4", ".m4v", ".avi", ".mov", ".ts", ".m2ts",
                     ".iso", ".wmv", ".mpg", ".mpeg", ".flac", ".mp3", ".m4a",
                     ".aac", ".ogg", ".opus", ".wav", ".wma", ".ape", ".aiff")
+PLAY_MEDIA = 512                      # media_player feature bit for play_media
+ACTIVE_STATES = ("playing", "paused", "buffering", "idle", "on")
 
 
 class PlaybackError(Exception):
@@ -60,7 +62,12 @@ def _call(path, method="GET", payload=None, timeout=10):
 
 
 def players(refresh=False):
-    """[{'entity_id', 'name', 'state'}] for every media_player HA exposes."""
+    """[{'entity_id', 'name', 'state', 'device_class'}] for usable media_players.
+
+    Only players that accept `play_media` are kept - a TV that can only be turned
+    up and down cannot take a file - and anything unavailable is left out so the
+    picker never offers a device that will fail.
+    """
     if not token():
         return []
     if not refresh and time.time() - _cache["at"] < CACHE_SECONDS:
@@ -78,9 +85,12 @@ def players(refresh=False):
         if (state.get("state") or "") in ("unavailable", "unknown"):
             continue                      # nothing can be sent to those
         attributes = state.get("attributes") or {}
+        if not (attributes.get("supported_features") or 0) & PLAY_MEDIA:
+            continue                      # cannot take a file, only volume etc.
         found.append({"entity_id": entity_id,
                       "name": attributes.get("friendly_name") or entity_id,
-                      "state": state.get("state") or ""})
+                      "state": state.get("state") or "",
+                      "device_class": attributes.get("device_class") or ""})
     found.sort(key=lambda item: item["name"].lower())
     _cache.update(at=time.time(), players=found)
     return found
@@ -167,6 +177,39 @@ def play(entity_id, root_path, rel_path, kind="music"):
         return "Playing %s and %d more from %s" % (
             os.path.basename(files[0]), queued, rel_path)
     return "Playing %s" % os.path.basename(files[0])
+
+
+def chosen(con):
+    """The players this household picked in Admin, or None for 'no preference'."""
+    try:
+        row = con.execute("SELECT value FROM settings"
+                          " WHERE key = 'playback_players'").fetchone()
+        picked = json.loads(row["value"]) if row and row["value"] else None
+        return [str(name) for name in picked] if picked else None
+    except (TypeError, ValueError, AttributeError):
+        return None
+
+
+def choose(con, entity_ids):
+    """Remember the players worth offering; an empty list means all of them."""
+    con.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
+                ("playback_players", json.dumps(sorted(set(entity_ids)))))
+    con.commit()
+
+
+def players_for(con):
+    """The picker's list: what HA offers, narrowed to the chosen players.
+
+    Anything playing or paused comes first, then everything else by name, so the
+    device someone is actually using sits at the top.
+    """
+    found = players()
+    picked = chosen(con)
+    if picked:
+        wanted = set(picked)
+        found = [player for player in found if player["entity_id"] in wanted]
+    return sorted(found, key=lambda player: (player["state"] not in ACTIVE_STATES,
+                                             player["name"].lower()))
 
 
 def last_player(con):

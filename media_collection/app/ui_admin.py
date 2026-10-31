@@ -119,7 +119,7 @@ def _roots_block(base, roots):
 
 
 def render(base, viewer, stats, pending=0, message=None, refresh=None, duplicates=0,
-           roots=(), jellyfin=None, scan_message=""):
+           roots=(), jellyfin=None, scan_message="", players=(), chosen=None):
     parts = []
     if message:
         parts.append('<p class="banner good">%s</p>' % html.escape(message))
@@ -167,6 +167,8 @@ def render(base, viewer, stats, pending=0, message=None, refresh=None, duplicate
     parts.append(_scan_block(base, scan_message))
     if jellyfin is not None:
         parts.append(_jellyfin_block(base, jellyfin))
+    if players:
+        parts.append(_players_block(base, players, chosen))
 
     return ui.page(base, "Library admin", "".join(parts))
 
@@ -185,7 +187,53 @@ def _scan_block(base, message):
               html.escape(base))
 
 
+def _players_block(base, players, chosen):
+    """Which media players the Play box should offer.
+
+    Home Assistant reports every media_player it can see - phones, TVs,
+    receivers, cast targets - and most of them are not where anyone wants a
+    film to start. Ticking the useful ones keeps that list short; ticking
+    nothing means 'show them all' so it never blocks playback.
+    """
+    if not players:
+        return ('<h2>Players</h2>\n'
+                '<p class="sub">Home Assistant is not reporting any media'
+                ' players that can take a file yet.</p>')
+    rows = []
+    for player in players:
+        short = player["entity_id"].replace("media_player.", "")
+        rows.append(
+            '<label><input type="checkbox" name="player" value="%s"%s> %s'
+            '<span class="muted"> (%s · %s)</span></label>'
+            % (html.escape(player["entity_id"]),
+               " checked" if chosen and player["entity_id"] in chosen else "",
+               html.escape(player["name"]), html.escape(player["state"]),
+               html.escape(short)))
+    if chosen:
+        ticked = [player for player in players
+                  if player["entity_id"] in set(chosen)]
+        if ticked:
+            note = ("The Play box offers these %d of the %d Home Assistant reports."
+                    " Untick everything to go back to offering them all."
+                    % (len(ticked), len(players)))
+        else:
+            note = ("None of the saved players is available right now - title pages"
+                    " will offer them again as soon as they are back.")
+    else:
+        note = ("All %d players Home Assistant reports are offered on title pages."
+                " Tick the ones you use to shorten that list." % len(players))
+    return """<h2>Players</h2>
+<p class="sub">%s</p>
+<form method="post" action="%sadmin/players">
+  <div class="grid players">%s</div>
+  <p><button type="submit">Save players</button>
+     <span class="muted">Only ticked players appear on title pages.</span></p>
+</form>""" % (note, html.escape(base), "".join(rows))
+
+
+
 def _jellyfin_block(base, status):
+
     """Jellyfin: how much of the catalogue the server can already play."""
     kinds = status.get("kinds") or {}
     detail = ", ".join("%d %s" % (count, kind)

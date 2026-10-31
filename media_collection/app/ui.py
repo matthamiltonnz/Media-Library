@@ -26,6 +26,9 @@ SHELL = """<!doctype html>
   .grid { display: grid; gap: .5rem .9rem;
           grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); max-width: 60rem; }
   .grid label { display: grid; gap: .2rem; font-size: .8rem; opacity: .85; }
+  .grid.players { max-height: 20rem; overflow-y: auto; }
+  .grid.players label { display: flex; align-items: baseline; gap: .4rem;
+                        opacity: 1; }
   .banner { padding: .5rem .7rem; border-radius: 6px; margin-bottom: 1rem; }
   .bad { background: #c33; color: #fff; }
   .good { background: #2a7; color: #fff; }

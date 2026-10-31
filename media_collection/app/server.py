@@ -710,13 +710,17 @@ class Handler(BaseHTTPRequestHandler):
                     message = "Folded %d duplicate title(s)." % int(deduped)
                 elif params.get("jellyfin"):
                     message = params["jellyfin"][0]
+                elif params.get("players"):
+                    message = params["players"][0]
                 elif params.get("scan") and scan.summary():
                     message = scan.summary()
                 return self.respond(200, ui_admin.render(
                     base, viewer, stats(con), merger.pending_count(con), message,
                     refresh_job.status(), len(dedupe.groups(con)),
                     con.execute("SELECT * FROM media_roots ORDER BY medium, label").fetchall(),
-                    jellyfin.status(con), scan.summary()))
+                    jellyfin.status(con), scan.summary(),
+                    players=playback.players(),
+                    chosen=playback.chosen(con)))
 
             if route.rstrip("/").endswith("/export.csv"):
                 return self.respond(
@@ -801,7 +805,7 @@ class Handler(BaseHTTPRequestHandler):
         return self.respond(200, ui_title.render(
             base, row, items, digital, FORMATS, FORMAT_LABELS, summary=summary,
             error=error, ripped_root=RIPPED_ROOT, roots=roots, owner=owner,
-            players=playback.players(), last_player=playback.last_player(con),
+            players=playback.players_for(con), last_player=playback.last_player(con),
             jellyfin_link=jellyfin_link, jellyfin_sessions=jellyfin_sessions,
             path_suggestion=path_suggestion,
             jellyfin_configured=bool(jellyfin.config(con)[1])))
@@ -879,6 +883,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self.respond(303, "", extra={
                     "Location": base + "admin?jellyfin="
                     + quote("Jellyfin settings saved - press Sync to match the copies.")})
+
+            if route.rstrip("/").endswith("/admin/players"):
+                playback.choose(con, form.get("player") or [])
+                return self.respond(303, "", extra={
+                    "Location": base + "admin?players="
+                    + quote("Player list saved.")})
 
             if route.rstrip("/").endswith("/jellyfin/sync"):
                 if jellyfin.start_sync(DB_PATH):
