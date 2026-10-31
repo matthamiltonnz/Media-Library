@@ -305,9 +305,6 @@ $library
   <button type="submit">Add</button>
 </form>
 
-<h2>Owners</h2>
-<table><tbody>$owners</tbody></table>
-
 <p class="sub" style="margin-top:2rem"><a href="${base}admin">Library admin</a></p>
 </body>
 </html>
@@ -428,12 +425,6 @@ def render_index(con, viewer, base, error=None, query="", pending=0, merged=0,
         library = ("<table><thead><tr><th>Title</th><th>Year</th><th>Format</th>"
                    "<th>Owner</th><th>Barcode</th><th>Watched</th><th>Where</th>"
                    "<th></th></tr></thead><tbody>%s</tbody></table>" % body)
-    owners = "".join(
-        "<tr><td>{0}</td><td>{1} {2}</td></tr>".format(
-            html.escape(o["owner"]), o["item_count"],
-            "copy" if o["item_count"] == 1 else "copies")
-        for o in owner_totals(con)
-    ) or '<tr><td colspan="2" class="empty">No owners yet.</td></tr>'
     return PAGE.substitute(
         base=base,
         viewer=html.escape(viewer["display_name"]),
@@ -458,7 +449,6 @@ def render_index(con, viewer, base, error=None, query="", pending=0, merged=0,
                       "&amp;owner=%d" % owner if owner else "",
                       "List view" if view == "grid" else "Thumbnails"),
         library=library,
-        owners=owners,
         format_options="".join(
             '<option value="{0}">{1}</option>'.format(f, FORMAT_LABELS[f]) for f in FORMATS
         ),
