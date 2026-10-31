@@ -85,28 +85,21 @@ def _roots_block(base, roots):
     rows = []
     for root in roots:
         form_id = "root-%d" % root["id"]
-        options = "".join(
-            '<option value="%s"%s>%s</option>'
-            % (value, " selected" if value == root["medium"] else "", label)
-            for value, label in (("video", "Video"), ("music", "Music"),
-                                 ("other", "Other")))
         rows.append(
             "<tr>"
             '<td><input form="%s" name="label" value="%s" required></td>'
             '<td><input form="%s" name="path" class="barcode" value="%s"'
             ' required></td>'
-            '<td><select form="%s" name="medium">%s</select></td>'
             '<td><form id="%s" method="post" action="%sadmin/roots/%d">'
             '<button type="submit">Save</button></form>'
             '<form method="post" action="%sadmin/roots/%d/delete">'
             '<button type="submit">Remove</button></form></td></tr>'
             % (form_id, html.escape(root["label"], quote=True),
                form_id, html.escape(root["path"], quote=True),
-               form_id, options,
                form_id, html.escape(base), root["id"],
                html.escape(base), root["id"]))
     rows = "".join(rows)
-    table = ("<table><thead><tr><th>Label</th><th>Path</th><th>Medium</th><th></th>"
+    table = ("<table><thead><tr><th>Label</th><th>Path</th><th></th>"
              "</tr></thead><tbody>%s</tbody></table>" % rows) if roots else \
             '<p class="muted">No roots yet.</p>'
     return """
@@ -117,13 +110,8 @@ def _roots_block(base, roots):
 %s
 <form method="post" action="%sadmin/roots">
   <div class="grid">
-    <label>Label<input name="label" placeholder="Matt — Movies" required></label>
-    <label>Path<input name="path" placeholder="/media/My Media/QNAP/Movies" required></label>
-    <label>Medium<select name="medium">
-      <option value="video">Video</option>
-      <option value="music">Music</option>
-      <option value="other">Other</option>
-    </select></label>
+    <label>Label<input name="label" placeholder="QNAP" required></label>
+    <label>Path<input name="path" placeholder="/media/QNAP" required></label>
   </div>
   <p><button type="submit">Add root</button></p>
 </form>

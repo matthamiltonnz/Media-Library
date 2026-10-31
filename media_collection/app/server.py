@@ -801,13 +801,12 @@ class Handler(BaseHTTPRequestHandler):
             if route.rstrip("/").endswith("/admin/roots"):
                 label = field(form, "label")
                 path = field(form, "path")
-                medium = field(form, "medium") or "video"
                 if not (label and path):
                     return self.respond(400, "Label and path are required.",
                                         "text/plain; charset=utf-8")
                 try:
-                    con.execute("INSERT INTO media_roots (label, path, medium)"
-                                " VALUES (?, ?, ?)", (label, path, medium))
+                    con.execute("INSERT INTO media_roots (label, path)"
+                                " VALUES (?, ?)", (label, path))
                     con.commit()
                 except sqlite3.IntegrityError:
                     con.rollback()
@@ -818,14 +817,12 @@ class Handler(BaseHTTPRequestHandler):
                 root_id = int(match.group(1))
                 label = field(form, "label")
                 path = field(form, "path")
-                medium = field(form, "medium") or "video"
                 if not (label and path):
                     return self.respond(400, "Label and path are required.",
                                         "text/plain; charset=utf-8")
                 try:
-                    con.execute("UPDATE media_roots SET label = ?, path = ?,"
-                                " medium = ? WHERE id = ?",
-                                (label, path, medium, root_id))
+                    con.execute("UPDATE media_roots SET label = ?, path = ?"
+                                " WHERE id = ?", (label, path, root_id))
                     con.commit()
                 except sqlite3.IntegrityError:
                     con.rollback()

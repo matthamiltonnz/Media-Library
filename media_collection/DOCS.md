@@ -81,7 +81,7 @@ sources**. Pick the copy, the provider (*Ripped file (NAS)*, Jellyfin, Kodi, iTu
 Apple TV) and the **NAS root** plus the path inside it.
 
 Roots are rows, not config — Admin → **Media roots** lists them, and every row is
-editable in place (label, path and medium) with **Save**, alongside **Remove**; a new
+editable in place (label and path) with **Save**, alongside **Remove**; a new
 folder is an **Add** form underneath. Labels and paths must be unique, and a clash is
 reported rather than silently dropped. Seeded with:
 
