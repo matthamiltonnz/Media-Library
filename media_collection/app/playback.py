@@ -68,6 +68,8 @@ def players(refresh=False):
         entity_id = state.get("entity_id") or ""
         if not entity_id.startswith("media_player."):
             continue
+        if (state.get("state") or "") in ("unavailable", "unknown"):
+            continue                      # nothing can be sent to those
         attributes = state.get("attributes") or {}
         found.append({"entity_id": entity_id,
                       "name": attributes.get("friendly_name") or entity_id,
