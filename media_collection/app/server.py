@@ -416,8 +416,7 @@ def render_index(con, viewer, base, error=None, query="", pending=0, merged=0,
                     str(card["release_year"] or ""),
                     " · ".join(FORMAT_LABELS.get(f, f)
                                for f in (card["formats"] or "").split(",")),
-                    "%d %s" % (card["copies"],
-                               "copy" if card["copies"] == 1 else "copies")])))
+                    ])))
             )
             for card in cards) or '<p class="empty">Nothing yet — add your first disc.</p>')
     else:
