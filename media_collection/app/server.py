@@ -890,12 +890,14 @@ class Handler(BaseHTTPRequestHandler):
             match = re.search(r"/sources/(\d+)/delete/?$", route)
             if match:
                 source = con.execute(
-                    "SELECT d.id, i.title_id FROM digital_sources d"
+                    "SELECT d.id, d.provider, d.path, i.title_id FROM digital_sources d"
                     " JOIN items i ON i.id = d.item_id WHERE d.id = ?",
                     (int(match.group(1)),)).fetchone()
                 if source is None:
                     return self.respond(404, "No such source", "text/plain; charset=utf-8")
                 con.execute("DELETE FROM digital_sources WHERE id = ?", (source["id"],))
+                if source["provider"] == "rip":
+                    scan.remember_skip(con, source["title_id"], source["path"])
                 con.commit()
                 return self.title_page(con, viewer, base, source["title_id"],
                                        summary="Playback source removed.")

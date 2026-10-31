@@ -7,6 +7,7 @@ each title should be - Movies/Name (Year), TV/Show (Year), Music/owner/artist/
 album - so a scan costs a handful of folder listings even on a NAS.
 """
 
+import json
 import os
 import re
 import sqlite3
@@ -144,6 +145,30 @@ def _locate_album(roots, artist, album, cache):
     return None
 
 
+SKIP_KEY = "scan_skipped"
+
+
+def _skipped(con):
+    """Files the household said are the wrong ones, as 'title id|folder'."""
+    try:
+        row = con.execute("SELECT value FROM settings WHERE key = ?",
+                          (SKIP_KEY,)).fetchone()
+        return set(json.loads(row["value"] or "[]")) if row else set()
+    except (TypeError, ValueError):
+        return set()
+
+
+def remember_skip(con, title_id, path):
+    """Stop a later scan putting back a source someone deliberately removed."""
+    if not path:
+        return
+    skipped = _skipped(con)
+    skipped.add("%d|%s" % (title_id, path))
+    con.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
+                (SKIP_KEY, json.dumps(sorted(skipped))))
+    con.commit()
+
+
 def missing(con):
     """Titles that have a copy but no ripped file linked to any of them."""
     return con.execute(
@@ -159,11 +184,12 @@ def sync_files(con, log=print):
     """Link every title that is already on disk but has no playback source."""
     roots = _roots(con)
     cache, counts = {}, {"roots": len(roots), "titles": 0, "linked": 0,
-                         "unmatched": 0, "missing_roots": 0}
+                         "unmatched": 0, "missing_roots": 0, "skipped": 0}
     counts["missing_roots"] = sum(1 for root in roots
                                   if not os.path.isdir(root["path"]))
     if not roots:
         return counts
+    skipped = _skipped(con)
     for title in missing(con):
         counts["titles"] += 1
         found = _locate(roots, title, cache)
@@ -171,6 +197,9 @@ def sync_files(con, log=print):
             counts["unmatched"] += 1
             continue
         relative, root_id = found
+        if "%d|%s" % (title["id"], relative) in skipped:
+            counts["skipped"] = counts.get("skipped", 0) + 1
+            continue
         item = con.execute("SELECT id FROM items WHERE title_id = ?"
                            " ORDER BY id LIMIT 1", (title["id"],)).fetchone()
         if not item:
