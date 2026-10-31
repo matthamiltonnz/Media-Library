@@ -227,6 +227,7 @@ def _players_block(base, players, chosen):
 <form method="post" action="%sadmin/players">
   <div class="grid players">%s</div>
   <p><button type="submit">Save players</button>
+     <button type="submit" name="clear" value="1">Offer every player</button>
      <span class="muted">Only ticked players appear on title pages.</span></p>
 </form>""" % (note, html.escape(base), "".join(rows))
 

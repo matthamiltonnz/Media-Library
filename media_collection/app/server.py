@@ -885,7 +885,15 @@ class Handler(BaseHTTPRequestHandler):
                     + quote("Jellyfin settings saved - press Sync to match the copies.")})
 
             if route.rstrip("/").endswith("/admin/players"):
-                playback.choose(con, form.get("player") or [])
+                if field(form, "clear"):
+                    playback.choose(con, [])
+                else:
+                    picked = form.get("player") or []
+                    saved = playback.chosen(con) or []
+                    listed = {player["entity_id"]
+                              for player in playback.players()}
+                    playback.choose(con, picked + [name for name in saved
+                                                   if name not in listed])
                 return self.respond(303, "", extra={
                     "Location": base + "admin?players="
                     + quote("Player list saved.")})
