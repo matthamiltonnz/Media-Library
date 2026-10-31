@@ -87,6 +87,21 @@ and `kind` adds **music** — so an album is a title with one row per copy (CD, 
 or a ripped FLAC source on the music root). The CSV importer maps "CD", "Audio CD",
 "Vinyl", "LP", "SACD", "Cassette"/"Tape" automatically.
 
+### Album metadata from MusicBrainz
+
+Music titles are resolved by **MusicBrainz** instead of Wikipedia: the title name is
+split into artist and album on the em dash (`ABBA — Gold (1992)`), the release-group
+search is scored on title similarity plus the stored year, and the winning group
+supplies the first release date, the album type and the release-group id (stored in
+`musicbrainz_id`, linked from the title page). Cover art comes from the Cover Art
+Archive — only images that actually exist are stored, served over HTTPS so the
+ingress page doesn't block them.
+
+Two requests per album at MusicBrainz's one-per-second limit, so a full first pass
+over a few hundred albums takes roughly half an hour; the job pauses and resumes on
+`429`/`503` like the film lookups do. There is no API key to configure. Albums with
+no MusicBrainz match are left untouched and reported back on the title page.
+
 ### Bulk import of a ripped music tree
 
 `app/music_import.py` walks `<root>/<Owner's Music>/<Artist>/<Album>` and creates one

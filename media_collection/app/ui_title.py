@@ -36,6 +36,10 @@ def _links(row):
     if row["tmdb_id"]:
         links.append('<a href="https://www.themoviedb.org/movie/%s" target="_blank" '
                      'rel="noopener">TMDB %s</a>' % (row["tmdb_id"], row["tmdb_id"]))
+    if "musicbrainz_id" in row.keys() and row["musicbrainz_id"]:
+        links.append('<a href="https://musicbrainz.org/release-group/%s" '
+                     'target="_blank" rel="noopener">MusicBrainz</a>'
+                     % _text(row["musicbrainz_id"]))
     if row["metadata_updated_at"]:
         links.append('<span class="muted">%s via %s</span>'
                      % (_text(row["metadata_updated_at"]),

@@ -19,6 +19,12 @@ import sys
 YEAR = re.compile(r"\((\d{4})\)")
 
 
+def is_junk(name):
+    """NAS housekeeping folders (.@__thumb, @eaDir, @Recycle, hidden entries)."""
+    return (not name or name.startswith(".") or name.startswith("@")
+            or name.lower() in ("recycle", "#recycle"))
+
+
 def parse_owner(folder):
     name = folder.replace("\u2019", "'").replace("\u2018", "'")
     match = re.match(r"(.+?)'s music$", name, re.I)
@@ -73,6 +79,8 @@ def main():
 
     albums = copies = owners = 0
     for owner_dir in sorted(os.listdir(root_path)):
+        if is_junk(owner_dir):
+            continue
         owner = parse_owner(owner_dir)
         owner_path = os.path.join(root_path, owner_dir)
         if not owner or not os.path.isdir(owner_path):
@@ -92,10 +100,14 @@ def main():
             owners += 1
 
         for artist in sorted(os.listdir(owner_path)):
+            if is_junk(artist):
+                continue
             artist_path = os.path.join(owner_path, artist)
             if not os.path.isdir(artist_path):
                 continue
             for album in sorted(os.listdir(artist_path)):
+                if is_junk(album):
+                    continue
                 album_path = os.path.join(artist_path, album)
                 if not os.path.isdir(album_path):
                     continue

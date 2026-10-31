@@ -11,7 +11,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-UA = "media-collection-addon/0.4 (Home Assistant local add-on)"
+UA = "media-collection-addon/0.9 (https://github.com/matthamiltonnz/Media-Library)"
 FORMAT_SUFFIX = re.compile(r"\s+(3D|4K|Ultra HD)$", re.I)
 YEAR = re.compile(r"\b(18|19|20)\d{2}\b")
 
@@ -35,7 +35,7 @@ def _get(url, timeout=25):
         with urllib.request.urlopen(request, timeout=timeout) as response:
             return json.loads(response.read().decode("utf-8", "replace"))
     except urllib.error.HTTPError as exc:
-        if exc.code == 429:
+        if exc.code in (429, 503):
             raise Throttle(url.split("?")[0])
         raise
     except urllib.error.URLError as exc:
@@ -212,6 +212,126 @@ def wikipedia_summary(page_title):
     }
 
 
+MUSIC_SPLIT = re.compile(r"\s+[—–]\s+")
+ALBUM_YEAR = re.compile(r"\s*\((?:19|20)\d{2}\)\s*$")
+MB_ROOT = "https://musicbrainz.org/ws/2"
+MB_PAUSE = 1.1                      # MusicBrainz asks for at most one request/second
+
+
+def split_artist_album(name):
+    """"ABBA — Gold (1992)" -> ("ABBA", "Gold (1992)"); no separator -> album only."""
+    text = (name or "").strip()
+    for pattern in (MUSIC_SPLIT, re.compile(r"\s+-\s+")):
+        match = pattern.search(text)
+        if match and match.start() > 0:
+            return text[:match.start()].strip(), text[match.end():].strip()
+    return None, text
+
+
+def cover_art(mbid, size=500):
+    """Front cover from the Cover Art Archive, or None if the release has none."""
+    try:
+        payload = _get("https://coverartarchive.org/release-group/%s" % mbid)
+    except Exception:
+        return None
+    for image in payload.get("images") or []:
+        if image.get("front"):
+            thumbs = image.get("thumbnails") or {}
+            url = (thumbs.get(str(size)) or thumbs.get("large")
+                   or image.get("image"))
+            # the site is served over HTTPS, so mixed-content images are blocked
+            if url and url.startswith("http://"):
+                url = "https://" + url[len("http://"):]
+            return url
+    return None
+
+
+def musicbrainz_lookup(artist, album, year=None):
+    """Best release-group for one album: mbid, year, cover, title, credit, types."""
+    album = ALBUM_YEAR.sub("", album or "").strip() or (album or "")
+    clauses = ['release:"%s"' % album.replace('"', "")]
+    if artist:
+        clauses.append('artist:"%s"' % artist.replace('"', ""))
+    params = urllib.parse.urlencode({"query": " AND ".join(clauses),
+                                     "fmt": "json", "limit": "8"})
+    time.sleep(MB_PAUSE)
+    payload = _get(MB_ROOT + "/release-group?" + params)
+
+    wanted = _key(album)
+    best = None
+    for group in payload.get("release-groups") or []:
+        title_key = _key(group.get("title"))
+        if not title_key:
+            continue
+        # "Gold (1992)" in the library is MusicBrainz's "Gold: Greatest Hits", so a
+        # title that starts with the album name still counts when the year agrees.
+        if title_key != wanted and not (len(wanted) >= 3 and (
+                title_key.startswith(wanted) or wanted.startswith(title_key))):
+            continue
+        score = int(group.get("score") or 0)
+        date = group.get("first-release-date") or ""
+        if year and date[:4] == str(year):
+            score += 40                     # the year breaks album/remaster ties
+        elif year and date[:4]:
+            score -= 25
+        if best is None or score > best[0]:
+            best = (score, group)
+    if best is None:
+        return None
+
+    group = best[1]
+    date = group.get("first-release-date") or ""
+    credit = "".join((part.get("name") or "") + (part.get("joinphrase") or "")
+                     for part in group.get("artist-credit") or [])
+    types = [group.get("primary-type")] + list(group.get("secondary-types") or [])
+    return {
+        "mbid": group.get("id"),
+        "title": group.get("title") or album,
+        "credit": credit.strip() or (artist or ""),
+        "date": date,
+        "year": int(date[:4]) if date[:4].isdigit() else None,
+        "types": " · ".join(part for part in types if part),
+        "cover": cover_art(group.get("id")) if group.get("id") else None,
+    }
+
+
+def refresh_music(con, row):
+    """MusicBrainz for one album - cover art, first release and the MB link."""
+    artist, album = split_artist_album(row["name"])
+    try:
+        found = musicbrainz_lookup(artist, album, row["release_year"])
+    except Throttle:
+        return "rate-limited"
+    except Exception:
+        found = None
+    if not found:
+        return "no MusicBrainz match for %s" % album
+
+    updates = {"musicbrainz_id": found["mbid"]}
+    if found["year"]:
+        updates["release_year"] = found["year"]
+    if found["cover"]:
+        updates["poster_url"] = found["cover"]
+    words = ["%s by %s" % (found["title"], found["credit"]) if found["credit"]
+             else found["title"]]
+    if found["date"]:
+        words.append("first released %s" % found["date"])
+    if found["types"]:
+        words.append(found["types"])
+    updates["overview"] = "%s." % ", ".join(words)
+
+    columns = ", ".join("%s = ?" % key for key in updates)
+    con.execute("UPDATE titles SET %s, metadata_source = 'musicbrainz',"
+                " metadata_updated_at = datetime('now') WHERE id = ?" % columns,
+                list(updates.values()) + [row["id"]])
+    con.commit()
+
+    message = "metadata refreshed from musicbrainz"
+    if not found["cover"]:
+        message += " (no cover art on file)"
+    return message
+
+
 def refresh(con, title_id):
     """Pull metadata for one title and store it - never raises.
 
@@ -221,6 +341,9 @@ def refresh(con, title_id):
     row = con.execute("SELECT * FROM titles WHERE id = ?", (title_id,)).fetchone()
     if row is None:
         return "title not found"
+
+    if row["kind"] == "music":
+        return refresh_music(con, row)
 
     cleaned = clean_title(row["name"])
     updates = {}
