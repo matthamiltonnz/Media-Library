@@ -1051,7 +1051,7 @@ class Handler(BaseHTTPRequestHandler):
                 new_tmdb = int(tmdb) if tmdb else None
                 con.execute(
                     "UPDATE titles SET name = ?, release_year = ?, kind = ?,"
-                    " tmdb_id = ? WHERE id = ?",
+                    " imdb_id = ?, tmdb_id = ? WHERE id = ?",
                     (name, new_year, kind, new_imdb, new_tmdb, title_id))
                 con.commit()
 
