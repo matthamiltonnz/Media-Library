@@ -327,7 +327,9 @@ def render_index(con, viewer, base, error=None, query="", pending=0, merged=0,
                    "<th>Owner</th><th>Barcode</th><th>Watched</th><th>Where</th>"
                    "<th></th></tr></thead><tbody>%s</tbody></table>" % body)
     owners = "".join(
-        "<tr><td>{0}</td><td>{1} copies</td></tr>".format(html.escape(o["owner"]), o["item_count"])
+        "<tr><td>{0}</td><td>{1} {2}</td></tr>".format(
+            html.escape(o["owner"]), o["item_count"],
+            "copy" if o["item_count"] == 1 else "copies")
         for o in owner_totals(con)
     ) or '<tr><td colspan="2" class="empty">No owners yet.</td></tr>'
     return PAGE.substitute(
