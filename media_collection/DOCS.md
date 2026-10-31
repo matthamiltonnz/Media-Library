@@ -190,7 +190,10 @@ The poster view draws each title inside a **virtual case** picked from the best 
 held — a clear CD jewel case with its left hinge, a vinyl sleeve, a blue Blu-ray case,
 the same blue with a "Blu-ray 3D" band for 3D, and a black case lettered
 "4K ULTRA HD" — so square album art is never cropped into a poster shape and the
-shelf presence is visible at a glance. It is CSS only: no case artwork to host.
+shelf presence is visible at a glance. The case is a two-column layout, spine first and
+artwork second, so the printed band (and its "Blu-ray" / "DVD" lettering) is always pinned
+to the left edge whatever the browser does with the image. It is CSS only: no case
+artwork to host.
 
 Cover art comes from Jellyfin when the title is linked (`/art/<item>` proxies
 Jellyfin's primary image and caches it under `/data/art`, so the page never refetches

@@ -60,6 +60,21 @@ CASE_CLASS = {"uhd_4k": "case-4k", "bluray_3d": "case-3d", "bluray": "case-blu",
               "digital": "case-digital"}
 
 
+CASE_LABEL = {CASE_CLASS["uhd_4k"]: "4K Ultra HD",
+              CASE_CLASS["bluray_3d"]: "Blu-ray 3D",
+              CASE_CLASS["bluray"]: "Blu-ray",
+              CASE_CLASS["dvd"]: "DVD"}
+
+
+def case_spine(kind, formats):
+    """The words printed up the left spine, or '' for a case without one."""
+    case = case_class(kind, formats)
+    for name, label in CASE_LABEL.items():
+        if name in case:
+            return '<span class="spine">%s</span>' % html.escape(label)
+    return ""
+
+
 def case_class(kind, formats):
     """Virtual case for a card: jewel case, sleeve, or blue/yellow/black Blu-ray."""
     have = set(filter(None, (formats or "").split(",")))
@@ -234,26 +249,23 @@ PAGE = Template("""<!doctype html>
   /* Blu-ray, 3D and 4K cases: coloured plastic with a printed band across the top,
      the way the real boxes look (blue / blue with 3D / black with 4K Ultra HD) */
   .thumb.case-blu, .thumb.case-3d, .thumb.case-4k, .thumb.case-dvd {
-      aspect-ratio: 5 / 7; padding: 0 0 0 12%; border-radius: 5px;
-      overflow: hidden;
+      aspect-ratio: 5 / 7; border-radius: 5px; overflow: hidden;
+      display: grid; grid-template-columns: 12% 1fr; align-items: stretch;
       box-shadow: inset 0 0 0 1px #ffffff2e, 0 6px 14px #0006; }
-  .thumb.case-blu::before, .thumb.case-3d::before,
-  .thumb.case-4k::before, .thumb.case-dvd::before {
-      position: absolute; left: 0; top: 0; bottom: 0; width: 12%;
+  .thumb .spine {
       display: flex; align-items: center; justify-content: center;
       writing-mode: vertical-rl; transform: rotate(180deg);
       font-size: .55rem; font-weight: 700; letter-spacing: .06em; color: #fff;
       text-shadow: 0 1px 2px #0006;
       border-right: 1px solid #ffffff33;
       background: linear-gradient(90deg, #ffffff26, #ffffff0a); }
+  .thumb.case-blu > .spine { font-style: italic; }
+  .thumb.case-3d > .spine { letter-spacing: .1em; }
+  .thumb.case-dvd > .spine { letter-spacing: .2em; }
   .thumb.case-blu { background: linear-gradient(180deg, #4fa6e3, #1e6cb8 32%, #0a3d7e); }
-  .thumb.case-blu::before { content: "Blu-ray"; font-style: italic; }
   .thumb.case-3d { background: linear-gradient(180deg, #4fa6e3, #1e6cb8 32%, #0a3566); }
-  .thumb.case-3d::before { content: "Blu-ray 3D"; font-style: italic; }
   .thumb.case-4k { background: linear-gradient(180deg, #2a2a2a, #08080a 55%, #000); }
-  .thumb.case-4k::before { content: "4K ULTRA HD"; letter-spacing: .14em; }
   .thumb.case-dvd { background: linear-gradient(180deg, #23252b, #0c0d10 60%, #050506); }
-  .thumb.case-dvd::before { content: "DVD"; letter-spacing: .2em; }
   .thumb.case-blu img, .thumb.case-3d img,
   .thumb.case-4k img, .thumb.case-dvd img {
       border-radius: 0; box-shadow: none; }
@@ -413,8 +425,9 @@ def render_index(con, viewer, base, error=None, query="", pending=0, merged=0,
             '<div class="cap"><strong>{3}</strong><span class="muted">{4}</span></div></a>'
             .format(
                 base, card["id"],
-                '<div class="thumb %s">%s</div>' % (
+                '<div class="thumb %s">%s%s</div>' % (
                     case_class(card["kind"], card["formats"]),
+                    case_spine(card["kind"], card["formats"]),
                     '<img src="%s" alt="" loading="lazy">' % html.escape(
                         base + "art/" + card["jf_id"] if card["jf_id"]
                         else card["poster_url"])
