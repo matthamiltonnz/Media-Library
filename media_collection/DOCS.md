@@ -109,12 +109,13 @@ no MusicBrainz match are left untouched and reported back on the title page.
 `app/music_import.py` walks `<root>/<Owner's Music>/<Artist>/<Album>` and creates one
 music title per album (named `Artist — Album`, year lifted from a `(1999)` suffix),
 one `cd` copy owned by the person whose folder it sits in, and a `rip` playback
-source pointing at the album folder. Only folders that actually contain audio files
-(`mp3`, `flac`, `m4a`, `wav`, `ogg`, `ape`, …) become CD copies — artwork-only
-leftovers (`Folder.jpg`, `desktop.ini`, `.db`) and QNAP housekeeping folders
-(`.@__thumb`, `@eaDir`, `#recycle`) are skipped. A folder that holds a concert disc
-(`.mka` / `.mkv` / `.cue` and no separate tracks, e.g. an Atmos Blu-ray) is kept as a
-**Blu-ray** copy. Re-running it adds nothing, so it is safe after every new rip:
+source pointing at the album folder. The codec decides the copy: **FLAC → CD** (a rip),
+**MP3 → Digital · Google Play · MP3**, **M4A/AAC → Digital · iTunes · AAC** (the store
+is recorded in the copy's edition), and a folder that holds a concert disc (`.mka` /
+`.mkv` / `.cue` and no separate tracks, e.g. an Atmos Blu-ray) becomes a **Blu-ray**
+copy. Folders with no audio at all — artwork-only leftovers (`Folder.jpg`,
+`desktop.ini`, `.db`) and QNAP housekeeping (`.@__thumb`, `@eaDir`, `#recycle`) — are
+skipped. Re-running it adds nothing, so it is safe after every new rip:
 
 ```bash
 python3 /app/music_import.py /data/media.db "/media/QNAP/Music"            # import

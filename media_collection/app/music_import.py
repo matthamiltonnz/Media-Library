@@ -33,30 +33,38 @@ DISC_EXT = (".mka", ".mkv", ".cue")
 
 
 def album_format(folder, depth=2):
-    """"cd" for a folder of tracks, "bluray" for a disc rip, None for artwork only.
+    """(format, edition) for an album folder.
 
-    Artwork-only leftovers (Folder.jpg, desktop.ini, .db) never become a copy, but a
-    concert disc (mka/mkv/cue without separate tracks - e.g. an Atmos Blu-ray) is
-    kept as a Blu-ray copy.
+    FLAC means a ripped CD, MP3 means a Google Play Music purchase and M4A/AAC means
+    an iTunes purchase, so the copy is recorded as Digital rather than CD. Artwork-only
+    leftovers never become a copy; a concert disc (mka/mkv/cue without separate tracks,
+    e.g. an Atmos Blu-ray) is kept as a Blu-ray copy.
     """
     base = len(folder)
-    audio = disc = False
+    flac = mp3 = aac = disc = False
     for root, dirs, files in os.walk(folder):
         dirs[:] = [name for name in dirs if not is_junk(name)]
         for name in files:
             lower = name.lower()
-            if lower.endswith(AUDIO_EXT):
-                audio = True
-                break
-            if lower.endswith(DISC_EXT):
+            if lower.endswith(".flac"):
+                flac = True
+            elif lower.endswith(".mp3"):
+                mp3 = True
+            elif lower.endswith((".m4a", ".aac", ".m4p")):
+                aac = True
+            elif lower.endswith(DISC_EXT):
                 disc = True
-        if audio:
+        if flac or mp3 or aac:
             break
         if root[base:].count(os.sep) >= depth:
             dirs[:] = []
-    if audio:
-        return "cd"
-    return "bluray" if disc else None
+    if flac:
+        return "cd", ""
+    if mp3:
+        return "digital", "Google Play \u00b7 MP3"
+    if aac:
+        return "digital", "iTunes \u00b7 AAC"
+    return ("bluray", "") if disc else (None, "")
 
 
 def parse_owner(folder):
@@ -149,7 +157,7 @@ def main():
                 album_path = os.path.join(artist_path, album)
                 if not os.path.isdir(album_path):
                     continue
-                fmt = album_format(album_path)
+                fmt, edition = album_format(album_path)
                 if not fmt:
                     continue
 
@@ -175,9 +183,9 @@ def main():
                     (title_name, year)).lastrowid
 
                 item_id = con.execute(
-                    "INSERT INTO items (title_id, owner_id, format, location,"
-                    " visibility) VALUES (?, ?, ?, ?, 'shared')",
-                    (title_id, owner_id, fmt, owner_dir)).lastrowid
+                    "INSERT INTO items (title_id, owner_id, format, edition,"
+                    " location, visibility) VALUES (?, ?, ?, ?, ?, 'shared')",
+                    (title_id, owner_id, fmt, edition or None, owner_dir)).lastrowid
                 con.execute(
                     "INSERT INTO digital_sources (item_id, provider, path, root_id)"
                     " VALUES (?, 'rip', ?, ?)", (item_id, rel_path, root_id))

@@ -55,6 +55,8 @@ def _item_row(base, item, formats, labels):
     )
     watched = item["last_watched_on"] or ""
     bits = ['<span class="tag">%s</span>' % labels[item["format"]]]
+    if item["edition"]:
+        bits.append(_text(item["edition"]))
     bits.append(item["upc_ean"] or "no barcode")
     bits.append("shared" if item["visibility"] == "shared" else "private")
     if item["location"]:
