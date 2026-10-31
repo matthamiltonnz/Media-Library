@@ -42,9 +42,11 @@ def _get(url, timeout=25):
         raise Throttle(str(exc.reason))         # offline / DNS hiccup: back off too
 
 
-def wikipedia_search(name, limit=5, year=None):
-    """Page title on en.wikipedia for "<name> film" (no Wikidata involved)."""
-    params = urllib.parse.urlencode({"q": "%s film" % name, "limit": str(limit)})
+def wikipedia_search(name, limit=5, year=None, kind="movie"):
+    """Page title on en.wikipedia for "<name> film" / "<name> TV series"."""
+    suffix = "TV series" if kind == "tv" else "film"
+    params = urllib.parse.urlencode({"q": "%s %s" % (name, suffix),
+                                     "limit": str(limit)})
     data = _get("https://en.wikipedia.org/w/rest.php/v1/search/page?" + params)
     wanted = _key(name)
     best = None
@@ -103,8 +105,8 @@ def qid_by_tmdb(tmdb_id, kind="movie"):
     return hits[0]["title"] if hits else None
 
 
-def search_wikidata(names, limit=10, workers=6, pause=0.0):
-    """{title: qid} - best film-ish item for each name, fetched concurrently."""
+def search_wikidata(names, limit=10, workers=6, pause=0.0, kind="movie"):
+    """{title: qid} - best film-ish (or TV-ish) item for each name, concurrently."""
     from concurrent.futures import ThreadPoolExecutor
 
     def one(name):
@@ -123,7 +125,8 @@ def search_wikidata(names, limit=10, workers=6, pause=0.0):
         for hit in payload.get("search", []):
             label = (hit.get("label") or "").strip()
             description = (hit.get("description") or "").lower()
-            if "film" not in description:
+            wanted = ("series", "television") if kind == "tv" else ("film",)
+            if not any(word in description for word in wanted):
                 continue
             # "film director", "film studio", "film producer" are not the film
             if any(word in description for word in
@@ -380,9 +383,11 @@ def refresh(con, title_id):
             if row["tmdb_id"]:
                 unresolved.append("TMDB %s" % row["tmdb_id"])
         if not page:
-            page = wikipedia_search(cleaned, year=row["release_year"])
+            page = wikipedia_search(cleaned, year=row["release_year"],
+                                    kind=row["kind"])
         if not page:
-            qid = search_wikidata([cleaned], workers=1).get(cleaned)
+            qid = search_wikidata([cleaned], workers=1,
+                                  kind=row["kind"]).get(cleaned)
             if qid:
                 year, imdb = fetch_entities([qid]).get(qid, (None, None))
                 if year and not row["release_year"]:

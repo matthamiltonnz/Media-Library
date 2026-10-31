@@ -42,5 +42,8 @@ DB_PATH="$DB" python3 "$APP/dedupe.py" "$DB" || echo "dedupe step skipped"
 # playback source. The root comes from MUSIC_PATH, else the database's music root.
 python3 "$APP/music_import.py" "$DB" ${MUSIC_PATH:+"$MUSIC_PATH"} || echo "music scan skipped"
 
+# Same for TV: <Show (Year)>/<Season NN> becomes one title, one copy per season.
+python3 "$APP/tv_import.py" "$DB" || echo "tv scan skipped"
+
 echo "starting media collection on :${PORT:-8099} (db=${DB})"
 exec python3 "$APP/server.py"
