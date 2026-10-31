@@ -74,24 +74,36 @@ cost and when; Kodi is no longer offered because it sits outside Home Assistant.
 Music titles are stored as "Artist — Album", and that name is split once into an
 `artists` row per act (`artists.py --link`, re-run on every add-on start and after
 a music import). The Music view then offers **By artist**: every act with albums
-on the shelf, how many, and the years covered. Each act opens a page with their
-albums, what each one is owned as, and a MusicBrainz link, so a music title edits
-the **MusicBrainz ID** instead of the IMDb/TMDb pair.
+on the shelf, how many, and the years covered, as a table or as a wall of covers.
+Each act opens a page with their albums (again list or thumbnails), what each one
+is owned as, and a MusicBrainz link, so a music title edits the **MusicBrainz ID**
+instead of the IMDb/TMDb pair.
+
+Artist details come from MusicBrainz without any Jellyfin involvement: **Admin →
+Artists → Fill artist details** looks up every act that has no id yet (one request
+a second, in the background) and stores the MusicBrainz id, country and the year
+the act started; a few are filled in automatically on each start. Since an artist
+has no picture of its own, the page and the cover wall borrow the art of their
+first album - Jellyfin's image when that album is linked, otherwise the Cover Art
+Archive picture MusicBrainz gave it.
 
 ## Filtering
 
 The format tally under the heading ("Blu-ray 172 · Digital 169 · 4K Blu-ray 38") is
 clickable: press a format to see only those copies, press the same one again to
 clear it. The tallies keep showing the whole library so you can switch between
-them.
+them. Every card and list row carries the filters it was opened with, so **Back to
+the catalogue** returns to the same kind, owner, search and format.
 
 ## Play
 
 A title page opens on **About**: one badge per copy (format, store and owner, so
 "Blu-ray · Matt" and "Digital · iTunes · Mitchell" read at a glance), then a single
-**Play** button. That button opens a small window listing every way to play the
-title: pick a player once, then press the copy to start (a ripped file on the NAS,
-or **Play in Jellyfin** when the title is linked). Only players that accept a file
+**Play** button. That button opens a small window with two labelled halves:
+**From the shelf** picks a Home Assistant player and then the copy to start, and
+**On the Jellyfin server** picks the Jellyfin app that is open right now (Apple TV,
+Vero, a phone) and starts the linked item there. Nothing lists sessions on the page
+itself - the picker is where they belong. Only players that accept a file
 (`play_media`) and are reachable are listed, and **Admin → Players** narrows that
 list to the handful you actually use.
 

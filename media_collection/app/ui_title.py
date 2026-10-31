@@ -96,7 +96,7 @@ def _badges(items, digital, labels, base=None, title_id=None):
 
 def _play_block(base, row, items, digital, players, last_player,
                 jellyfin_link, jellyfin_configured, sessions, labels):
-    """The badges plus one Play button; the button opens every way to play."""
+    """Badges plus one Play button; the button opens every way to play."""
     playable = [source for source in digital
                 if source["provider"] == "rip" and source["path"]
                 and source["root_path"]]
@@ -108,50 +108,60 @@ def _play_block(base, row, items, digital, players, last_player,
         return (head + '<p class="muted">No file to play yet - rip the disc to'
                 ' the NAS and the scan picks it up by itself.</p>')
 
-    player_options = "".join(
-        '<option value="%s"%s>%s%s</option>'
-        % (_text(player["entity_id"]),
-           " selected" if player["entity_id"] == last_player else "",
-           _text(player["name"]),
-           " (%s)" % _text(player["state"]) if player["state"] else "")
-        for player in players)
-    copies = "".join(
-        '<p class="copy-play">'
-        '<button type="submit" name="source_id" value="%d">Play %s</button>'
-        ' <span class="muted">%s</span></p>'
-        % (source["id"],
-           _text("%s · %s" % (labels.get(source["copy_format"],
-                                         source["copy_format"] or "copy"),
-                              source["owner_name"] or "unowned")),
-           _text(source["root_label"] or "media") + " · "
-           + _text(source["path"]))
-        for source in playable)
-    if copies:
-        copies = ('<form method="post" action="%stitle/%d/play">'
-                  '<label>Player<select name="entity_id">%s</select></label>'
-                  '%s</form>'
-                  '<p class="muted">Home Assistant plays the file through its'
-                  ' own media source, so the player only needs to understand'
-                  ' the format.</p>'
-                  % (_text(base), row["id"], player_options, copies))
+    if playable:
+        player_options = "".join(
+            '<option value="%s"%s>%s%s</option>'
+            % (_text(player["entity_id"]),
+               " selected" if player["entity_id"] == last_player else "",
+               _text(player["name"]),
+               " (%s)" % _text(player["state"]) if player["state"] else "")
+            for player in players)
+        copies = "".join(
+            '<p class="copy-play"><button type="submit" name="source_id"'
+            ' value="%d">Play %s</button> <span class="muted">%s</span></p>'
+            % (source["id"],
+               _text("%s · %s" % (labels.get(source["copy_format"],
+                                             source["copy_format"] or "copy"),
+                                  source["owner_name"] or "unowned")),
+               _text(source["root_label"] or "media") + " · "
+               + _text(source["path"]))
+            for source in playable)
+        shelf = ('<h3>From the shelf</h3>'
+                 '<p class="sub">Home Assistant opens the file on a player you'
+                 ' choose.</p>'
+                 '<form method="post" action="%stitle/%d/play">'
+                 '<label>Player<select name="entity_id">%s</select></label>%s'
+                 '</form>' % (_text(base), row["id"], player_options, copies))
     else:
-        copies = '<p class="muted">No ripped file for this title yet.</p>'
+        shelf = ('<h3>From the shelf</h3><p class="muted">No ripped file for'
+                 ' this title yet - rip the disc and the scan picks it up.</p>')
 
-    jellyfin = ""
-    if jellyfin_ready:
-        jellyfin = ('<form method="post" action="%stitle/%d/jellyfin">'
-                    '<button type="submit">Play in Jellyfin</button>'
-                    ' <span class="muted">Streams from the Jellyfin server.</span>'
-                    '</form>' % (_text(base), row["id"]))
-    playing = ""
-    if sessions:
-        playing = ('<p class="muted">Playing in Jellyfin now: %s</p>'
-                   % _text(", ".join(str(session) for session in sessions)))
+    if not jellyfin_ready:
+        jellyfin = ""
+    elif sessions:
+        session_options = "".join(
+            '<option value="%s">%s%s</option>'
+            % (_text(session.get("id")), _text(session.get("name") or "device"),
+               " — " + _text(session.get("client")) if session.get("client")
+               else "")
+            for session in sessions)
+        jellyfin = ('<h3>On the Jellyfin server</h3>'
+                    '<p class="sub">Starts it on a Jellyfin app that is open'
+                    ' right now.</p>'
+                    '<form method="post" action="%stitle/%d/jellyfin">'
+                    '<label>Jellyfin device<select name="session_id">%s'
+                    '</select></label>'
+                    '<p><button type="submit">Play in Jellyfin</button></p>'
+                    '</form>' % (_text(base), row["id"], session_options))
+    else:
+        jellyfin = ('<h3>On the Jellyfin server</h3>'
+                    '<p class="muted">No Jellyfin app is open at the moment -'
+                    ' start it on the device you want and press Play again.</p>')
 
     return """%s
 <p><button type="button" class="primary" data-open="play">Play</button></p>
 <dialog id="play" class="sheet">
-  <h2>Play %s</h2>%s
+  <h2>Play %s</h2>
   %s
   %s
   <form method="dialog"><p><button type="submit">Close</button></p></form>
@@ -163,7 +173,7 @@ document.addEventListener("click", function (event) {
     document.getElementById(opener.dataset.open).showModal();
   }
 });
-</script>""" % (head, _text(row["name"]), playing, jellyfin, copies)
+</script>""" % (head, _text(row["name"]), shelf, jellyfin)
 
 
 def _format_options(formats, labels, chosen):
@@ -318,7 +328,8 @@ def _title_form(base, row):
 def render(base, row, items, digital, formats, labels, summary=None, error=None,
            ripped_root="", roots=(), owner=None, players=(), last_player=None,
            jellyfin_link=None, jellyfin_sessions=(),
-           jellyfin_configured=False, tab="about", users=(), viewer_id=None):
+           jellyfin_configured=False, tab="about", users=(), viewer_id=None,
+           back=None):
     parts = []
     if summary:
         parts.append('<p class="banner good">%s</p>' % _text(summary))
@@ -367,5 +378,7 @@ def render(base, row, items, digital, formats, labels, summary=None, error=None,
                                  labels))
         parts.append(_title_form(base, row))
 
-    back = "?kind=%s" % row["kind"] + ("&owner=%d" % owner if owner else "")
+    if back is None:
+        back = ("?kind=%s" % row["kind"]
+                + ("&owner=%d" % owner if owner else ""))
     return ui.page(base, row["name"], "".join(parts), back=back)

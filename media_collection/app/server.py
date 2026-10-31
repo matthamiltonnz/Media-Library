@@ -370,6 +370,19 @@ ROW = Template("""<tr>
 
 def render_index(con, viewer, base, error=None, query="", pending=0, merged=0,
                  view="list", kind="", owner=None, format=""):
+    bits = []
+    if query:
+        bits.append("q=" + quote(query))
+    if kind:
+        bits.append("kind=" + quote(kind))
+    if owner:
+        bits.append("owner=%d" % owner)
+    if view and view != "list":
+        bits.append("view=" + quote(view))
+    if format:
+        bits.append("format=" + quote(format))
+    here = "?" + "&".join(bits) if bits else ""
+
     rows = library_rows(con, viewer["id"], query, kind, owner, format)
     titles, copies, formats = library_stats(con, viewer["id"], query,
                                             kind, owner, format)
@@ -453,7 +466,7 @@ def render_index(con, viewer, base, error=None, query="", pending=0, merged=0,
             " GROUP BY t.id ORDER BY t.name COLLATE NOCASE",
             [viewer["id"]] + extra).fetchall()
         library = '<div class="cards">%s</div>' % ("".join(
-            '<a class="card" href="{0}title/{1}">{2}'
+            '<a class="card" href="{0}title/{1}?from={5}">{2}'
             '<div class="cap"><strong>{3}</strong><span class="muted">{4}</span></div></a>'
             .format(
                 base, card["id"],
@@ -471,6 +484,7 @@ def render_index(con, viewer, base, error=None, query="", pending=0, merged=0,
                     " · ".join(FORMAT_LABELS.get(f, f)
                                for f in (card["formats"] or "").split(",")),
                     ])))
+                , html.escape(here)
             )
             for card in cards) or '<p class="empty">Nothing yet — add your first disc.</p>')
     else:
@@ -772,6 +786,8 @@ class Handler(BaseHTTPRequestHandler):
                     message = params["jellyfin"][0]
                 elif params.get("players"):
                     message = params["players"][0]
+                elif params.get("artists"):
+                    message = params["artists"][0]
                 elif params.get("scan") and scan.summary():
                     message = scan.summary()
                 return self.respond(200, ui_admin.render(
@@ -823,8 +839,11 @@ class Handler(BaseHTTPRequestHandler):
                    or [""])[0]
             merged = (parse_qs(urlparse(self.path).query).get("merged") or ["0"])[0]
             if route.rstrip("/").endswith("/artists"):
+                want = (parse_qs(urlparse(self.path).query).get("view")
+                        or ["list"])[0]
                 return self.respond(200, ui_artists.render_list(
-                    base, artists.all_artists(con, viewer["id"])))
+                    base, artists.all_artists(con, viewer["id"]),
+                    "grid" if want == "grid" else "list"))
 
             match = re.search(r"/artist/(\d+)/?$", route)
             if match:
@@ -832,10 +851,12 @@ class Handler(BaseHTTPRequestHandler):
                 if artist is None:
                     return self.respond(404, "No such artist",
                                         "text/plain; charset=utf-8")
+                want = (parse_qs(urlparse(self.path).query).get("view")
+                        or ["list"])[0]
                 return self.respond(200, ui_artists.render_artist(
                     base, artist,
                     artists.titles_for(con, artist["id"], viewer["id"]),
-                    FORMAT_LABELS))
+                    FORMAT_LABELS, "grid" if want == "grid" else "list"))
 
             # detail page, always last so /title/<id>/metadata is handled in POST
             detail = re.search(r"/title/(\d+)/?$", route)
@@ -882,6 +903,9 @@ class Handler(BaseHTTPRequestHandler):
             jellyfin_link, jellyfin_sessions = None, []
         tab = (parse_qs(urlparse(self.path).query).get("tab")
                or ["about"])[0]
+        source = (parse_qs(urlparse(self.path).query).get("from")
+                  or [""])[0]
+        back = source if source.startswith("?") else None
         return self.respond(200, ui_title.render(
             base, row, items, digital, FORMATS, FORMAT_LABELS, summary=summary,
             error=error, ripped_root=RIPPED_ROOT, roots=roots, owner=owner,
@@ -890,7 +914,7 @@ class Handler(BaseHTTPRequestHandler):
             jellyfin_configured=bool(jellyfin.config(con)[1]),
             users=con.execute("SELECT id, display_name FROM users"
                               " ORDER BY display_name").fetchall(),
-            viewer_id=viewer["id"], tab=tab))
+            viewer_id=viewer["id"], tab=tab, back=back))
 
     def do_POST(self):
         form = parse_body(self)
@@ -966,7 +990,12 @@ class Handler(BaseHTTPRequestHandler):
                     "Location": base + "admin?jellyfin="
                     + quote("Jellyfin settings saved - press Sync to match the copies.")})
 
-            if route.rstrip("/").endswith("/admin/players"):
+            if route.rstrip("/").endswith("/admin/artists"):
+                artists.start(DB_PATH)
+                return self.respond(303, "", extra={
+                    "Location": base + "admin?artists="
+                    + quote("Filling artist details from MusicBrainz.")})
+
                 if field(form, "clear"):
                     playback.choose(con, [])
                 else:
@@ -1271,6 +1300,7 @@ def main():
     log("media collection listening on :%d (db=%s)" % (PORT, DB_PATH))
     scan.start(DB_PATH)
     jellyfin.start_sync(DB_PATH)
+    artists.start(DB_PATH, limit=60)          # a few details per start
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
 
 

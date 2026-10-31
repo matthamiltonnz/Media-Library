@@ -167,6 +167,7 @@ def render(base, viewer, stats, pending=0, message=None, refresh=None, duplicate
     parts.append(_scan_block(base, scan_message))
     if jellyfin is not None:
         parts.append(_jellyfin_block(base, jellyfin))
+    parts.append(_artists_block(base))
     if players:
         parts.append(_players_block(base, players, chosen))
 
@@ -185,6 +186,21 @@ def _scan_block(base, message):
 </form>""" % ("<p class=\"sub\">%s</p>" % html.escape(message) if message else
               '<p class="muted">Not scanned since the add-on started.</p>',
               html.escape(base))
+
+
+def _artists_block(base):
+    """Fill the artists table from MusicBrainz - no Jellyfin needed."""
+    import artists
+
+    state = artists.summary()
+    return """<h2>Artists</h2>
+<p class="sub">%s</p>
+<form method="post" action="%sadmin/artists">
+  <p><button type="submit">Fill artist details</button>
+     <span class="muted">Looks up every act without a MusicBrainz id, one a
+     second. A few are done automatically each time the add-on starts.</span></p>
+</form>""" % (state or "Artist details come from MusicBrainz: the id, the country"
+               " and the year the act started.", html.escape(base))
 
 
 def _players_block(base, players, chosen):

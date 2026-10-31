@@ -7,6 +7,7 @@ pages then work from a plain join instead of re-splitting every row.
 
 import argparse
 import sys
+import threading
 
 SEPARATOR = " — "
 
@@ -54,10 +55,17 @@ def link_all(con):
 
 
 def all_artists(con, viewer_id):
-    """Every artist with something on the shelf, plus their album counts."""
+    """Every artist with something on the shelf, plus their album counts and art."""
     return con.execute(
         "SELECT a.*, COUNT(t.id) AS albums,"
-        " MIN(t.release_year) AS first_year, MAX(t.release_year) AS last_year"
+        " MIN(t.release_year) AS first_year, MAX(t.release_year) AS last_year,"
+        " (SELECT l.jf_id FROM titles t2"
+        "    JOIN items i2 ON i2.title_id = t2.id"
+        "    JOIN jellyfin_links l ON l.item_id = i2.id"
+        "   WHERE t2.artist_id = a.id ORDER BY t2.id LIMIT 1) AS jf_id,"
+        " (SELECT t3.poster_url FROM titles t3 JOIN items i3 ON i3.title_id = t3.id"
+        "   WHERE t3.artist_id = a.id AND t3.poster_url IS NOT NULL"
+        "   ORDER BY t3.id LIMIT 1) AS poster_url"
         " FROM artists a JOIN titles t ON t.artist_id = a.id"
         " WHERE t.kind = 'music'"
         " AND EXISTS (SELECT 1 FROM items i WHERE i.title_id = t.id"
@@ -75,7 +83,9 @@ def titles_for(con, artist_id, viewer_id):
     """The albums of one artist this viewer can see, oldest first."""
     return con.execute(
         "SELECT t.*, COUNT(i.id) AS copies, group_concat(DISTINCT i.format)"
-        " AS formats, MIN(i.last_watched_on) AS last_watched_on"
+        " AS formats, MIN(i.last_watched_on) AS last_watched_on,"
+        " (SELECT l.jf_id FROM jellyfin_links l JOIN items i2 ON i2.id = l.item_id"
+        "   WHERE i2.title_id = t.id ORDER BY l.jf_id LIMIT 1) AS jf_id"
         " FROM titles t JOIN items i ON i.title_id = t.id"
         " WHERE t.artist_id = ? AND t.kind = 'music'"
         " AND (i.visibility = 'shared' OR i.owner_id = ?)"
@@ -103,6 +113,79 @@ def main(argv=None):
     print("artists: %d new, %d album(s) linked" % (made, linked))
     con.close()
     return 0
+
+
+def enrich(con, limit=None):
+    """Fill in the MusicBrainz id (country, formed year) for artists without one."""
+    import metadata
+
+    rows = con.execute(
+        "SELECT id, name FROM artists WHERE musicbrainz_id IS NULL"
+        " ORDER BY name").fetchall()
+    filled = 0
+    for row in rows:
+        if limit is not None and filled >= limit:
+            break
+        try:
+            found = metadata.musicbrainz_artist(row["name"])
+        except metadata.Throttle:
+            break                              # come back to it later
+        except Exception:
+            continue
+        if not found:
+            continue
+        con.execute(
+            "UPDATE artists SET musicbrainz_id = ?, country = ?,"
+            " formed_year = ?, overview = COALESCE(overview, ?) WHERE id = ?",
+            (found["mbid"], found["country"], found["formed_year"],
+             found["note"], row["id"]))
+        con.commit()
+        filled += 1
+    return filled
+
+
+_STATE = {"running": False, "filled": 0, "at": None}
+
+
+def status():
+    return dict(_STATE)
+
+
+def summary():
+    """One line for the admin page: what the last fill managed to do."""
+    state = status()
+    if state["running"]:
+        return "Filling artist details from MusicBrainz..."
+    if state["at"]:
+        return ("Filled %d artist(s) from MusicBrainz on %s."
+                % (state["filled"], state["at"]))
+    return ""
+
+
+def start(db_path, limit=None):
+    """Fill artist details in the background - MusicBrainz allows one call a second."""
+    if _STATE["running"]:
+        return False
+    _STATE.update(running=True, filled=0)
+
+    def _run():
+        import datetime
+        import sqlite3
+
+        con = sqlite3.connect(db_path, timeout=10)
+        con.row_factory = sqlite3.Row
+        try:
+            filled = enrich(con, limit)
+            _STATE.update(filled=filled,
+                          at=datetime.datetime.now().strftime("%Y-%m-%d %H:%M"))
+        except Exception as exc:               # keep the app serving
+            print("artists: %s" % exc, file=sys.stderr)
+        finally:
+            con.close()
+            _STATE["running"] = False
+
+    threading.Thread(target=_run, daemon=True).start()
+    return True
 
 
 if __name__ == "__main__":

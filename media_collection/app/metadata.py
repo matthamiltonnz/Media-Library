@@ -249,6 +249,34 @@ def cover_art(mbid, size=500):
     return None
 
 
+def musicbrainz_artist(name):
+    """MusicBrainz' best guess at an artist: id, country, year they formed.
+
+    Used to fill in the artists table from the act's name alone, so nothing here
+    depends on Jellyfin being present.
+    """
+    if not name:
+        return None
+    params = urllib.parse.urlencode({
+        "query": 'artist:"%s"' % name.replace('"', ""),
+        "fmt": "json", "limit": 1})
+    time.sleep(MB_PAUSE)
+    payload = _get(MB_ROOT + "/artist?" + params)
+    found = (payload.get("artists") or [None])[0]
+    if not found:
+        return None
+    life = found.get("life-span") or {}
+    begin = life.get("begin") or ""
+    return {
+        "name": found.get("name") or name,
+        "mbid": found.get("id"),
+        "country": found.get("country"),
+        "formed_year": int(begin[:4]) if begin[:4].isdigit() else None,
+        "note": found.get("disambiguation") or found.get("type") or None,
+    }
+
+
+
 def musicbrainz_lookup(artist, album, year=None):
     """Best release-group for one album: mbid, year, cover, title, credit, types."""
     album = ALBUM_YEAR.sub("", album or "").strip() or (album or "")
