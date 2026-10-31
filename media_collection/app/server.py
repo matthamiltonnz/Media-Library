@@ -46,6 +46,8 @@ FORMAT_LABELS = {
     "other": "Other",
 }
 KINDS = {"movie": "Movie", "tv": "TV", "music": "Music", "other": "Other"}
+# the top-level switch: the catalogue is always in exactly one of these
+MODES = (("movie", "Movies"), ("tv", "TV"), ("music", "Music"))
 
 
 def load_options():
@@ -201,6 +203,12 @@ PAGE = Template("""<!doctype html>
   .card .cap .muted { font-size: .74rem; }
   label.check { display: flex; align-items: center; gap: .4rem; font-size: .85rem; }
   label.check input { width: auto; }
+  nav.modes { display: flex; gap: .4rem; margin: 0 0 .7rem; flex-wrap: wrap; }
+  nav.modes a { padding: .38rem .85rem; border-radius: 999px; border: 1px solid #8886;
+                color: inherit; text-decoration: none; font-weight: 600;
+                font-size: .9rem; }
+  nav.modes a.current { background: #2f6f4f; border-color: #2f6f4f; color: #fff; }
+  nav.modes .n { opacity: .7; font-weight: 400; margin-left: .3rem; font-size: .82rem; }
   .banner { padding: .5rem .7rem; border-radius: 6px; background: #c33;
             color: #fff; margin-bottom: 1rem; }
   .empty { opacity: .6; }
@@ -210,9 +218,10 @@ PAGE = Template("""<!doctype html>
 <h1>Media Collection</h1>
 <p class="sub">Signed in as <strong>$viewer</strong> — you see everything shared
    plus your own private copies.</p>
+$modes
 <form class="search" method="get" action="$base">
   <input name="q" value="$q" placeholder="Search title or barcode">
-  <select name="kind" onchange="this.form.submit()">$kind_options</select>
+  <input type="hidden" name="kind" value="$kind">
   <input type="hidden" name="view" value="$view">
   <button type="submit">Search</button>
 </form>
@@ -225,6 +234,7 @@ $library
 
 <h2>Add a copy</h2>
 <form class="add" method="post" action="${base}items">
+  <input type="hidden" name="kind" value="$kind">
   <input name="title" placeholder="Title" required>
   <input name="release_year" placeholder="Year" inputmode="numeric" pattern="[0-9]{0,4}">
   <select name="format">$format_options</select>
@@ -269,6 +279,18 @@ def render_index(con, viewer, base, error=None, query="", pending=0, merged=0,
                                         "y" if copies == 1 else "ies")
     totals = " · ".join("%s %d" % (FORMAT_LABELS.get(row["fmt"], row["fmt"]), row["n"])
                         for row in formats) or "nothing yet"
+    mode_counts = {row["kind"]: row["n"] for row in con.execute(
+        "SELECT t.kind AS kind, COUNT(*) AS n FROM items i"
+        " JOIN titles t ON t.id = i.title_id"
+        " WHERE (i.visibility = 'shared' OR i.owner_id = ?) GROUP BY t.kind",
+        (viewer["id"],))}
+    modes = "".join(
+        '<a class="%s" href="%s?kind=%s%s">%s<span class="n">%d</span></a>'
+        % ("current" if value == kind else "", html.escape(base), value,
+           "&amp;view=grid" if view == "grid" else "", label,
+           mode_counts.get(value, 0))
+        for value, label in (MODES + (("other", "Other"),)
+                             if mode_counts.get("other") else MODES))
     if merged:
         notice = ('<p class="banner good">Merged %d item(s) from the bundled catalogue — '
                   "reload to see everything.</p>" % merged)
@@ -341,17 +363,14 @@ def render_index(con, viewer, base, error=None, query="", pending=0, merged=0,
         heading=heading,
         totals=totals,
         kind=kind,
-        kind_options="".join(
-            '<option value="%s"%s>%s</option>'
-            % (value, " selected" if value == kind else "", label)
-            for value, label in (("", "All media"), ("movie", "Films"), ("tv", "TV"),
-                                 ("music", "Music"), ("other", "Other"))),
+        modes="<nav class=\"modes\">%s</nav>" % modes,
         scope=' matching “%s”' % html.escape(query) if query else "",
         q=html.escape(query),
-        clear=' · <a href="%s">clear search</a>' % html.escape(base) if query else "",
+        clear=(' · <a href="%s?kind=%s">clear search</a>'
+               % (html.escape(base), kind) if query else ""),
         view=view,
-        viewtoggle=' · <a href="%s?view=%s%s">%s</a>'
-                   % (html.escape(base), "list" if view == "grid" else "grid",
+        viewtoggle=' · <a href="%s?view=%s&amp;kind=%s%s">%s</a>'
+                   % (html.escape(base), "list" if view == "grid" else "grid", kind,
                       "&amp;q=" + html.escape(query) if query else "",
                       "List view" if view == "grid" else "Thumbnails"),
         library=library,
@@ -387,6 +406,10 @@ def add_item(con, viewer, form):
     if not title:
         return "Title is required.", None
 
+    kind = field(form, "kind")
+    if kind not in KINDS:
+        kind = "movie"
+
     year_raw = field(form, "release_year")
     year = int(year_raw) if year_raw.isdigit() else None
 
@@ -415,8 +438,9 @@ def add_item(con, viewer, form):
                         " metadata_source = NULL WHERE id = ?", (imdb, title_id))
     else:
         title_id = con.execute(
-            "INSERT INTO titles (name, release_year, created_by, imdb_id)"
-            " VALUES (?, ?, ?, ?)", (title, year, viewer["id"], imdb)).lastrowid
+            "INSERT INTO titles (name, release_year, created_by, imdb_id, kind)"
+            " VALUES (?, ?, ?, ?, ?)",
+            (title, year, viewer["id"], imdb, kind)).lastrowid
 
     try:
         con.execute(
@@ -626,7 +650,7 @@ class Handler(BaseHTTPRequestHandler):
                 pending=merger.pending_count(con),
                 merged=int(merged) if merged.isdigit() else 0,
                 view="grid" if view == "grid" else "list",
-                kind=kind if kind in ("movie", "tv", "music", "other") else ""))
+                kind=kind if kind in ("movie", "tv", "music", "other") else "movie"))
         finally:
             con.close()
 

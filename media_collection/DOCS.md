@@ -126,11 +126,13 @@ when the Supervisor passes it through).
 
 ## Browsing
 
-The catalogue page opens with a count of **titles and copies** plus a per-format
-breakdown (CD, 3D Blu-ray, Blu-ray, 4K Blu-ray, Digital, …), so the headline is no
-longer a bare copy count. A **media type** selector next to the search box filters
-the whole page — and the counts — to Films, TV, Music or Other. The **Library admin**
-link sits at the foot of the page.
+The catalogue page opens in one **mode at a time** — **Movies**, **TV** or **Music**
+(an *Other* pill appears only if such titles exist). The switch sits above the search
+box, shows how many copies each mode holds, and there is no "everything" view: films,
+episodes and albums are never mixed. Within a mode the page shows the title/copy
+counts with a per-format breakdown (CD, 3D Blu-ray, Blu-ray, 4K Blu-ray, Digital, …),
+the search box, the list/poster toggle and the **Add a copy** form — which creates the
+new title in the mode you are in. The **Library admin** link sits at the foot of the page.
 
 ## If an upgrade fails
 

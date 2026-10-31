@@ -43,7 +43,7 @@ SHELL = """<!doctype html>
 </style>
 </head>
 <body>
-<p class="sub"><a href="@@BASE@@">← Back to the catalogue</a></p>
+<p class="sub"><a href="@@BACK@@">← Back to the catalogue</a></p>
 <h1>@@TITLE@@</h1>
 @@CONTENT@@
 </body>
@@ -51,7 +51,8 @@ SHELL = """<!doctype html>
 """
 
 
-def page(base, title, content):
+def page(base, title, content, back=""):
     return (SHELL.replace("@@BASE@@", html.escape(base))
+                 .replace("@@BACK@@", html.escape(base + back))
                  .replace("@@TITLE@@", html.escape(title))
                  .replace("@@CONTENT@@", content))

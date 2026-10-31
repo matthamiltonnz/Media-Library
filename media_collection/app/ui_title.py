@@ -188,4 +188,5 @@ def render(base, row, items, digital, formats, labels, summary=None, error=None,
      <span class="muted">The full path is the root plus what you type here.</span></p>
 </form>""")
 
-    return ui.page(base, row["name"], "".join(parts))
+    kind = row["kind"] if "kind" in row.keys() else "movie"
+    return ui.page(base, row["name"], "".join(parts), back="?kind=%s" % kind)
