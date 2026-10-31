@@ -47,6 +47,24 @@ FORMAT_LABELS = {
     "other": "Other",
 }
 KINDS = {"movie": "Movie", "tv": "TV", "music": "Music", "other": "Other"}
+# the case drawn around the artwork in the thumbnail view, by the best copy held
+CASE_ORDER = {
+    "music": ("cd", "vinyl", "bluray", "dvd", "digital"),
+    "movie": ("uhd_4k", "bluray_3d", "bluray", "dvd", "digital"),
+    "tv": ("uhd_4k", "bluray_3d", "bluray", "dvd", "digital"),
+}
+CASE_CLASS = {"uhd_4k": "case-4k", "bluray_3d": "case-3d", "bluray": "case-blu",
+              "dvd": "case-dvd", "cd": "case-jewel", "vinyl": "case-sleeve",
+              "digital": "case-digital"}
+
+
+def case_class(kind, formats):
+    """Virtual case for a card: jewel case, sleeve, or blue/yellow/black Blu-ray."""
+    have = set(filter(None, (formats or "").split(",")))
+    for fmt in CASE_ORDER.get(kind, CASE_ORDER["movie"]):
+        if fmt in have:
+            return CASE_CLASS[fmt] + (" case-music" if kind == "music" else "")
+    return CASE_CLASS["digital"] + (" case-music" if kind == "music" else "")
 # the top-level switch: the catalogue is always in exactly one of these
 MODES = (("movie", "Movies"), ("tv", "TV"), ("music", "Music"))
 
@@ -204,8 +222,32 @@ PAGE = Template("""<!doctype html>
   .card { border: 1px solid #8883; border-radius: 8px; overflow: hidden; color: inherit;
           text-decoration: none; display: flex; flex-direction: column; }
   .card .thumb { aspect-ratio: 2 / 3; background: #8882; display: flex; align-items: center;
-                 justify-content: center; font-size: .8rem; opacity: .8; }
+                 justify-content: center; font-size: .8rem; }
+  .card .thumb .muted { opacity: .6; }
   .card .thumb img { width: 100%; height: 100%; object-fit: cover; }
+  /* virtual cases: the artwork sits inside a drawn box, so a square cover never
+     gets cropped into a poster and a Blu-ray looks like a Blu-ray */
+  .thumb { position: relative; }
+  .thumb.case-music { aspect-ratio: 1 / 1; }
+  .thumb.case-jewel { aspect-ratio: 1 / 1; padding: 7% 9% 7% 11%;
+                      background: linear-gradient(135deg, #2b3138, #14181d 65%);
+                      border-left: 5px solid #3a424c; }
+  .thumb.case-jewel img { border: 1px solid #ffffff2e;
+                          box-shadow: 0 0 0 2px #0006, 0 4px 10px #0007; }
+  .thumb.case-sleeve { aspect-ratio: 1 / 1; padding: 6%;
+                       background: linear-gradient(160deg, #242424, #0e0e0e); }
+  .thumb.case-sleeve img { box-shadow: 0 6px 16px #000a; }
+  .thumb.case-blu, .thumb.case-3d, .thumb.case-4k {
+      aspect-ratio: 5 / 7; padding: 6% 5% 11%; border-radius: 4px 4px 3px 3px; }
+  .thumb.case-blu { background: linear-gradient(180deg, #1f5aa8, #0c2a58); }
+  .thumb.case-3d { background: linear-gradient(180deg, #e3b400, #8a6a00); }
+  .thumb.case-4k { background: linear-gradient(180deg, #171717, #000000); }
+  .thumb.case-blu img, .thumb.case-3d img, .thumb.case-4k img {
+      border-radius: 2px; box-shadow: 0 2px 8px #0008; }
+  .thumb.case-dvd { aspect-ratio: 5 / 7; padding: 6% 5% 11%;
+                    background: linear-gradient(180deg, #4a4a4a, #1a1a1a); }
+  .thumb.case-dvd img { border-radius: 2px; box-shadow: 0 2px 8px #0008; }
+  .thumb.case-digital { background: #8881; }
   .card .cap { padding: .4rem .5rem; font-size: .82rem; display: grid; gap: .15rem; }
   .card .cap .muted { font-size: .74rem; }
   label.check { display: flex; align-items: center; gap: .4rem; font-size: .85rem; }
@@ -338,18 +380,21 @@ def render_index(con, viewer, base, error=None, query="", pending=0, merged=0,
     if view == "grid":
         clause, extra = visible_clause(query, kind, owner)
         cards = con.execute(
-            "SELECT t.id, t.name, t.release_year, t.poster_url,"
+            "SELECT t.id, t.name, t.release_year, t.poster_url, t.kind,"
             " COUNT(i.id) AS copies, group_concat(DISTINCT i.format) AS formats"
             " FROM titles t JOIN items i ON i.title_id = t.id"
             " WHERE " + clause +
             " GROUP BY t.id ORDER BY t.name COLLATE NOCASE",
             [viewer["id"]] + extra).fetchall()
         library = '<div class="cards">%s</div>' % ("".join(
-            '<a class="card" href="{0}title/{1}"><div class="thumb">{2}</div>'
-            '<div class="cap"><strong>{3}</strong><span class="muted">{4}</span></div></a>'.format(
+            '<a class="card" href="{0}title/{1}">{2}'
+            '<div class="cap"><strong>{3}</strong><span class="muted">{4}</span></div></a>'
+            .format(
                 base, card["id"],
-                '<img src="%s" alt="">' % html.escape(card["poster_url"])
-                if card["poster_url"] else '<span class="muted">no image</span>',
+                '<div class="thumb %s">%s</div>' % (
+                    case_class(card["kind"], card["formats"]),
+                    '<img src="%s" alt="">' % html.escape(card["poster_url"])
+                    if card["poster_url"] else '<span class="muted">no image</span>'),
                 html.escape(card["name"]),
                 html.escape(" · ".join(filter(None, [
                     str(card["release_year"] or ""),

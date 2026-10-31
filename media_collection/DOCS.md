@@ -164,6 +164,11 @@ counts with a per-format breakdown (CD, 3D Blu-ray, Blu-ray, 4K Blu-ray, Digital
 the search box, the list/poster toggle and the **Add a copy** form — which creates the
 new title in the mode you are in. The **Library admin** link sits at the foot of the page.
 
+The poster view draws each title inside a **virtual case** picked from the best copy
+held — a CD jewel case, a vinyl sleeve, a blue Blu-ray case, a yellow one for 3D and a
+black one for 4K — so square album art is never cropped into a poster shape and the
+shelf presence is visible at a glance. It is CSS only: no case artwork to host.
+
 ## If an upgrade fails
 
 Each migration runs in one transaction, so a failure leaves nothing half-applied.
