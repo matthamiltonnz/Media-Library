@@ -255,13 +255,13 @@ PAGE = Template("""<!doctype html>
   .thumb.case-4k img, .thumb.case-dvd img {
       border-radius: 2px; box-shadow: 0 3px 10px #000a; }
   /* a CD sits in a clear jewel case: hinge on the left, inlay under the plastic */
-  .thumb.case-jewel { aspect-ratio: 1 / 1; padding: 7% 9% 7% 13%; border-radius: 3px;
-      background: linear-gradient(100deg, #d7e0e6 0 11%, #f2f7fa 11% 100%);
-      border-left: 5px solid #c2cdd5;
+  .thumb.case-jewel { aspect-ratio: 1 / 1; padding: 0 0 0 12%; border-radius: 3px;
+      overflow: hidden;
+      background: linear-gradient(100deg, #d7e0e6 0 12%, #f2f7fa 12% 100%);
       box-shadow: inset 0 0 0 1px #ffffff, 0 6px 14px #0005; }
-  .thumb.case-jewel::before { content: ""; position: absolute; left: 11%; top: 0;
+  .thumb.case-jewel::before { content: ""; position: absolute; left: 12%; top: 0;
       bottom: 0; width: 1px; background: #ffffffcc; }
-  .thumb.case-jewel img { border: 1px solid #0000001f; box-shadow: 0 1px 5px #0004; }
+  .thumb.case-jewel img { border: 0; box-shadow: none; }
   /* vinyl keeps its printed sleeve */
   .thumb.case-sleeve { aspect-ratio: 1 / 1; padding: 6%; border-radius: 3px;
                        background: linear-gradient(160deg, #242424, #0e0e0e); }
