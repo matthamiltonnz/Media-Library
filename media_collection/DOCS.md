@@ -66,8 +66,10 @@ Each copy can record where it can be played from: open a title → **Playback
 sources**. Pick the copy, the provider (*Ripped file (NAS)*, Jellyfin, Kodi, iTunes,
 Apple TV) and the **NAS root** plus the path inside it.
 
-Roots are rows, not config — Admin → **Media roots** lists, adds and removes them,
-so a new folder (or a moved NAS) is an edit, not a rebuild. Seeded with:
+Roots are rows, not config — Admin → **Media roots** lists them, and every row is
+editable in place (label, path and medium) with **Save**, alongside **Remove**; a new
+folder is an **Add** form underneath. Labels and paths must be unique, and a clash is
+reported rather than silently dropped. Seeded with:
 
 | Root | Path |
 |---|---|

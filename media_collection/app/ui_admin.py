@@ -82,20 +82,38 @@ def _refresh_block(base, refresh):
 
 
 def _roots_block(base, roots):
-    rows = "".join(
-        "<tr><td>%s</td><td class=\"barcode\">%s</td><td>%s</td>"
-        "<td><form method=\"post\" action=\"%sadmin/roots/%d/delete\">"
-        "<button type=\"submit\">Remove</button></form></td></tr>"
-        % (html.escape(root["label"]), html.escape(root["path"]),
-           html.escape(root["medium"]), html.escape(base), root["id"])
-        for root in roots)
+    rows = []
+    for root in roots:
+        form_id = "root-%d" % root["id"]
+        options = "".join(
+            '<option value="%s"%s>%s</option>'
+            % (value, " selected" if value == root["medium"] else "", label)
+            for value, label in (("video", "Video"), ("music", "Music"),
+                                 ("other", "Other")))
+        rows.append(
+            "<tr>"
+            '<td><input form="%s" name="label" value="%s" required></td>'
+            '<td><input form="%s" name="path" class="barcode" value="%s"'
+            ' required></td>'
+            '<td><select form="%s" name="medium">%s</select></td>'
+            '<td><form id="%s" method="post" action="%sadmin/roots/%d">'
+            '<button type="submit">Save</button></form>'
+            '<form method="post" action="%sadmin/roots/%d/delete">'
+            '<button type="submit">Remove</button></form></td></tr>'
+            % (form_id, html.escape(root["label"], quote=True),
+               form_id, html.escape(root["path"], quote=True),
+               form_id, options,
+               form_id, html.escape(base), root["id"],
+               html.escape(base), root["id"]))
+    rows = "".join(rows)
     table = ("<table><thead><tr><th>Label</th><th>Path</th><th>Medium</th><th></th>"
              "</tr></thead><tbody>%s</tbody></table>" % rows) if roots else \
             '<p class="muted">No roots yet.</p>'
     return """
 <h2>Media roots (NAS folders)</h2>
 <p>The folders that ripped files live in. A playback source stores a root plus the
-   path inside it, so moving the NAS only means editing the root.</p>
+   path inside it, so moving the NAS only means editing the root — every row below
+   can be changed in place and saved.</p>
 %s
 <form method="post" action="%sadmin/roots">
   <div class="grid">

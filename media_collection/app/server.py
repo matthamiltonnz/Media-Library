@@ -671,6 +671,27 @@ class Handler(BaseHTTPRequestHandler):
                     con.rollback()
                 return self.respond(303, "", extra={"Location": base + "admin"})
 
+            match = re.search(r"/admin/roots/(\d+)/?$", route)
+            if match:
+                root_id = int(match.group(1))
+                label = field(form, "label")
+                path = field(form, "path")
+                medium = field(form, "medium") or "video"
+                if not (label and path):
+                    return self.respond(400, "Label and path are required.",
+                                        "text/plain; charset=utf-8")
+                try:
+                    con.execute("UPDATE media_roots SET label = ?, path = ?,"
+                                " medium = ? WHERE id = ?",
+                                (label, path, medium, root_id))
+                    con.commit()
+                except sqlite3.IntegrityError:
+                    con.rollback()
+                    return self.respond(
+                        400, "Another root already uses that label or path.",
+                        "text/plain; charset=utf-8")
+                return self.respond(303, "", extra={"Location": base + "admin"})
+
             match = re.search(r"/admin/roots/(\d+)/delete/?$", route)
             if match:
                 con.execute("UPDATE digital_sources SET root_id = NULL WHERE root_id = ?",
