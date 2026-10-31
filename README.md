@@ -31,8 +31,9 @@ Full documentation: [media_collection/DOCS.md](media_collection/DOCS.md).
   background refresh for the whole library and IMDb-id-first matching so a corrected
   match sticks.
 - **Browsing** — one mode at a time (**Movies**, **TV**, **Music**), never a mixed
-  list, with titles/copies counts broken down by format, search, list and poster
-  views, and the admin page tucked away at the foot of the catalogue.
+  list, plus an owner filter for *Everyone* or a single person, with titles/copies
+  counts broken down by format, search, list and poster views, and the admin page
+  tucked away at the foot of the catalogue.
 - **Playback sources** — record that a copy is a ripped file on the NAS (root + path),
   or a Jellyfin/Kodi/iTunes item, ready for routing later. A ripped music tree
   (`Owner's Music/Artist/Album`) is scanned on every start, turning each album folder

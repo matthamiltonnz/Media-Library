@@ -132,7 +132,10 @@ when the Supervisor passes it through).
 The catalogue page opens in one **mode at a time** — **Movies**, **TV** or **Music**
 (an *Other* pill appears only if such titles exist). The switch sits above the search
 box, shows how many copies each mode holds, and there is no "everything" view: films,
-episodes and albums are never mixed. Within a mode the page shows the title/copy
+episodes and albums are never mixed. Under it, a second row of pills narrows the view
+to **Everyone** or a single household member, with that person's copy count inside the
+current mode; other people's private copies never appear, whichever filter is active.
+Within a mode the page shows the title/copy
 counts with a per-format breakdown (CD, 3D Blu-ray, Blu-ray, 4K Blu-ray, Digital, …),
 the search box, the list/poster toggle and the **Add a copy** form — which creates the
 new title in the mode you are in. The **Library admin** link sits at the foot of the page.

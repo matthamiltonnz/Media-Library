@@ -107,7 +107,7 @@ def viewer_for(handler, con):
 
 # ------------------------------------------------------------------ views ----
 
-def library_rows(con, viewer_id, query="", kind=""):
+def library_rows(con, viewer_id, query="", kind="", owner=None):
     sql = """
         SELECT i.id, t.id AS title_id, t.name AS title, t.release_year, i.format,
                i.edition, i.upc_ean, i.region, i.visibility, i.location,
@@ -124,11 +124,14 @@ def library_rows(con, viewer_id, query="", kind=""):
     if kind:
         sql += " AND t.kind = ?"
         params.append(kind)
+    if owner:
+        sql += " AND i.owner_id = ?"
+        params.append(int(owner))
     sql += " ORDER BY t.name COLLATE NOCASE, i.format"
     return con.execute(sql, params).fetchall()
 
 
-def visible_clause(query="", kind=""):
+def visible_clause(query="", kind="", owner=None):
     where = ["(i.visibility = 'shared' OR i.owner_id = ?)"]
     params = []                              # viewer id is supplied by the caller
     if query:
@@ -137,11 +140,14 @@ def visible_clause(query="", kind=""):
     if kind:
         where.append("t.kind = ?")
         params.append(kind)
+    if owner:
+        where.append("i.owner_id = ?")
+        params.append(int(owner))
     return " AND ".join(where), params
 
 
-def library_stats(con, viewer_id, query="", kind=""):
-    clause, extra = visible_clause(query, kind)
+def library_stats(con, viewer_id, query="", kind="", owner=None):
+    clause, extra = visible_clause(query, kind, owner)
     params = [viewer_id] + extra
     base = ("FROM items i JOIN titles t ON t.id = i.title_id WHERE " + clause)
     titles = con.execute("SELECT COUNT(DISTINCT t.id) " + base, params).fetchone()[0]
@@ -209,6 +215,9 @@ PAGE = Template("""<!doctype html>
                 font-size: .9rem; }
   nav.modes a.current { background: #2f6f4f; border-color: #2f6f4f; color: #fff; }
   nav.modes .n { opacity: .7; font-weight: 400; margin-left: .3rem; font-size: .82rem; }
+  nav.owners { margin-top: -.35rem; }
+  nav.owners a { font-size: .8rem; padding: .22rem .6rem; font-weight: 500; }
+  nav.owners .n { font-size: .76rem; }
   .banner { padding: .5rem .7rem; border-radius: 6px; background: #c33;
             color: #fff; margin-bottom: 1rem; }
   .empty { opacity: .6; }
@@ -219,9 +228,11 @@ PAGE = Template("""<!doctype html>
 <p class="sub">Signed in as <strong>$viewer</strong> — you see everything shared
    plus your own private copies.</p>
 $modes
+<nav class="modes owners">$owner_tabs</nav>
 <form class="search" method="get" action="$base">
   <input name="q" value="$q" placeholder="Search title or barcode">
   <input type="hidden" name="kind" value="$kind">
+  <input type="hidden" name="owner" value="$owner">
   <input type="hidden" name="view" value="$view">
   <button type="submit">Search</button>
 </form>
@@ -272,9 +283,9 @@ ROW = Template("""<tr>
 
 
 def render_index(con, viewer, base, error=None, query="", pending=0, merged=0,
-                 view="list", kind=""):
-    rows = library_rows(con, viewer["id"], query, kind)
-    titles, copies, formats = library_stats(con, viewer["id"], query, kind)
+                 view="list", kind="", owner=None):
+    rows = library_rows(con, viewer["id"], query, kind, owner)
+    titles, copies, formats = library_stats(con, viewer["id"], query, kind, owner)
     heading = "%d title%s · %d cop%s" % (titles, "" if titles == 1 else "s", copies,
                                         "y" if copies == 1 else "ies")
     totals = " · ".join("%s %d" % (FORMAT_LABELS.get(row["fmt"], row["fmt"]), row["n"])
@@ -291,6 +302,23 @@ def render_index(con, viewer, base, error=None, query="", pending=0, merged=0,
            mode_counts.get(value, 0))
         for value, label in (MODES + (("other", "Other"),)
                              if mode_counts.get("other") else MODES))
+    owner_rows = con.execute(
+        "SELECT u.id, u.display_name, COUNT(*) AS n FROM items i"
+        " JOIN users u ON u.id = i.owner_id JOIN titles t ON t.id = i.title_id"
+        " WHERE (i.visibility = 'shared' OR i.owner_id = ?)%s"
+        " GROUP BY u.id ORDER BY u.display_name COLLATE NOCASE"
+        % (" AND t.kind = ?" if kind else ""),
+        [viewer["id"]] + ([kind] if kind else [])).fetchall()
+    owner_tabs = "".join(
+        ['<a class="%s" href="%s?kind=%s%s">Everyone<span class="n">%d</span></a>'
+         % ("" if owner else "current", html.escape(base), kind,
+            "&amp;view=grid" if view == "grid" else "",
+            sum(row["n"] for row in owner_rows))]
+        + ['<a class="%s" href="%s?kind=%s&amp;owner=%d%s">%s<span class="n">%d</span></a>'
+           % ("current" if owner == row["id"] else "", html.escape(base), kind,
+              row["id"], "&amp;view=grid" if view == "grid" else "",
+              html.escape(row["display_name"]), row["n"])
+           for row in owner_rows])
     if merged:
         notice = ('<p class="banner good">Merged %d item(s) from the bundled catalogue — '
                   "reload to see everything.</p>" % merged)
@@ -301,7 +329,7 @@ def render_index(con, viewer, base, error=None, query="", pending=0, merged=0,
     else:
         notice = ""
     if view == "grid":
-        clause, extra = visible_clause(query, kind)
+        clause, extra = visible_clause(query, kind, owner)
         cards = con.execute(
             "SELECT t.id, t.name, t.release_year, t.poster_url,"
             " COUNT(i.id) AS copies, group_concat(DISTINCT i.format) AS formats"
@@ -363,15 +391,19 @@ def render_index(con, viewer, base, error=None, query="", pending=0, merged=0,
         heading=heading,
         totals=totals,
         kind=kind,
+        owner=owner or "",
         modes="<nav class=\"modes\">%s</nav>" % modes,
+        owner_tabs=owner_tabs,
         scope=' matching “%s”' % html.escape(query) if query else "",
         q=html.escape(query),
-        clear=(' · <a href="%s?kind=%s">clear search</a>'
-               % (html.escape(base), kind) if query else ""),
+        clear=(' · <a href="%s?kind=%s%s">clear search</a>'
+               % (html.escape(base), kind,
+                  "&amp;owner=%d" % owner if owner else "") if query else ""),
         view=view,
-        viewtoggle=' · <a href="%s?view=%s&amp;kind=%s%s">%s</a>'
+        viewtoggle=' · <a href="%s?view=%s&amp;kind=%s%s%s">%s</a>'
                    % (html.escape(base), "list" if view == "grid" else "grid", kind,
                       "&amp;q=" + html.escape(query) if query else "",
+                      "&amp;owner=%d" % owner if owner else "",
                       "List view" if view == "grid" else "Thumbnails"),
         library=library,
         owners=owners,
@@ -640,21 +672,26 @@ class Handler(BaseHTTPRequestHandler):
             query = (parse_qs(urlparse(self.path).query).get("q") or [""])[0].strip()
             view = (parse_qs(urlparse(self.path).query).get("view") or ["grid"])[0]
             kind = (parse_qs(urlparse(self.path).query).get("kind") or [""])[0]
+            owner_raw = (parse_qs(urlparse(self.path).query).get("owner") or [""])[0]
+            owner = int(owner_raw) if owner_raw.isdigit() else None
             merged = (parse_qs(urlparse(self.path).query).get("merged") or ["0"])[0]
             # detail page, always last so /title/<id>/metadata is handled in POST
             detail = re.search(r"/title/(\d+)/?$", route)
             if detail:
-                return self.title_page(con, viewer, base, int(detail.group(1)))
+                return self.title_page(con, viewer, base, int(detail.group(1)),
+                                       owner=owner)
             return self.respond(200, render_index(
                 con, viewer, base, query=query,
                 pending=merger.pending_count(con),
                 merged=int(merged) if merged.isdigit() else 0,
                 view="grid" if view == "grid" else "list",
+                owner=owner,
                 kind=kind if kind in ("movie", "tv", "music", "other") else "movie"))
         finally:
             con.close()
 
-    def title_page(self, con, viewer, base, title_id, summary=None, error=None):
+    def title_page(self, con, viewer, base, title_id, summary=None, error=None,
+                   owner=None):
         row = con.execute("SELECT * FROM titles WHERE id = ?", (title_id,)).fetchone()
         if row is None:
             return self.respond(404, "No such title", "text/plain; charset=utf-8")
@@ -669,8 +706,10 @@ class Handler(BaseHTTPRequestHandler):
         roots = con.execute("SELECT id, label, path FROM media_roots"
                             " ORDER BY medium, label").fetchall()
         return self.respond(200, ui_title.render(base, row, items, digital, FORMATS,
-                                                 FORMAT_LABELS, summary=summary, error=error,
-                                                 ripped_root=RIPPED_ROOT, roots=roots))
+                                                 FORMAT_LABELS, summary=summary,
+                                                 error=error,
+                                                 ripped_root=RIPPED_ROOT, roots=roots,
+                                                 owner=owner))
 
     def do_POST(self):
         form = parse_body(self)

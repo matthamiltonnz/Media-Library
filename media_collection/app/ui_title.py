@@ -88,7 +88,7 @@ def _item_row(base, item, formats, labels):
 
 
 def render(base, row, items, digital, formats, labels, summary=None, error=None,
-           ripped_root="", roots=()):
+           ripped_root="", roots=(), owner=None):
     parts = []
     if summary:
         parts.append('<p class="banner good">%s</p>' % _text(summary))
@@ -189,4 +189,5 @@ def render(base, row, items, digital, formats, labels, summary=None, error=None,
 </form>""")
 
     kind = row["kind"] if "kind" in row.keys() else "movie"
-    return ui.page(base, row["name"], "".join(parts), back="?kind=%s" % kind)
+    back = "?kind=%s" % kind + ("&owner=%d" % owner if owner else "")
+    return ui.page(base, row["name"], "".join(parts), back=back)
