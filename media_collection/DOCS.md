@@ -79,6 +79,30 @@ and `kind` adds **music** — so an album is a title with one row per copy (CD, 
 or a ripped FLAC source on the music root). The CSV importer maps "CD", "Audio CD",
 "Vinyl", "LP", "SACD", "Cassette"/"Tape" automatically.
 
+### Bulk import of a ripped music tree
+
+`app/music_import.py` walks `<root>/<Owner's Music>/<Artist>/<Album>` and creates one
+music title per album (named `Artist — Album`, year lifted from a `(1999)` suffix),
+one `cd` copy owned by the person whose folder it sits in, and a `rip` playback
+source pointing at the album folder. Re-running it adds nothing, so it is safe after
+every new rip:
+
+```bash
+python3 /app/music_import.py /data/media.db "/media/QNAP/Music"            # import
+python3 /app/music_import.py /data/media.db "/media/QNAP/Music" --dry-run  # count only
+```
+
+Run it inside the running add-on with `docker exec app_local_media_collection …`.
+Owner folders map to users by display name; a missing person is created.
+
+## Browsing
+
+The catalogue page opens with a count of **titles and copies** plus a per-format
+breakdown (CD, 3D Blu-ray, Blu-ray, 4K Blu-ray, Digital, …), so the headline is no
+longer a bare copy count. A **media type** selector next to the search box filters
+the whole page — and the counts — to Films, TV, Music or Other. The **Library admin**
+link sits at the foot of the page.
+
 ## If an upgrade fails
 
 Each migration runs in one transaction, so a failure leaves nothing half-applied.

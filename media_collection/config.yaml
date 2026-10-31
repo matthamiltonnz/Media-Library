@@ -1,5 +1,5 @@
 name: Media Collection
-version: "0.8.6"
+version: "0.9.3"
 slug: media_collection
 description: >-
   Shared family media catalogue. Every disc has one owner, and every shared copy
@@ -25,8 +25,10 @@ watchdog: http://[HOST]:[PORT:8099]/health
 options:
   default_visibility: shared
   log_level: info
-  ripped_movies_path: "/media/My Media/QNAP/Movies"
+  ripped_movies_path: "/media/QNAP/Movies"
+  music_path: "/media/QNAP/Music"
 schema:
   default_visibility: list(shared|private)
   log_level: list(debug|info|warning|error)
   ripped_movies_path: str
+  music_path: str

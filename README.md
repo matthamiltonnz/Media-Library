@@ -30,8 +30,13 @@ Full documentation: [media_collection/DOCS.md](media_collection/DOCS.md).
 - **Metadata** — keyless (Wikidata + Wikipedia): plot, poster, year, IMDb id, with a
   background refresh for the whole library and IMDb-id-first matching so a corrected
   match sticks.
+- **Browsing** — the page opens with titles/copies counts broken down by format, a
+  one-click **media type** filter (Films / TV / Music / Other), list and poster views,
+  and the admin page tucked away at the foot of the catalogue.
 - **Playback sources** — record that a copy is a ripped file on the NAS (root + path),
-  or a Jellyfin/Kodi/iTunes item, ready for routing later.
+  or a Jellyfin/Kodi/iTunes item, ready for routing later. A ripped music tree
+  (`Owner's Music/Artist/Album`) is scanned on every start, turning each album folder
+  into a CD copy with a rip source.
 - **Housekeeping** — automatic schema migrations, duplicate-title folding, and a
   repair pass that survives interrupted upgrades.
 

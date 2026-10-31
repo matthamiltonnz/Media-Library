@@ -105,7 +105,7 @@ def viewer_for(handler, con):
 
 # ------------------------------------------------------------------ views ----
 
-def library_rows(con, viewer_id, query=""):
+def library_rows(con, viewer_id, query="", kind=""):
     sql = """
         SELECT i.id, t.id AS title_id, t.name AS title, t.release_year, i.format,
                i.edition, i.upc_ean, i.region, i.visibility, i.location,
@@ -119,8 +119,34 @@ def library_rows(con, viewer_id, query=""):
     if query:
         sql += " AND (t.name LIKE ? OR COALESCE(i.upc_ean, '') = ?)"
         params += ["%" + query + "%", query]
+    if kind:
+        sql += " AND t.kind = ?"
+        params.append(kind)
     sql += " ORDER BY t.name COLLATE NOCASE, i.format"
     return con.execute(sql, params).fetchall()
+
+
+def visible_clause(query="", kind=""):
+    where = ["(i.visibility = 'shared' OR i.owner_id = ?)"]
+    params = []                              # viewer id is supplied by the caller
+    if query:
+        where.append("(t.name LIKE ? OR COALESCE(i.upc_ean, '') = ?)")
+        params += ["%" + query + "%", query]
+    if kind:
+        where.append("t.kind = ?")
+        params.append(kind)
+    return " AND ".join(where), params
+
+
+def library_stats(con, viewer_id, query="", kind=""):
+    clause, extra = visible_clause(query, kind)
+    params = [viewer_id] + extra
+    base = ("FROM items i JOIN titles t ON t.id = i.title_id WHERE " + clause)
+    titles = con.execute("SELECT COUNT(DISTINCT t.id) " + base, params).fetchone()[0]
+    copies = con.execute("SELECT COUNT(*) " + base, params).fetchone()[0]
+    formats = con.execute("SELECT i.format AS fmt, COUNT(*) AS n " + base +
+                          " GROUP BY i.format ORDER BY n DESC", params).fetchall()
+    return titles, copies, formats
 
 def owner_totals(con):
     return con.execute(
@@ -186,13 +212,15 @@ PAGE = Template("""<!doctype html>
    plus your own private copies.</p>
 <form class="search" method="get" action="$base">
   <input name="q" value="$q" placeholder="Search title or barcode">
+  <select name="kind" onchange="this.form.submit()">$kind_options</select>
   <input type="hidden" name="view" value="$view">
   <button type="submit">Search</button>
 </form>
-<p class="sub"><a href="${base}admin">Library admin</a>$viewtoggle$clear</p>
+<p class="sub">$viewtoggle$clear</p>
 $notice
 $error
-<h2>$count copies$scope</h2>
+<h2>$heading$scope</h2>
+<p class="sub">$totals</p>
 $library
 
 <h2>Add a copy</h2>
@@ -215,6 +243,8 @@ $library
 
 <h2>Owners</h2>
 <table><tbody>$owners</tbody></table>
+
+<p class="sub" style="margin-top:2rem"><a href="${base}admin">Library admin</a></p>
 </body>
 </html>
 """)
@@ -232,8 +262,13 @@ ROW = Template("""<tr>
 
 
 def render_index(con, viewer, base, error=None, query="", pending=0, merged=0,
-                 view="list"):
-    rows = library_rows(con, viewer["id"], query)
+                 view="list", kind=""):
+    rows = library_rows(con, viewer["id"], query, kind)
+    titles, copies, formats = library_stats(con, viewer["id"], query, kind)
+    heading = "%d title%s · %d cop%s" % (titles, "" if titles == 1 else "s", copies,
+                                        "y" if copies == 1 else "ies")
+    totals = " · ".join("%s %d" % (FORMAT_LABELS.get(row["fmt"], row["fmt"]), row["n"])
+                        for row in formats) or "nothing yet"
     if merged:
         notice = ('<p class="banner good">Merged %d item(s) from the bundled catalogue — '
                   "reload to see everything.</p>" % merged)
@@ -244,14 +279,14 @@ def render_index(con, viewer, base, error=None, query="", pending=0, merged=0,
     else:
         notice = ""
     if view == "grid":
+        clause, extra = visible_clause(query, kind)
         cards = con.execute(
             "SELECT t.id, t.name, t.release_year, t.poster_url,"
             " COUNT(i.id) AS copies, group_concat(DISTINCT i.format) AS formats"
             " FROM titles t JOIN items i ON i.title_id = t.id"
-            " WHERE (i.visibility = 'shared' OR i.owner_id = ?)%s"
-            " GROUP BY t.id ORDER BY t.name COLLATE NOCASE"
-            % (" AND (t.name LIKE ? OR COALESCE(i.upc_ean, '') = ?)" if query else ""),
-            ([viewer["id"]] + (["%" + query + "%", query] if query else []))).fetchall()
+            " WHERE " + clause +
+            " GROUP BY t.id ORDER BY t.name COLLATE NOCASE",
+            [viewer["id"]] + extra).fetchall()
         library = '<div class="cards">%s</div>' % ("".join(
             '<a class="card" href="{0}title/{1}"><div class="thumb">{2}</div>'
             '<div class="cap"><strong>{3}</strong><span class="muted">{4}</span></div></a>'.format(
@@ -301,6 +336,14 @@ def render_index(con, viewer, base, error=None, query="", pending=0, merged=0,
         error='<p class="banner">%s</p>' % html.escape(error) if error else "",
         notice=notice,
         count=len(rows),
+        heading=heading,
+        totals=totals,
+        kind=kind,
+        kind_options="".join(
+            '<option value="%s"%s>%s</option>'
+            % (value, " selected" if value == kind else "", label)
+            for value, label in (("", "All media"), ("movie", "Films"), ("tv", "TV"),
+                                 ("music", "Music"), ("other", "Other"))),
         scope=' matching “%s”' % html.escape(query) if query else "",
         q=html.escape(query),
         clear=' · <a href="%s">clear search</a>' % html.escape(base) if query else "",
@@ -570,6 +613,7 @@ class Handler(BaseHTTPRequestHandler):
 
             query = (parse_qs(urlparse(self.path).query).get("q") or [""])[0].strip()
             view = (parse_qs(urlparse(self.path).query).get("view") or ["grid"])[0]
+            kind = (parse_qs(urlparse(self.path).query).get("kind") or [""])[0]
             merged = (parse_qs(urlparse(self.path).query).get("merged") or ["0"])[0]
             # detail page, always last so /title/<id>/metadata is handled in POST
             detail = re.search(r"/title/(\d+)/?$", route)
@@ -579,7 +623,8 @@ class Handler(BaseHTTPRequestHandler):
                 con, viewer, base, query=query,
                 pending=merger.pending_count(con),
                 merged=int(merged) if merged.isdigit() else 0,
-                view="grid" if view == "grid" else "list"))
+                view="grid" if view == "grid" else "list",
+                kind=kind if kind in ("movie", "tv", "music", "other") else ""))
         finally:
             con.close()
 
