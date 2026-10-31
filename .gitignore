@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+*.db
+*.db-wal
+*.db-shm
+.DS_Store
+
+# personal data: never publish a household collection
+media_collection/seed/*.db
+media_collection/seed/*.csv
+upc-ean-additions.txt
+upc-ean-missing-research.md

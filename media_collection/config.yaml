@@ -1,0 +1,32 @@
+name: Media Collection
+version: "0.8.6"
+slug: media_collection
+description: >-
+  Shared family media catalogue. Every disc has one owner, and every shared copy
+  is visible to the whole household through the Home Assistant sidebar.
+url: https://github.com/matthamiltonnz/Media-Library
+arch:
+  - aarch64
+  - amd64
+  - armv7
+  - armhf
+  - i386
+init: false
+startup: application
+boot: auto
+ingress: true
+ingress_port: 8099
+map:
+  - media:ro
+panel_icon: mdi:movie-open
+panel_title: Media Collection
+panel_admin: false
+watchdog: http://[HOST]:[PORT:8099]/health
+options:
+  default_visibility: shared
+  log_level: info
+  ripped_movies_path: "/media/My Media/QNAP/Movies"
+schema:
+  default_visibility: list(shared|private)
+  log_level: list(debug|info|warning|error)
+  ripped_movies_path: str

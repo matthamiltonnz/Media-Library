@@ -1,0 +1,11 @@
+build_from:
+  aarch64: ghcr.io/home-assistant/aarch64-base:3.21
+  amd64: ghcr.io/home-assistant/amd64-base:3.21
+  armv7: ghcr.io/home-assistant/armv7-base:3.21
+  armhf: ghcr.io/home-assistant/armhf-base:3.21
+  i386: ghcr.io/home-assistant/i386-base:3.21
+labels:
+  org.opencontainers.image.title: Media Collection
+  org.opencontainers.image.description: Shared family media catalogue add-on
+  org.opencontainers.image.source: https://github.com/matthamiltonnz/Media-Library
+  org.opencontainers.image.licenses: MIT

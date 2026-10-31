@@ -1,0 +1,244 @@
+"""Keyless metadata: Wikidata for the film item (year, IMDb id, Wikipedia page)
+and the Wikipedia REST summary for the plot, poster and one-line description.
+
+Everything is best-effort - a failed lookup returns nothing and the caller keeps
+whatever is already stored.
+"""
+import json
+import re
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+
+UA = "media-collection-addon/0.4 (Home Assistant local add-on)"
+FORMAT_SUFFIX = re.compile(r"\s+(3D|4K|Ultra HD)$", re.I)
+YEAR = re.compile(r"\b(18|19|20)\d{2}\b")
+
+
+class Throttle(Exception):
+    """Wikimedia asked us to slow down (HTTP 429)."""
+
+
+def clean_title(name):
+    return FORMAT_SUFFIX.sub("", name or "").strip()
+
+
+def _key(text):
+    return re.sub(r"[^a-z0-9]+", "", (text or "").lower())
+
+
+def _get(url, timeout=25):
+    request = urllib.request.Request(
+        url, headers={"User-Agent": UA, "Accept": "application/json"})
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return json.loads(response.read().decode("utf-8", "replace"))
+    except urllib.error.HTTPError as exc:
+        if exc.code == 429:
+            raise Throttle(url.split("?")[0])
+        raise
+    except urllib.error.URLError as exc:
+        raise Throttle(str(exc.reason))         # offline / DNS hiccup: back off too
+
+
+def wikipedia_search(name, limit=5):
+    """Page title on en.wikipedia for "<name> film" (no Wikidata involved)."""
+    params = urllib.parse.urlencode({"q": "%s film" % name, "limit": str(limit)})
+    data = _get("https://en.wikipedia.org/w/rest.php/v1/search/page?" + params)
+    wanted = _key(name)
+    for page in data.get("pages", []):
+        title = page.get("title") or ""
+        base = title.split("(")[0].strip()
+        if _key(base) == wanted:
+            return title
+    return None
+
+
+def qid_by_imdb(imdb_id):
+    """Wikidata item whose P345 (IMDb id) matches - the reliable way to resolve."""
+    if not imdb_id:
+        return None
+    params = urllib.parse.urlencode({
+        "action": "query", "format": "json", "list": "search", "srlimit": "1",
+        "srsearch": 'haswbstatement:P345=%s' % imdb_id,
+    })
+    try:
+        payload = _get("https://www.wikidata.org/w/api.php?" + params)
+    except Exception:
+        return None
+    hits = payload.get("query", {}).get("search", [])
+    return hits[0]["title"] if hits else None
+
+
+def search_wikidata(names, limit=10, workers=6, pause=0.0):
+    """{title: qid} - best film-ish item for each name, fetched concurrently."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    def one(name):
+        params = urllib.parse.urlencode({
+            "action": "wbsearchentities", "format": "json", "language": "en",
+            "uselang": "en", "type": "item", "limit": str(limit), "search": name,
+        })
+        try:
+            payload = _get("https://www.wikidata.org/w/api.php?" + params, timeout=20)
+        except Exception:
+            time.sleep(1.0)
+            return name, None
+        finally:
+            time.sleep(pause)
+        best = None
+        for hit in payload.get("search", []):
+            label = (hit.get("label") or "").strip()
+            description = (hit.get("description") or "").lower()
+            if "film" not in description:
+                continue
+            # "film director", "film studio", "film producer" are not the film
+            if any(word in description for word in
+                   ("director", "producer", "screenwriter", "actor", "actress",
+                    "studio", "company", "filmmaker", "critic", "festival")):
+                continue
+            if _key(label) == _key(name):
+                return name, hit["id"]
+            best = best or hit["id"]
+        return name, best
+
+    chosen = {}
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        for index, (name, qid) in enumerate(pool.map(one, names), start=1):
+            if qid:
+                chosen[name] = qid
+            if index % 100 == 0:
+                print("  searched %d/%d" % (index, len(names)), flush=True)
+    return chosen
+
+
+def fetch_entities(qids):
+    """{qid: (year, imdb_id)} from the P577 / P345 claims."""
+    found = {}
+    qids = [q for q in qids if q]
+    for start in range(0, len(qids), 50):
+        params = urllib.parse.urlencode({
+            "action": "wbgetentities", "format": "json",
+            "props": "claims", "ids": "|".join(qids[start:start + 50]),
+        })
+        try:
+            payload = _get("https://www.wikidata.org/w/api.php?" + params, timeout=60)
+        except Exception:
+            continue
+        for qid, entity in payload.get("entities", {}).items():
+            claims = entity.get("claims", {})
+            dates = [c["mainsnak"]["datavalue"]["value"]["time"]
+                     for c in claims.get("P577", [])
+                     if c.get("mainsnak", {}).get("datavalue")]
+            imdbs = [c["mainsnak"]["datavalue"]["value"]
+                     for c in claims.get("P345", [])
+                     if c.get("mainsnak", {}).get("datavalue")]
+            year = None
+            if dates:
+                try:
+                    year = int(min(dates).lstrip("+")[:4])
+                except ValueError:
+                    year = None
+            imdb = imdbs[0] if imdbs else None
+            if imdb and imdb.startswith("nm"):
+                # nm… is a person (director, actor) - never the film itself
+                found[qid] = (None, None)
+                continue
+            found[qid] = (year, imdb)
+    return found
+
+
+def enwiki_title(qid):
+    """English Wikipedia page title for a Wikidata item (for the REST summary)."""
+    if not qid:
+        return None
+    params = urllib.parse.urlencode({
+        "action": "wbgetentities", "format": "json", "props": "sitelinks",
+        "sitefilter": "enwiki", "ids": qid,
+    })
+    try:
+        payload = _get("https://www.wikidata.org/w/api.php?" + params)
+    except Exception:
+        return None
+    entity = payload.get("entities", {}).get(qid, {})
+    return (entity.get("sitelinks", {}).get("enwiki", {}) or {}).get("title")
+
+
+def wikipedia_summary(page_title):
+    """{overview, poster_url, description, year} from the Wikipedia REST summary."""
+    url = ("https://en.wikipedia.org/api/rest_v1/page/summary/"
+           + urllib.parse.quote(page_title.replace(" ", "_"), safe=""))
+    data = _get(url, timeout=25)
+    description = data.get("description") or ""
+    match = YEAR.search(description) or YEAR.search(data.get("extract") or "")
+    return {
+        "overview": (data.get("extract") or "").strip() or None,
+        "poster_url": (data.get("originalimage") or data.get("thumbnail") or {}).get("source"),
+        "description": description or None,
+        "year": int(match.group(0)) if match else None,
+    }
+
+
+def refresh(con, title_id):
+    """Pull metadata for one title and store it - never raises.
+
+    Two request budget: Wikipedia first (page search + summary), and Wikidata only
+    when an IMDb id has to be honoured or the Wikipedia page is missing.
+    """
+    row = con.execute("SELECT * FROM titles WHERE id = ?", (title_id,)).fetchone()
+    if row is None:
+        return "title not found"
+
+    cleaned = clean_title(row["name"])
+    updates = {}
+    source = []
+
+    try:
+        if row["imdb_id"]:
+            qid = qid_by_imdb(row["imdb_id"])
+            if qid:
+                year, imdb = fetch_entities([qid]).get(qid, (None, None))
+                if year:
+                    updates["release_year"] = year          # the id is authoritative
+                if imdb and imdb != row["imdb_id"]:
+                    updates["imdb_id"] = imdb
+                page = enwiki_title(qid)
+            else:
+                page = None
+            if not page:
+                page = wikipedia_search(cleaned)
+        else:
+            page = wikipedia_search(cleaned)
+            if not page:
+                qid = search_wikidata([cleaned], workers=1).get(cleaned)
+                if qid:
+                    year, imdb = fetch_entities([qid]).get(qid, (None, None))
+                    if year and not row["release_year"]:
+                        updates["release_year"] = year
+                    if imdb and not row["imdb_id"]:
+                        updates["imdb_id"] = imdb
+                    page = enwiki_title(qid)
+                    source.append("wikidata")
+
+        if page:
+            summary = wikipedia_summary(page)
+            updates["overview"] = summary["overview"]
+            updates["poster_url"] = summary["poster_url"]
+            if summary["year"] and "release_year" not in updates and not row["release_year"]:
+                updates["release_year"] = summary["year"]
+            source.append("wikipedia")
+    except Throttle:
+        return "rate-limited"
+    except Exception:
+        pass
+
+    if not updates:
+        return "no metadata found for %s" % cleaned
+
+    updates["metadata_source"] = "+".join(source) or "manual"
+    columns = ", ".join("%s = ?" % key for key in updates)
+    con.execute("UPDATE titles SET %s, metadata_updated_at = datetime('now') WHERE id = ?"
+                % columns, list(updates.values()) + [title_id])
+    con.commit()
+    return "metadata refreshed from %s" % updates["metadata_source"]
