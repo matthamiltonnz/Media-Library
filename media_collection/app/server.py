@@ -231,24 +231,41 @@ PAGE = Template("""<!doctype html>
      gets cropped into a poster and a Blu-ray looks like a Blu-ray */
   .thumb { position: relative; }
   .thumb.case-music { aspect-ratio: 1 / 1; }
-  .thumb.case-jewel { aspect-ratio: 1 / 1; padding: 7% 9% 7% 11%;
-                      background: linear-gradient(135deg, #2b3138, #14181d 65%);
-                      border-left: 5px solid #3a424c; }
-  .thumb.case-jewel img { border: 1px solid #ffffff2e;
-                          box-shadow: 0 0 0 2px #0006, 0 4px 10px #0007; }
-  .thumb.case-sleeve { aspect-ratio: 1 / 1; padding: 6%;
+  /* Blu-ray, 3D and 4K cases: coloured plastic with a printed band across the top,
+     the way the real boxes look (blue / blue with 3D / black with 4K Ultra HD) */
+  .thumb.case-blu, .thumb.case-3d, .thumb.case-4k, .thumb.case-dvd {
+      aspect-ratio: 5 / 7; padding: 24% 6% 10%; border-radius: 5px;
+      box-shadow: inset 0 0 0 1px #ffffff2e, 0 6px 14px #0006; }
+  .thumb.case-blu::before, .thumb.case-3d::before,
+  .thumb.case-4k::before, .thumb.case-dvd::before {
+      position: absolute; left: 0; right: 0; top: 0; height: 20%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: .62rem; font-weight: 700; letter-spacing: .04em; color: #fff;
+      border-bottom: 1px solid #ffffff33;
+      background: linear-gradient(180deg, #ffffff26, #ffffff0a); }
+  .thumb.case-blu { background: linear-gradient(180deg, #4fa6e3, #1e6cb8 32%, #0a3d7e); }
+  .thumb.case-blu::before { content: "Blu-ray"; font-style: italic; }
+  .thumb.case-3d { background: linear-gradient(180deg, #4fa6e3, #1e6cb8 32%, #0a3566); }
+  .thumb.case-3d::before { content: "Blu-ray 3D"; font-style: italic; }
+  .thumb.case-4k { background: linear-gradient(180deg, #2a2a2a, #08080a 55%, #000); }
+  .thumb.case-4k::before { content: "4K ULTRA HD"; letter-spacing: .14em; }
+  .thumb.case-dvd { background: linear-gradient(180deg, #23252b, #0c0d10 60%, #050506); }
+  .thumb.case-dvd::before { content: "DVD"; letter-spacing: .2em; }
+  .thumb.case-blu img, .thumb.case-3d img,
+  .thumb.case-4k img, .thumb.case-dvd img {
+      border-radius: 2px; box-shadow: 0 3px 10px #000a; }
+  /* a CD sits in a clear jewel case: hinge on the left, inlay under the plastic */
+  .thumb.case-jewel { aspect-ratio: 1 / 1; padding: 7% 9% 7% 13%; border-radius: 3px;
+      background: linear-gradient(100deg, #d7e0e6 0 11%, #f2f7fa 11% 100%);
+      border-left: 5px solid #c2cdd5;
+      box-shadow: inset 0 0 0 1px #ffffff, 0 6px 14px #0005; }
+  .thumb.case-jewel::before { content: ""; position: absolute; left: 11%; top: 0;
+      bottom: 0; width: 1px; background: #ffffffcc; }
+  .thumb.case-jewel img { border: 1px solid #0000001f; box-shadow: 0 1px 5px #0004; }
+  /* vinyl keeps its printed sleeve */
+  .thumb.case-sleeve { aspect-ratio: 1 / 1; padding: 6%; border-radius: 3px;
                        background: linear-gradient(160deg, #242424, #0e0e0e); }
   .thumb.case-sleeve img { box-shadow: 0 6px 16px #000a; }
-  .thumb.case-blu, .thumb.case-3d, .thumb.case-4k {
-      aspect-ratio: 5 / 7; padding: 6% 5% 11%; border-radius: 4px 4px 3px 3px; }
-  .thumb.case-blu { background: linear-gradient(180deg, #1f5aa8, #0c2a58); }
-  .thumb.case-3d { background: linear-gradient(180deg, #e3b400, #8a6a00); }
-  .thumb.case-4k { background: linear-gradient(180deg, #171717, #000000); }
-  .thumb.case-blu img, .thumb.case-3d img, .thumb.case-4k img {
-      border-radius: 2px; box-shadow: 0 2px 8px #0008; }
-  .thumb.case-dvd { aspect-ratio: 5 / 7; padding: 6% 5% 11%;
-                    background: linear-gradient(180deg, #4a4a4a, #1a1a1a); }
-  .thumb.case-dvd img { border-radius: 2px; box-shadow: 0 2px 8px #0008; }
   .thumb.case-digital { background: #8881; }
   .card .cap { padding: .4rem .5rem; font-size: .82rem; display: grid; gap: .15rem; }
   .card .cap .muted { font-size: .74rem; }
