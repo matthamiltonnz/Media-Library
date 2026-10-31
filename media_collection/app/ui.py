@@ -43,6 +43,22 @@ SHELL = """<!doctype html>
   details.copy summary { cursor: pointer; font-size: .9rem; }
   details.copy[open] summary { margin-bottom: .6rem; }
   form.inline { display: inline; }
+  .badges { display: flex; flex-wrap: wrap; gap: .4rem; margin: .2rem 0 .8rem; }
+  .badge { border: 1px solid #8885; border-radius: 999px; padding: .15rem .6rem;
+           font-size: .78rem; background: #8881; white-space: nowrap; }
+  .tabs { display: flex; gap: .3rem; border-bottom: 1px solid #8884;
+          margin: 1.2rem 0 .9rem; }
+  .tabs a { padding: .4rem .8rem; border-radius: 6px 6px 0 0; font-size: .9rem;
+            text-decoration: none; }
+  .tabs a.on { background: #8882; font-weight: 600; }
+  button.primary { font-size: 1rem; padding: .5rem 1.6rem; }
+  button.danger { border-color: #b4453c; color: #e8837a; }
+  dialog.sheet { border: 1px solid #8886; border-radius: 10px; padding: 1.2rem 1.4rem;
+                 max-width: 34rem; width: 92%; background: Canvas; color: CanvasText; }
+  dialog.sheet::backdrop { background: #0008; }
+  dialog.sheet h2 { margin-top: 0; }
+  dialog.sheet p.copy-play { display: flex; align-items: center; gap: .6rem;
+                             flex-wrap: wrap; margin: .5rem 0; }
 </style>
 </head>
 <body>

@@ -58,7 +58,7 @@ FORMAT_ALIASES = {
 }
 
 PROVIDERS = {"itunes": "itunes", "apple": "itunes", "apple tv": "appletv",
-             "appletv": "appletv", "jellyfin": "jellyfin", "kodi": "kodi"}
+             "appletv": "appletv", "jellyfin": "jellyfin"}
 
 
 def clean(value):

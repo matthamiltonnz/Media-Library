@@ -35,6 +35,9 @@ OPTIONS_PATH = "/data/options.json"
 
 FORMATS = ["bluray_3d", "bluray", "uhd_4k", "dvd", "digital", "cd", "vinyl", "sacd",
            "cassette", "vhs", "other"]
+# A digital copy either came from one of these stores or is a ripped file.
+PURCHASE_STORES = ("itunes", "appletv", "other")
+
 FORMAT_LABELS = {
     "bluray_3d": "3D Blu-ray",
     "bluray": "Blu-ray",
@@ -557,12 +560,23 @@ def add_item(con, viewer, form):
             (title, year, viewer["id"], imdb, kind)).lastrowid
 
     try:
-        con.execute(
-            "INSERT INTO items (title_id, owner_id, format, edition, upc_ean,"
-            " location, visibility, added_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (title_id, viewer["id"], fmt, field(form, "edition") or None, upc,
-             field(form, "location") or None, visibility, viewer["id"]),
-        )
+            owner_id = (re.sub(r"\D", "", field(form, "owner_id"))
+                        or viewer["id"])
+            cursor = con.execute(
+                "INSERT INTO items (title_id, owner_id, format, edition,"
+                " upc_ean, location, visibility, added_by, price_paid,"
+                " acquired_on, notes)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (title_id, int(owner_id), fmt, field(form, "edition") or None,
+                 upc, field(form, "location") or None, visibility,
+                 viewer["id"], field(form, "price_paid") or None,
+                 field(form, "acquired_on") or None,
+                 field(form, "notes") or None),
+            )
+            store = field(form, "store")
+            if fmt == "digital" and store in PURCHASE_STORES:
+                con.execute("INSERT INTO digital_sources (item_id, provider)"
+                            " VALUES (?, ?)", (cursor.lastrowid, store))
     except sqlite3.IntegrityError as exc:
         con.rollback()
         if "upc_ean" in str(exc):
@@ -794,12 +808,17 @@ class Handler(BaseHTTPRequestHandler):
         if row is None:
             return self.respond(404, "No such title", "text/plain; charset=utf-8")
         items = con.execute(
-            "SELECT * FROM items WHERE title_id = ? AND (visibility = 'shared' OR owner_id = ?)"
-            " ORDER BY format, id", (title_id, viewer["id"])).fetchall()
+            "SELECT i.*, u.display_name AS owner_name FROM items i"
+            " JOIN users u ON u.id = i.owner_id WHERE i.title_id = ?"
+            " AND (i.visibility = 'shared' OR i.owner_id = ?)"
+            " ORDER BY i.format, i.id",
+            (title_id, viewer["id"])).fetchall()
         digital = con.execute(
-            "SELECT d.*, i.format AS copy_format, r.label AS root_label,"
-            " r.path AS root_path"
+            "SELECT d.*, i.format AS copy_format,"
+            " u.display_name AS owner_name,"
+            " r.label AS root_label, r.path AS root_path"
             " FROM digital_sources d JOIN items i ON i.id = d.item_id"
+            " JOIN users u ON u.id = i.owner_id"
             " LEFT JOIN media_roots r ON r.id = d.root_id"
             " WHERE i.title_id = ? ORDER BY d.provider", (title_id,)).fetchall()
         roots = con.execute("SELECT id, label, path, medium FROM media_roots"
@@ -810,18 +829,17 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as exc:                     # never break the page for this
             print("jellyfin: %s" % exc)
             jellyfin_link, jellyfin_sessions = None, []
-        try:
-            path_suggestion = scan.suggest(con, title_id)
-        except Exception as exc:                     # a missing share must not 500 the page
-            print("scan: %s" % exc)
-            path_suggestion = ""
+        tab = (parse_qs(urlparse(self.path).query).get("tab")
+               or ["about"])[0]
         return self.respond(200, ui_title.render(
             base, row, items, digital, FORMATS, FORMAT_LABELS, summary=summary,
             error=error, ripped_root=RIPPED_ROOT, roots=roots, owner=owner,
             players=playback.players_for(con), last_player=playback.last_player(con),
             jellyfin_link=jellyfin_link, jellyfin_sessions=jellyfin_sessions,
-            path_suggestion=path_suggestion,
-            jellyfin_configured=bool(jellyfin.config(con)[1])))
+            jellyfin_configured=bool(jellyfin.config(con)[1]),
+            users=con.execute("SELECT id, display_name FROM users"
+                              " ORDER BY display_name").fetchall(),
+            viewer_id=viewer["id"], tab=tab))
 
     def do_POST(self):
         form = parse_body(self)
@@ -1066,18 +1084,34 @@ class Handler(BaseHTTPRequestHandler):
                                            error="Barcode must be 12 or 13 digits.")
                 try:
                     con.execute(
-                        "UPDATE items SET format = ?, edition = ?, upc_ean = ?, region = ?,"
-                        " location = ?, condition = ?, visibility = ?, last_watched_on = ?,"
-                        " updated_at = datetime('now') WHERE id = ?",
+                        "UPDATE items SET format = ?, edition = ?, upc_ean = ?,"
+                        " region = ?, location = ?, condition = ?, visibility = ?,"
+                        " last_watched_on = ?, price_paid = ?, acquired_on = ?,"
+                        " notes = ?, updated_at = datetime('now') WHERE id = ?",
                         (fmt, field(form, "edition") or None, upc,
-                         field(form, "region") or None, field(form, "location") or None,
+                         field(form, "region") or None,
+                         field(form, "location") or None,
                          field(form, "condition") or None,
-                         "private" if field(form, "visibility") == "private" else "shared",
-                         field(form, "last_watched_on") or None, item_id))
+                         "private" if field(form, "visibility") == "private"
+                         else "shared",
+                         field(form, "last_watched_on") or None,
+                         field(form, "price_paid") or None,
+                         field(form, "acquired_on") or None,
+                         field(form, "notes") or None, item_id))
                 except sqlite3.IntegrityError:
                     con.rollback()
                     return self.title_page(con, viewer, base, item["title_id"],
                                            error="That barcode is already on another copy.")
+                store = field(form, "store")
+                if store in PURCHASE_STORES or not store:
+                    # a purchase has one store; rips and Jellyfin keep theirs
+                    con.execute("DELETE FROM digital_sources WHERE item_id = ?"
+                                " AND provider NOT IN ('rip', 'jellyfin')",
+                                (item_id,))
+                    if store in PURCHASE_STORES:
+                        con.execute("INSERT INTO digital_sources (item_id,"
+                                    " provider) VALUES (?, ?)",
+                                    (item_id, store))
                 con.commit()
                 return self.title_page(con, viewer, base, item["title_id"],
                                        summary="Copy updated.")
@@ -1164,7 +1198,10 @@ class Handler(BaseHTTPRequestHandler):
                     metadata.refresh(con, title_id)
                     return self.respond(303, "", extra={
                         "Location": base + "title/%d" % title_id})
-                return self.respond(303, "", extra={"Location": base})
+                where = base
+                if title_id and field(form, "from") == "title":
+                    where = base + "title/%d?tab=copies" % title_id
+                return self.respond(303, "", extra={"Location": where})
 
             return self.respond(404, "Not found", "text/plain; charset=utf-8")
         finally:

@@ -60,14 +60,26 @@ the table. The choice is carried through searches.
 title is created with its plot/poster/year straight away, landing you on its
 detail page.
 
+## Copies
+
+The **Copies** tab holds the detail and the editing: every copy of the title with
+its format, store, owner, edition, region, shelf, condition, barcode, price paid,
+purchase date, last watched date and visibility. Open a copy to change it, delete
+it, or add another one (owner included) without leaving the page. A digital copy
+records the store it was bought from - iTunes, Apple TV or other - next to what it
+cost and when; Kodi is no longer offered because it sits outside Home Assistant.
+
 ## Play
 
-A title with a ripped file also gets a **Play** block: pick the source, pick a
-media player, press **Play**. Only players that accept a file (they advertise
-`play_media`) and are reachable are listed, those already playing come first, and
-**Admin → Players** narrows the list to the handful you actually use instead of
-every phone, TV and Music Assistant copy Home Assistant knows about. The add-on
-asks Home Assistant to play
+A title page opens on **About**: one badge per copy (format, store and owner, so
+"Blu-ray · Matt" and "Digital · iTunes · Mitchell" read at a glance), then a single
+**Play** button. That button opens a small window listing every way to play the
+title: pick a player once, then press the copy to start (a ripped file on the NAS,
+or **Play in Jellyfin** when the title is linked). Only players that accept a file
+(`play_media`) and are reachable are listed, and **Admin → Players** narrows that
+list to the handful you actually use.
+
+Playback asks Home Assistant to play
 `media-source://media_source/local/<path under /media>` through
 `media_player.play_media`, so HA resolves the file itself and hands the player
 whatever it understands (cast, DLNA, Kodi…). HA only resolves files, not folders,
