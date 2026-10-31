@@ -29,20 +29,34 @@ AUDIO_EXT = (".mp3", ".flac", ".m4a", ".wav", ".ogg", ".ape", ".wma", ".aac",
              ".aiff", ".aif", ".dsf", ".dff", ".alac", ".opus", ".mpc", ".wv")
 
 
-def has_audio(folder, depth=2):
-    """True when the album folder - or a disc subfolder - holds at least one track.
+DISC_EXT = (".mka", ".mkv", ".cue")
 
-    Artwork-only leftovers (Folder.jpg, desktop.ini, .db) are not CDs, so they never
-    become a copy, and neither do concert video folders.
+
+def album_format(folder, depth=2):
+    """"cd" for a folder of tracks, "bluray" for a disc rip, None for artwork only.
+
+    Artwork-only leftovers (Folder.jpg, desktop.ini, .db) never become a copy, but a
+    concert disc (mka/mkv/cue without separate tracks - e.g. an Atmos Blu-ray) is
+    kept as a Blu-ray copy.
     """
     base = len(folder)
+    audio = disc = False
     for root, dirs, files in os.walk(folder):
         dirs[:] = [name for name in dirs if not is_junk(name)]
-        if any(name.lower().endswith(AUDIO_EXT) for name in files):
-            return True
+        for name in files:
+            lower = name.lower()
+            if lower.endswith(AUDIO_EXT):
+                audio = True
+                break
+            if lower.endswith(DISC_EXT):
+                disc = True
+        if audio:
+            break
         if root[base:].count(os.sep) >= depth:
             dirs[:] = []
-    return False
+    if audio:
+        return "cd"
+    return "bluray" if disc else None
 
 
 def parse_owner(folder):
@@ -135,7 +149,8 @@ def main():
                 album_path = os.path.join(artist_path, album)
                 if not os.path.isdir(album_path):
                     continue
-                if not has_audio(album_path):
+                fmt = album_format(album_path)
+                if not fmt:
                     continue
 
                 rel_path = "/".join([owner_dir, artist, album])
@@ -160,9 +175,9 @@ def main():
                     (title_name, year)).lastrowid
 
                 item_id = con.execute(
-                    "INSERT INTO items (title_id, owner_id, format, location, visibility)"
-                    " VALUES (?, ?, 'cd', ?, 'shared')",
-                    (title_id, owner_id, owner_dir)).lastrowid
+                    "INSERT INTO items (title_id, owner_id, format, location,"
+                    " visibility) VALUES (?, ?, ?, ?, 'shared')",
+                    (title_id, owner_id, fmt, owner_dir)).lastrowid
                 con.execute(
                     "INSERT INTO digital_sources (item_id, provider, path, root_id)"
                     " VALUES (?, 'rip', ?, ?)", (item_id, rel_path, root_id))
