@@ -790,7 +790,8 @@ class Handler(BaseHTTPRequestHandler):
             error=error, ripped_root=RIPPED_ROOT, roots=roots, owner=owner,
             players=playback.players(), last_player=playback.last_player(con),
             jellyfin_link=jellyfin_link, jellyfin_sessions=jellyfin_sessions,
-            path_suggestion=path_suggestion))
+            path_suggestion=path_suggestion,
+            jellyfin_configured=bool(jellyfin.config(con)[1])))
 
     def do_POST(self):
         form = parse_body(self)

@@ -91,7 +91,8 @@ def _item_row(base, item, formats, labels):
 
 def render(base, row, items, digital, formats, labels, summary=None, error=None,
            ripped_root="", roots=(), owner=None, players=(), last_player="",
-           jellyfin_link=None, jellyfin_sessions=(), path_suggestion=""):
+           jellyfin_link=None, jellyfin_sessions=(), path_suggestion="",
+           jellyfin_configured=False):
     parts = []
     if summary:
         parts.append('<p class="banner good">%s</p>' % _text(summary))
@@ -105,10 +106,14 @@ def render(base, row, items, digital, formats, labels, summary=None, error=None,
     if row["overview"]:
         parts.append("<p>%s</p>" % _text(row["overview"]))
 
+    parts.append(_jellyfin_play(base, row, jellyfin_link, jellyfin_sessions,
+                                jellyfin_configured))
+
     parts.append(
         '<form method="post" action="%stitle/%d/metadata">'
         "<button type=\"submit\">Refresh metadata</button></form>"
         % (base, row["id"]))
+
 
     parts.append("<h2>Edit title</h2>")
     kind_options = "".join(
@@ -171,27 +176,6 @@ def render(base, row, items, digital, formats, labels, summary=None, error=None,
      source, so whatever that player supports just plays.</span></p>
 </form>""")
 
-    if jellyfin_link:
-        parts.append("<h2>Play in Jellyfin</h2>")
-        if jellyfin_sessions:
-            session_options = "".join(
-                '<option value="%s">%s</option>'
-                % (_text(session["id"]),
-                   _text(session["name"] + (" · %s" % session["client"]
-                                            if session["client"] else "")))
-                for session in jellyfin_sessions)
-            parts.append(f"""
-<form method="post" action="{base}title/{row['id']}/jellyfin">
-  <div class="grid">
-    <label>Device<select name="session_id">{session_options}</select></label>
-  </div>
-  <p><button type="submit">Play</button>
-     <span class="muted">{_text(jellyfin_link['jf_name'] or 'Linked item')}
-     ({_text(jellyfin_link['jf_kind'])}) straight from the Jellyfin server.</span></p>
-</form>""")
-        else:
-            parts.append('<p class="muted">This copy is linked to Jellyfin, but no device with '
-                         'remote control is connected right now.</p>')
 
     parts.append('<p class="sub">Where this title can be played from — a ripped file on '
                  'the NAS, a Jellyfin/Kodi item, an iTunes purchase. Ripped files are '
@@ -261,3 +245,32 @@ def render(base, row, items, digital, formats, labels, summary=None, error=None,
     kind = row["kind"] if "kind" in row.keys() else "movie"
     back = "?kind=%s" % kind + ("&owner=%d" % owner if owner else "")
     return ui.page(base, row["name"], "".join(parts), back=back)
+
+
+def _jellyfin_play(base, row, link, sessions, configured):
+    """The first thing on the page: play this title on a Jellyfin client.
+
+    Nothing at all unless Jellyfin is set up and this title is linked, so a
+    household without Jellyfin never sees a dead button.
+    """
+    if not (configured and link):
+        return ""
+    if not sessions:
+        return ('<p class="muted">This copy is linked to Jellyfin, but no device with '
+                'remote control is connected right now.</p>')
+    session_options = "".join(
+        '<option value="%s">%s</option>'
+        % (_text(session["id"]),
+           _text(session["name"] + (" · %s" % session["client"]
+                                    if session["client"] else "")))
+        for session in sessions)
+    return f"""
+<h2>Play in Jellyfin</h2>
+<form method="post" action="{base}title/{row['id']}/jellyfin">
+  <div class="grid">
+    <label>Device<select name="session_id">{session_options}</select></label>
+  </div>
+  <p><button type="submit">Play</button>
+     <span class="muted">{_text(link['jf_name'] or 'Linked item')}
+     ({_text(link['jf_kind'])}) straight from the Jellyfin server.</span></p>
+</form>"""
