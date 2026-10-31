@@ -284,6 +284,12 @@ def musicbrainz_lookup(artist, album, year=None):
     credit = "".join((part.get("name") or "") + (part.get("joinphrase") or "")
                      for part in group.get("artist-credit") or [])
     types = [group.get("primary-type")] + list(group.get("secondary-types") or [])
+    art = None
+    if group.get("id"):
+        # the Cover Art Archive shares MusicBrainz's one-request-per-second rule,
+        # so the second request waits as well - back-to-back calls get 503s
+        time.sleep(MB_PAUSE)
+        art = cover_art(group.get("id"))
     return {
         "mbid": group.get("id"),
         "title": group.get("title") or album,
@@ -291,7 +297,7 @@ def musicbrainz_lookup(artist, album, year=None):
         "date": date,
         "year": int(date[:4]) if date[:4].isdigit() else None,
         "types": " · ".join(part for part in types if part),
-        "cover": cover_art(group.get("id")) if group.get("id") else None,
+        "cover": art,
     }
 
 
