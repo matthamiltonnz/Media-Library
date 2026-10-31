@@ -169,17 +169,25 @@ def render(base, row, items, digital, formats, labels, summary=None, error=None,
             for provider, label in (("rip", "Ripped file (NAS)"), ("jellyfin", "Jellyfin"),
                                     ("kodi", "Kodi"), ("itunes", "iTunes"),
                                     ("appletv", "Apple TV"), ("other", "Other")))
+        kind = row["kind"] if "kind" in row.keys() else "movie"
+        wanted_medium = "music" if kind == "music" else "video"
+        ordered = sorted(roots, key=lambda root: (root["medium"] != wanted_medium,
+                                                  root["medium"], root["label"]))
         root_options = "".join(
-            '<option value="%d">%s — %s</option>'
-            % (root["id"], _text(root["label"]), _text(root["path"]))
-            for root in roots)
+            '<option value="%d"%s>%s — %s</option>'
+            % (root["id"], " selected" if index == 0 else "",
+               _text(root["label"]), _text(root["path"]))
+            for index, root in enumerate(ordered))
+        path_hint = {"music": "Artist/Album (Year)",
+                     "tv": "Show/Season 1/Show S01E01.mkv"}.get(
+                         kind, "Movie (Year)/Movie.mkv")
         parts.append(f"""
 <form method="post" action="{base}title/{row['id']}/sources">
   <div class="grid">
     <label>Copy<select name="item_id">{copy_options}</select></label>
     <label>Provider<select name="provider">{provider_options}</select></label>
     <label>NAS root<select name="root_id">{root_options}</select></label>
-    <label>Path inside the root<input name="path" placeholder="Movie (Year)/Movie.mkv"></label>
+    <label>Path inside the root<input name="path" placeholder="{path_hint}"></label>
     <label>Library id<input name="library_id" placeholder="Jellyfin library / Kodi source"></label>
     <label>Item id<input name="external_id" placeholder="Jellyfin item / Kodi db id"></label>
     <label>Notes<input name="notes"></label>

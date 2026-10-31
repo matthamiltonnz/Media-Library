@@ -703,7 +703,7 @@ class Handler(BaseHTTPRequestHandler):
             " FROM digital_sources d JOIN items i ON i.id = d.item_id"
             " LEFT JOIN media_roots r ON r.id = d.root_id"
             " WHERE i.title_id = ? ORDER BY d.provider", (title_id,)).fetchall()
-        roots = con.execute("SELECT id, label, path FROM media_roots"
+        roots = con.execute("SELECT id, label, path, medium FROM media_roots"
                             " ORDER BY medium, label").fetchall()
         return self.respond(200, ui_title.render(base, row, items, digital, FORMATS,
                                                  FORMAT_LABELS, summary=summary,
