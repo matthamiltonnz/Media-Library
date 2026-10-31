@@ -144,6 +144,8 @@ skipped. Re-running it adds nothing, so it is safe after every new rip:
 python3 /app/music_import.py /data/media.db "/media/QNAP/Music"            # import
 python3 /app/music_import.py /data/media.db "/media/QNAP/Music" --dry-run  # count only
 python3 /app/tv_import.py /data/media.db "/media/QNAP/TV"                 # TV seasons
+python3 /app/film_import.py /data/media.db "/media/QNAP/Mitchell's Movies" \
+        --owner Mitchell                                                # ripped films
 ```
 
 The media root is the Home Assistant media folder (`/media/QNAP`); everything below it
@@ -157,6 +159,14 @@ path argument it uses the first `media_roots` row with `medium = 'music'`, so th
 entrypoint simply calls `music_import.py "$DB"` on every start and picks up whatever
 has been ripped since the last boot (`music_path` in the options overrides the root
 when the Supervisor passes it through).
+`film_import.py` follows the same rules for a folder of films: one folder is one
+film, `Name (Year) - Edition` is the title, and the file name decides the format
+(`2160p` a 4K disc, `1080p` a Blu-ray, 3D a 3D Blu-ray, SD a DVD, otherwise
+`--format`). Barcode, region and condition stay empty on purpose - those come from
+a Blu-ray.com export. The start-up call covers `/media/QNAP/Mitchell's Movies` for
+Mitchell; `FILMS_PATH` / `FILMS_OWNER` override it, and `--dry-run` prints what it
+would add.
+
 
 ## Browsing
 

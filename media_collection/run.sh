@@ -44,6 +44,16 @@ python3 "$APP/music_import.py" "$DB" ${MUSIC_PATH:+"$MUSIC_PATH"} || echo "music
 
 # Same for TV: <Show (Year)>/<Season NN> becomes one title, one copy per season.
 python3 "$APP/tv_import.py" "$DB" || echo "tv scan skipped"
+# Mitchell's films come from their own folder, one folder per film. The format is
+# read from the file name (2160p -> 4K, 1080p -> Blu-ray); disc details wait for
+# the Blu-ray.com export.
+FILMS=${FILMS_PATH:-}
+[ -n "$FILMS" ] || FILMS="/media/QNAP/Mitchell's Movies"
+if [ -d "$FILMS" ]; then
+    python3 "$APP/film_import.py" "$DB" "$FILMS" --owner "${FILMS_OWNER:-Mitchell}" \
+        || echo "film scan skipped"
+fi
+
 
 echo "starting media collection on :${PORT:-8099} (db=${DB})"
 exec python3 "$APP/server.py"

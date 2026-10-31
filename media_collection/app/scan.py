@@ -136,18 +136,24 @@ def _locate(roots, title, cache):
 
     year = _year(title["release_year"])
     wanted = _keys(name)
+    found = []
     for root, relative in _candidates(roots, cache):
         stem, entry_year = _split_year(relative.rsplit("/", 1)[-1])
         if not (_keys(stem) & wanted):
-            continue
-        if year and entry_year and entry_year != year:
             continue
         if kind == "tv" and "/" in relative:
             continue
         if not _has_media(os.path.join(root["path"], relative), cache):
             continue
-        return relative, root["id"]
-    return None
+        if year and entry_year == year:
+            return relative, root["id"]
+        found.append((entry_year, relative, root["id"]))
+    if year:
+        # no folder says the year - only trust one that says nothing either
+        quiet = [option for option in found if not option[0]]
+        return (quiet[0][1], quiet[0][2]) if len(quiet) == 1 else None
+    # a title with no year is only safe when one folder carries that name
+    return (found[0][1], found[0][2]) if len(found) == 1 else None
 
 
 def _album_match(entry, album_key, artist_key):
