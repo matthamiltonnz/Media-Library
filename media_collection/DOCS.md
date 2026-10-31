@@ -93,7 +93,11 @@ python3 /app/music_import.py /data/media.db "/media/QNAP/Music" --dry-run  # cou
 ```
 
 Run it inside the running add-on with `docker exec app_local_media_collection …`.
-Owner folders map to users by display name; a missing person is created.
+Owner folders map to users by display name; a missing person is created. Without a
+path argument it uses the first `media_roots` row with `medium = 'music'`, so the
+entrypoint simply calls `music_import.py "$DB"` on every start and picks up whatever
+has been ripped since the last boot (`music_path` in the options overrides the root
+when the Supervisor passes it through).
 
 ## Browsing
 
