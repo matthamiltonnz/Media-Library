@@ -25,6 +25,26 @@ def is_junk(name):
             or name.lower() in ("recycle", "#recycle"))
 
 
+AUDIO_EXT = (".mp3", ".flac", ".m4a", ".wav", ".ogg", ".ape", ".wma", ".aac",
+             ".aiff", ".aif", ".dsf", ".dff", ".alac", ".opus", ".mpc", ".wv")
+
+
+def has_audio(folder, depth=2):
+    """True when the album folder - or a disc subfolder - holds at least one track.
+
+    Artwork-only leftovers (Folder.jpg, desktop.ini, .db) are not CDs, so they never
+    become a copy, and neither do concert video folders.
+    """
+    base = len(folder)
+    for root, dirs, files in os.walk(folder):
+        dirs[:] = [name for name in dirs if not is_junk(name)]
+        if any(name.lower().endswith(AUDIO_EXT) for name in files):
+            return True
+        if root[base:].count(os.sep) >= depth:
+            dirs[:] = []
+    return False
+
+
 def parse_owner(folder):
     name = folder.replace("\u2019", "'").replace("\u2018", "'")
     match = re.match(r"(.+?)'s music$", name, re.I)
@@ -73,9 +93,13 @@ def main():
     elif args.dry_run:
         root_id = None
     else:
+        label = args.root_label
+        if con.execute("SELECT 1 FROM media_roots WHERE label = ?",
+                       (label,)).fetchone():
+            label = "%s (%s)" % (label, os.path.basename(root_path) or root_path)
         root_id = con.execute(
             "INSERT INTO media_roots (label, path, medium) VALUES (?, ?, 'music')",
-            (args.root_label, root_path)).lastrowid
+            (label, root_path)).lastrowid
 
     albums = copies = owners = 0
     for owner_dir in sorted(os.listdir(root_path)):
@@ -110,6 +134,8 @@ def main():
                     continue
                 album_path = os.path.join(artist_path, album)
                 if not os.path.isdir(album_path):
+                    continue
+                if not has_audio(album_path):
                     continue
 
                 rel_path = "/".join([owner_dir, artist, album])
