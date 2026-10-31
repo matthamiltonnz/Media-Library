@@ -235,9 +235,12 @@ catalogue fills that gap itself:
 
 * **Scan the media folders** (Admin) walks what is under the media roots and links
   titles that have a copy but no file yet. Films and shows are matched by folder
-  name and year, albums by `Music/owner/artist/album`, so punctuation and subtitles
-  (`10,000 B.C.` vs `10 000 bc`) do not hide anything. The same scan runs once when
-  the add-on starts; it reads a handful of folders, not the whole share.
+  name and year, albums by `Music/owner/artist/album`, so punctuation, subtitles and
+  `Name, The` sort names (`10,000 B.C.` vs `10 000 bc`, `Four Seasons, The` vs
+  `The Four Seasons`) do not hide anything. A folder only counts when it actually
+  holds a film or track, and pressing the button also moves a copy whose folder was
+  renamed on the share. The same scan runs once when the add-on starts; it reads a
+  handful of folders, not the whole share.
 * **Path inside the root** on a title page is pre-filled with the folder the scan
   found, so adding a missing copy is a single click rather than a typed path.
 * **Jellyfin**: paste the server URL and an API key (Dashboard → API Keys) under

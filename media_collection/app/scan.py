@@ -18,16 +18,28 @@ import unicodedata
 SKIP_FOLDERS = {"@recycle", "#recycle", "@eadir", "system volume information",
                 "lost+found"}
 
+MEDIA_EXTENSIONS = (
+    ".mkv", ".mp4", ".m4v", ".avi", ".mov", ".wmv", ".mpg", ".mpeg", ".ts",
+    ".m2ts", ".iso", ".flac", ".mp3", ".m4a", ".aac", ".ogg", ".opus", ".wav",
+    ".wma", ".ape", ".aiff",
+)
+
 YEAR_IN_NAME = re.compile(r"\(\s*(\d{4})\s*\)")
 ARTIST_ALBUM = re.compile(r"\s+[—–-]\s+|\s+-\s+")
 
 
 def _fold(text):
-    """Loose key: case, accents, punctuation and a leading 'the ' do not matter."""
+    """Loose key: case, accents, punctuation and a leading article do not matter.
+
+    'Four Seasons, The' and 'The Four Seasons' fold to the same key, which is how
+    sort-name style titles are written in the catalogue but not on the disk.
+    """
     text = unicodedata.normalize("NFKD", text or "").encode("ascii", "ignore").decode()
-    text = re.sub(r"[^a-z0-9 ]+", " ", text.lower())
+    text = text.lower()
+    text = re.sub(r",\s*(the|a|an)\s*$", "", text)
+    text = re.sub(r"[^a-z0-9 ]+", " ", text)
     text = re.sub(r"\s+", " ", text).strip()
-    return text[4:] if text.startswith("the ") else text
+    return re.sub(r"^(the|a|an) ", "", text)
 
 
 def _split_year(name):
@@ -69,6 +81,16 @@ def _listdir(path, cache):
         except OSError:
             cache[path] = []
     return cache[path]
+
+
+def _has_media(path, cache):
+    """True when the folder actually holds a film, episode or track.
+
+    Empty stubs left behind by an earlier import look like albums by name, so the
+    scan only trusts a folder that has something in it to play.
+    """
+    return any(name.lower().endswith(MEDIA_EXTENSIONS)
+               for name in _listdir(path, cache))
 
 
 def _roots(con):
@@ -122,8 +144,29 @@ def _locate(roots, title, cache):
             continue
         if kind == "tv" and "/" in relative:
             continue
+        if not _has_media(os.path.join(root["path"], relative), cache):
+            continue
         return relative, root["id"]
     return None
+
+
+def _album_match(entry, album_key, artist_key):
+    """Does this folder stand for the album?
+
+    Albums get renamed in the wild - 'The Four Seasons Hits' holding 'Hits
+    Digitally Enhanced' - so accept the album name itself, or the artist followed
+    by the start of it.
+    """
+    key = _fold(_split_year(entry)[0])
+    if not key:
+        return False
+    if key == album_key:
+        return True
+    joined = artist_key + " " + album_key
+    flat, flat_joined = key.replace(" ", ""), joined.replace(" ", "")
+    if flat == flat_joined or (flat_joined.startswith(flat) and len(flat) >= 8):
+        return True
+    return len(album_key) >= 8 and key.startswith(album_key)
 
 
 def _locate_album(roots, artist, album, cache):
@@ -139,7 +182,9 @@ def _locate_album(roots, artist, album, cache):
                 if not os.path.isdir(artist_path):
                     continue
                 for entry in _listdir(artist_path, cache):
-                    if _fold(_split_year(entry)[0]) != album_key:
+                    if not _album_match(entry, album_key, artist_key):
+                        continue
+                    if not _has_media(os.path.join(artist_path, entry), cache):
                         continue
                     return "Music/%s/%s/%s" % (owner, name, entry), root["id"]
     return None
@@ -180,11 +225,12 @@ def missing(con):
         " GROUP BY t.id ORDER BY t.id").fetchall()
 
 
-def sync_files(con, log=print):
+def sync_files(con, log=print, repair=False):
     """Link every title that is already on disk but has no playback source."""
     roots = _roots(con)
     cache, counts = {}, {"roots": len(roots), "titles": 0, "linked": 0,
-                         "unmatched": 0, "missing_roots": 0, "skipped": 0}
+                         "unmatched": 0, "missing_roots": 0, "skipped": 0,
+                         "relinked": 0}
     counts["missing_roots"] = sum(1 for root in roots
                                   if not os.path.isdir(root["path"]))
     if not roots:
@@ -211,8 +257,43 @@ def sync_files(con, log=print):
         counts["linked"] += 1
         log("scan: %s -> %s" % (title["name"], relative))
     con.commit()
+    if repair:
+        counts["relinked"] = _relink(con, roots, cache, skipped, log)
+        con.commit()
     counts["folders"] = len(cache)
     return counts
+
+
+def _relink(con, roots, cache, skipped, log):
+    """Point sources at the folder that actually holds the files.
+
+    Albums and films get renamed on the share while the catalogue keeps the old
+    folder, which then has no media in it - so look again and move the source.
+    """
+    by_root = {root["id"]: root for root in roots}
+    relinked = 0
+    rows = con.execute(
+        "SELECT d.id, d.path, d.root_id, t.id AS title_id, t.name, t.kind,"
+        " t.release_year FROM digital_sources d JOIN items i ON i.id = d.item_id"
+        " JOIN titles t ON t.id = i.title_id"
+        " WHERE d.provider = 'rip' AND d.path IS NOT NULL AND d.path <> ''").fetchall()
+    for row in rows:
+        root = by_root.get(row["root_id"])
+        if root is None or not os.path.isdir(root["path"]):
+            continue
+        if _has_media(os.path.join(root["path"], row["path"]), cache):
+            continue
+        found = _locate(roots, row, cache)
+        if not found or found[0] == row["path"]:
+            continue
+        if "%d|%s" % (row["title_id"], found[0]) in skipped:
+            continue
+        con.execute("UPDATE digital_sources SET path = ?, root_id = ?,"
+                    " notes = 'Re-linked to the folder found on disk' WHERE id = ?",
+                    (found[0], found[1], row["id"]))
+        relinked += 1
+        log("scan: %s moved to %s" % (row["name"], found[0]))
+    return relinked
 
 
 def suggest(con, title_id):
@@ -243,29 +324,34 @@ def summary():
         return ""
     if counts.get("error"):
         return "Media scan failed: %s" % counts["error"]
-    return ("Media scan: %(linked)d copies linked, %(unmatched)d titles with no "
+    text = ("Media scan: %(linked)d copies linked, %(unmatched)d titles with no "
             "file found (of %(titles)d)." % counts)
+    if counts.get("relinked"):
+        text += " %(relinked)d moved to a renamed folder." % counts
+    return text
 
 
-def start(db_path):
+def start(db_path, repair=False):
     """Look for unlinked files in the background; a page must never wait for it."""
     with _LOCK:
         if STATE["running"]:
             return False
-        STATE.update({"running": True, "counts": {},
+        STATE.update({"running": True, "counts": {}, "repair": repair,
                       "started": time.strftime("%Y-%m-%d %H:%M:%S"),
                       "finished": None})
-    threading.Thread(target=_run, args=(db_path,), daemon=True).start()
+    threading.Thread(target=_run, args=(db_path, repair), daemon=True).start()
     return True
 
 
-def _run(db_path):
+def _run(db_path, repair=False):
     con = sqlite3.connect(db_path, timeout=30)
     con.row_factory = sqlite3.Row
     try:
-        counts = sync_files(con, log=lambda message: None)
+        counts = sync_files(con, log=lambda message: None, repair=repair)
         if counts["linked"]:
             print("scan: linked %d copies from the media folders" % counts["linked"])
+        if counts.get("relinked"):
+            print("scan: moved %d copies to the folder found on disk" % counts["relinked"])
     except Exception as exc:                          # never take the server down
         print("scan: failed: %s" % exc)
         counts = {"error": str(exc)}

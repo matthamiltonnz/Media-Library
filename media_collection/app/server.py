@@ -852,7 +852,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.respond(303, "", extra={"Location": base + "admin"})
 
             if route.rstrip("/").endswith("/admin/scan"):
-                scan.start(DB_PATH)
+                scan.start(DB_PATH, repair=True)
                 return self.respond(303, "", extra={"Location": base + "admin?scan=1"})
 
             if route.rstrip("/").endswith("/jellyfin/save"):
