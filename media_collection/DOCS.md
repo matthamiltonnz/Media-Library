@@ -40,6 +40,14 @@ Exports are per viewer: shared copies plus your own private ones.
   plot, poster, year and IMDb id. The page polls `/admin/status.json` every three
   seconds while it runs, then reloads itself when the job stops. The "also
   overwrite" box forces a re-fetch for titles that already have metadata.
+  Matching is **id first**: an IMDb id (`P345`) or a TMDB id (`P4947` for films,
+  `P4983` for TV) is resolved through Wikidata, which also supplies the year and
+  the enwiki page — so a hand-entered id always wins over a name search. Without
+  an id the Wikipedia search is disambiguated by the title's year, which keeps
+  *3:10 to Yuma* (1957) and *3:10 to Yuma* (2007) apart. Editing the year, IMDb id
+  or TMDB id on the title page clears the cached plot/poster and re-resolves at
+  once; an id that Wikidata doesn't know is reported back to you. *Refresh all*
+  also revisits any title whose stored match did not come from the id on record.
   Wikimedia rate-limits bursts with HTTP 429: the job then **pauses** and the button
   becomes *Resume refresh* — press it later and it continues where it stopped,
   since it only targets titles still missing metadata.

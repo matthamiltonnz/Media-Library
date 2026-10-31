@@ -756,26 +756,29 @@ class Handler(BaseHTTPRequestHandler):
                 tmdb = re.sub(r"\D", "", field(form, "tmdb_id"))
                 kind = field(form, "kind") or "movie"
                 new_imdb = (field(form, "imdb_id") or "").strip() or None
-                before = con.execute("SELECT imdb_id FROM titles WHERE id = ?",
-                                     (title_id,)).fetchone()["imdb_id"]
+                before = con.execute(
+                    "SELECT imdb_id, tmdb_id, release_year, kind FROM titles"
+                    " WHERE id = ?", (title_id,)).fetchone()
+                new_year = int(year) if len(year) == 4 else None
+                new_tmdb = int(tmdb) if tmdb else None
                 con.execute(
-                    "UPDATE titles SET name = ?, release_year = ?, kind = ?, imdb_id = ?,"
+                    "UPDATE titles SET name = ?, release_year = ?, kind = ?,"
                     " tmdb_id = ? WHERE id = ?",
-                    (name, int(year) if len(year) == 4 else None, kind,
-                     new_imdb, int(tmdb) if tmdb else None, title_id))
+                    (name, new_year, kind, new_imdb, new_tmdb, title_id))
                 con.commit()
 
                 message = "Title updated."
-                if new_imdb != before:
-                    # the stored plot/poster belong to the old film - drop them and
-                    # re-resolve straight from the id you just entered
+                changed = (new_imdb != before["imdb_id"]
+                           or new_tmdb != before["tmdb_id"]
+                           or new_year != before["release_year"]
+                           or kind != before["kind"])
+                if changed:
+                    # the stored plot/poster belong to whatever matched last time -
+                    # drop them and re-resolve from the id/year you just entered
                     con.execute("UPDATE titles SET overview = NULL, poster_url = NULL,"
                                 " metadata_source = NULL WHERE id = ?", (title_id,))
                     con.commit()
-                    if new_imdb:
-                        message += " " + metadata.refresh(con, title_id)
-                    else:
-                        message += " Metadata cleared - refresh to look it up again."
+                    message += " " + metadata.refresh(con, title_id)
                 return self.title_page(con, viewer, base, title_id, summary=message)
 
             match = re.search(r"/items/(\d+)/?$", route)

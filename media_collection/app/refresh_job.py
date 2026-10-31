@@ -41,7 +41,13 @@ def _targets(db_path, force):
     try:
         sql = "SELECT id FROM titles"
         if not force:
-            sql += " WHERE overview IS NULL OR poster_url IS NULL"
+            # also revisit titles where an id exists but the stored match came from
+            # somewhere else - that is how a wrong film gets corrected
+            sql += (" WHERE overview IS NULL OR poster_url IS NULL"
+                    " OR (imdb_id IS NOT NULL"
+                    "     AND COALESCE(metadata_source, '') NOT LIKE '%imdb%')"
+                    " OR (tmdb_id IS NOT NULL"
+                    "     AND COALESCE(metadata_source, '') NOT LIKE '%tmdb%')")
         return [row[0] for row in con.execute(sql + " ORDER BY name")]
     finally:
         con.close()

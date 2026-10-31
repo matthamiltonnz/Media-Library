@@ -42,17 +42,29 @@ def _get(url, timeout=25):
         raise Throttle(str(exc.reason))         # offline / DNS hiccup: back off too
 
 
-def wikipedia_search(name, limit=5):
+def wikipedia_search(name, limit=5, year=None):
     """Page title on en.wikipedia for "<name> film" (no Wikidata involved)."""
     params = urllib.parse.urlencode({"q": "%s film" % name, "limit": str(limit)})
     data = _get("https://en.wikipedia.org/w/rest.php/v1/search/page?" + params)
     wanted = _key(name)
+    best = None
     for page in data.get("pages", []):
         title = page.get("title") or ""
         base = title.split("(")[0].strip()
-        if _key(base) == wanted:
+        if _key(base) != wanted:
+            continue
+        if not year:
             return title
-    return None
+        # "3:10 to Yuma" is the 1957 film, "3:10 to Yuma (2007 film)" the remake:
+        # the year on the record has to win over the bare title.
+        if "(%d" % year in title:
+            return title
+        blob = " ".join([page.get("description") or "",
+                         page.get("excerpt") or ""])
+        if str(year) in blob:
+            return title
+        best = best or title
+    return best
 
 
 def qid_by_imdb(imdb_id):
@@ -62,6 +74,26 @@ def qid_by_imdb(imdb_id):
     params = urllib.parse.urlencode({
         "action": "query", "format": "json", "list": "search", "srlimit": "1",
         "srsearch": 'haswbstatement:P345=%s' % imdb_id,
+    })
+    try:
+        payload = _get("https://www.wikidata.org/w/api.php?" + params)
+    except Exception:
+        return None
+    hits = payload.get("query", {}).get("search", [])
+    return hits[0]["title"] if hits else None
+
+
+def qid_by_tmdb(tmdb_id, kind="movie"):
+    """Wikidata item whose P4947 (TMDB film id / P4983 for TV) matches.
+
+    Lets a TMDB id typed in by hand do the resolving - no API key needed.
+    """
+    if not tmdb_id:
+        return None
+    prop = "P4983" if kind == "tv" else "P4947"
+    params = urllib.parse.urlencode({
+        "action": "query", "format": "json", "list": "search", "srlimit": "1",
+        "srsearch": "haswbstatement:%s=%s" % (prop, tmdb_id),
     })
     try:
         payload = _get("https://www.wikidata.org/w/api.php?" + params)
@@ -193,33 +225,43 @@ def refresh(con, title_id):
     cleaned = clean_title(row["name"])
     updates = {}
     source = []
+    unresolved = []
 
     try:
+        qid = None
         if row["imdb_id"]:
             qid = qid_by_imdb(row["imdb_id"])
             if qid:
+                source.append("imdb")
+        if not qid and row["tmdb_id"]:
+            qid = qid_by_tmdb(row["tmdb_id"], row["kind"])
+            if qid:
+                source.append("tmdb")
+        if qid:
+            year, imdb = fetch_entities([qid]).get(qid, (None, None))
+            if year:
+                updates["release_year"] = year          # the id is authoritative
+            if imdb and imdb != row["imdb_id"]:
+                updates["imdb_id"] = imdb
+            page = enwiki_title(qid)
+        else:
+            page = None
+            if row["imdb_id"]:
+                unresolved.append("IMDb %s" % row["imdb_id"])
+            if row["tmdb_id"]:
+                unresolved.append("TMDB %s" % row["tmdb_id"])
+        if not page:
+            page = wikipedia_search(cleaned, year=row["release_year"])
+        if not page:
+            qid = search_wikidata([cleaned], workers=1).get(cleaned)
+            if qid:
                 year, imdb = fetch_entities([qid]).get(qid, (None, None))
-                if year:
-                    updates["release_year"] = year          # the id is authoritative
-                if imdb and imdb != row["imdb_id"]:
+                if year and not row["release_year"]:
+                    updates["release_year"] = year
+                if imdb and not row["imdb_id"]:
                     updates["imdb_id"] = imdb
                 page = enwiki_title(qid)
-            else:
-                page = None
-            if not page:
-                page = wikipedia_search(cleaned)
-        else:
-            page = wikipedia_search(cleaned)
-            if not page:
-                qid = search_wikidata([cleaned], workers=1).get(cleaned)
-                if qid:
-                    year, imdb = fetch_entities([qid]).get(qid, (None, None))
-                    if year and not row["release_year"]:
-                        updates["release_year"] = year
-                    if imdb and not row["imdb_id"]:
-                        updates["imdb_id"] = imdb
-                    page = enwiki_title(qid)
-                    source.append("wikidata")
+                source.append("wikidata")
 
         if page:
             summary = wikipedia_summary(page)
@@ -241,4 +283,8 @@ def refresh(con, title_id):
     con.execute("UPDATE titles SET %s, metadata_updated_at = datetime('now') WHERE id = ?"
                 % columns, list(updates.values()) + [title_id])
     con.commit()
-    return "metadata refreshed from %s" % updates["metadata_source"]
+    message = "metadata refreshed from %s" % updates["metadata_source"]
+    if unresolved:
+        message = ("%s not found in Wikidata - matched by name and year instead. %s"
+                   % (" and ".join(unresolved), message))
+    return message
