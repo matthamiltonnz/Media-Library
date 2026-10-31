@@ -336,6 +336,42 @@ def status(con):
 
 
 
+def image(con, jf_id, size=600):
+    """The cover Jellyfin holds for an item, cached under /data.
+
+    Jellyfin already scraped a proper front-of-case image for everything it
+    indexed, which beats the posters the catalogue picked up from Wikipedia.
+    """
+    if not jf_id or not re.match(r"^[A-Za-z0-9]+$", jf_id):
+        raise JellyfinError("No such Jellyfin item.")
+    base, key = config(con)
+    if not key:
+        raise JellyfinError("No Jellyfin API key yet.")
+    folder = "/data/art"
+    cached = os.path.join(folder, "%s-%d.jpg" % (jf_id, size))
+    if os.path.isfile(cached):
+        with open(cached, "rb") as handle:
+            return handle.read()
+    request = urllib.request.Request(
+        "%s/Items/%s/Images/Primary?maxHeight=%d&quality=90"
+        % (base, jf_id, size))
+    request.add_header("Authorization", 'MediaBrowser Token="%s"' % key)
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            data = response.read()
+    except urllib.error.HTTPError as exc:
+        raise JellyfinError("Jellyfin has no cover for that item (%s)." % exc.code)
+    except Exception as exc:
+        raise JellyfinError("Could not reach Jellyfin: %s" % exc)
+    try:
+        os.makedirs(folder, exist_ok=True)
+        with open(cached, "wb") as handle:
+            handle.write(data)
+    except OSError:
+        pass                                   # a read-only /data still serves it
+    return data
+
+
 _LOCK = threading.Lock()
 STATE = {"running": False, "counts": {}, "started": None, "finished": None}
 

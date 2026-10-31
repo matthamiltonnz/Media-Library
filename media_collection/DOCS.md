@@ -189,6 +189,12 @@ the same blue with a "Blu-ray 3D" band for 3D, and a black case lettered
 "4K ULTRA HD" — so square album art is never cropped into a poster shape and the
 shelf presence is visible at a glance. It is CSS only: no case artwork to host.
 
+Cover art comes from Jellyfin when the title is linked (`/art/<item>` proxies
+Jellyfin's primary image and caches it under `/data/art`, so the page never refetches
+it), and falls back to the `poster_url` the metadata refresh stored. Wikipedia only
+carried a poster for a quarter of the films; Jellyfin has one for everything it
+indexed, films and albums alike.
+
 ## If an upgrade fails
 
 Each migration runs in one transaction, so a failure leaves nothing half-applied.

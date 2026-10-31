@@ -99,8 +99,11 @@ def render(base, row, items, digital, formats, labels, summary=None, error=None,
     if error:
         parts.append('<p class="banner bad">%s</p>' % _text(error))
 
-    if row["poster_url"]:
-        parts.append('<img class="poster" src="%s" alt="">' % _text(row["poster_url"]))
+    poster = row["poster_url"]
+    if jellyfin_configured and jellyfin_link and jellyfin_link["jf_id"]:
+        poster = base + "art/" + jellyfin_link["jf_id"]
+    if poster:
+        parts.append('<img class="poster" src="%s" alt="">' % _text(poster))
     parts.append("<p>%s</p>" % (_facts(row) or '<span class="muted">year unknown</span>'))
     parts.append("<p>%s</p>" % _links(row))
     if row["overview"]:

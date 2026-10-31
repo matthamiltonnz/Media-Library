@@ -400,6 +400,9 @@ def render_index(con, viewer, base, error=None, query="", pending=0, merged=0,
         clause, extra = visible_clause(query, kind, owner)
         cards = con.execute(
             "SELECT t.id, t.name, t.release_year, t.poster_url, t.kind,"
+            " (SELECT l.jf_id FROM jellyfin_links l"
+            "   JOIN items li ON li.id = l.item_id"
+            "   WHERE li.title_id = t.id ORDER BY l.jf_kind LIMIT 1) AS jf_id,"
             " COUNT(i.id) AS copies, group_concat(DISTINCT i.format) AS formats"
             " FROM titles t JOIN items i ON i.title_id = t.id"
             " WHERE " + clause +
@@ -412,8 +415,11 @@ def render_index(con, viewer, base, error=None, query="", pending=0, merged=0,
                 base, card["id"],
                 '<div class="thumb %s">%s</div>' % (
                     case_class(card["kind"], card["formats"]),
-                    '<img src="%s" alt="">' % html.escape(card["poster_url"])
-                    if card["poster_url"] else '<span class="muted">no image</span>'),
+                    '<img src="%s" alt="" loading="lazy">' % html.escape(
+                        base + "art/" + card["jf_id"] if card["jf_id"]
+                        else card["poster_url"])
+                    if (card["jf_id"] or card["poster_url"])
+                    else '<span class="muted">no image</span>'),
                 html.escape(card["name"]),
                 html.escape(" · ".join(filter(None, [
                     str(card["release_year"] or ""),
@@ -672,6 +678,13 @@ class Handler(BaseHTTPRequestHandler):
             viewer = viewer_for(self, con)
             base = base_path(self)
             route = route_path(self)
+            match = re.search(r"/art/([A-Za-z0-9]+)$", route)
+            if match:
+                try:
+                    return self.respond(200, jellyfin.image(con, match.group(1)),
+                                        "image/jpeg")
+                except jellyfin.JellyfinError:
+                    return self.respond(404, "", "text/plain; charset=utf-8")
             if route.rstrip("/").endswith("/health"):
                 return self.respond(200, json.dumps({"status": "ok"}), "application/json")
             if route.rstrip("/").endswith("/api/state"):
