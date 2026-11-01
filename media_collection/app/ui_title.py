@@ -104,6 +104,20 @@ def _badges(items, digital, labels, base=None, title_id=None):
     ripped = _ripped(digital)
     badges = []
     for item in items:
+        if item["format"] == "ripped":
+            # a file is the importer's business: where it is, nothing to edit
+            where = item["rip_path"] or files.get(item["id"]) or ""
+            jf = ""
+            for source in digital:
+                if source["item_id"] == item["id"] and "jf_id" in source.keys():
+                    jf = source["jf_id"] or ""
+                    if jf:
+                        break
+            parts.append('<p class="copy-line"><strong>Ripped file</strong>'
+                         ' <span class="muted">%s%s</span></p>'
+                         % (_text(where),
+                            " \u00b7 Jellyfin " + _text(jf) if jf else ""))
+            continue
         text = _text(_copy_title(item, labels, stores.get(item["id"]),
                                  item["id"] in ripped))
         if base and title_id:
@@ -122,9 +136,7 @@ def _play_block(base, row, items, digital, players, last_player,
                 if source["provider"] == "rip" and source["path"]
                 and source["root_path"]]
     jellyfin_ready = bool(jellyfin_link and jellyfin_configured)
-    badges = ""  # the copies list below replaces these pills
-    head = ('<div class="badges">%s</div>' % badges if badges
-            else '<p class="muted">No copies recorded yet.</p>')
+    head = "" if items else '<p class="muted">No copies recorded yet.</p>'
     if not playable and not jellyfin_ready:
         return (head + '<p class="muted">No file to play yet - rip the disc to'
                 ' the NAS and the scan picks it up by itself.</p>')
@@ -279,8 +291,7 @@ def _copy_line(item, labels, store, ripped=False, path=None):
         money.append("bought %s" % _text(item["acquired_on"]))
     if money:
         detail = (detail + " · " if detail else "") + " ".join(money)
-    watched = ("watched %s" % _text(item["last_watched_on"])
-               if item["last_watched_on"] else "not watched")
+    watched = ""           # watched lives on the title, not on a copy
     detail = (detail + " · " if detail else "") + watched
     return '<strong>%s</strong> <span class="muted">%s</span>' % (head, detail)
 
@@ -466,6 +477,7 @@ def render(base, row, items, digital, formats, labels, summary=None, error=None,
     parts.append(tabs)
 
     if True:   # the copies sit below; this branch is no longer exclusive
+        parts.append('<h2>Copies</h2>')
         parts.append(_copies_tab(base, row, items, digital, formats, labels,
                                  users, viewer_id))
     if True:   # play sheet and the about block belong on every view
