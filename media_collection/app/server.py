@@ -66,6 +66,24 @@ CASE_CLASS = {"uhd_4k": "case-4k", "bluray_3d": "case-3d", "bluray": "case-blu",
               "dvd": "case-dvd", "cd": "case-jewel", "vinyl": "case-sleeve",
               "digital": "case-digital", "ripped": "case-digital"}
 
+# the shelf order: best picture first, a file on the NAS always last
+QUALITY = {"uhd_4k": 0, "digital": 1, "bluray": 2, "bluray_3d": 3, "dvd": 4,
+           "cd": 5, "vinyl": 6, "sacd": 7, "cassette": 8, "vhs": 9,
+           "other": 10, "ripped": 11}
+
+
+def quality_sorted(formats):
+    """A title's formats, best first — 4K, digital, Blu-ray, DVD, VHS, ripped."""
+    return sorted((f for f in (formats or "").split(",") if f),
+                  key=lambda f: QUALITY.get(f, 99))
+
+
+def shown_formats(formats, picked=()):
+    """What a card draws: the best of the formats currently being filtered."""
+    order = quality_sorted(formats)
+    chosen = [f for f in order if not picked or f in picked]
+    return ",".join(chosen or order)
+
 
 CASE_LABEL = {CASE_CLASS["uhd_4k"]: "4K Ultra HD",
               CASE_CLASS["bluray_3d"]: "Blu-ray 3D",
@@ -588,8 +606,8 @@ def render_index(con, viewer, base, error=None, query="",
             .format(
                 base, card["id"],
                 '<div class="thumb %s">%s%s</div>' % (
-                    case_class(card["kind"], card["formats"]),
-                    case_band(card["kind"], card["formats"]),
+                    case_class(card["kind"], shown_formats(card["formats"], picked)),
+                    case_band(card["kind"], shown_formats(card["formats"], picked)),
                     '<img src="%s" alt="" loading="lazy">' % html.escape(
                         ui.pick_cover(base, card["jf_id"], card["poster_url"],
                                       card["art_source"]))
@@ -599,7 +617,7 @@ def render_index(con, viewer, base, error=None, query="",
                 html.escape(" · ".join(filter(None, [
                     str(card["release_year"] or ""),
                     " · ".join(FORMAT_LABELS.get(f, f)
-                               for f in (card["formats"] or "").split(",")),
+                               for f in quality_sorted(card["formats"])),
                     ])))
                 , html.escape(here)
             )
