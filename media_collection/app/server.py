@@ -58,9 +58,9 @@ FORMAT_LABELS = {
 KINDS = {"movie": "Movie", "tv": "TV", "music": "Music", "other": "Other"}
 # the case drawn around the artwork in the thumbnail view, by the best copy held
 CASE_ORDER = {
-    "music": ("cd", "vinyl", "bluray", "dvd", "digital"),
-    "movie": ("uhd_4k", "bluray_3d", "bluray", "dvd", "digital"),
-    "tv": ("uhd_4k", "bluray_3d", "bluray", "dvd", "digital"),
+    "music": ("cd", "vinyl", "digital", "bluray", "dvd", "ripped"),
+    "movie": ("uhd_4k", "digital", "bluray", "bluray_3d", "dvd", "vhs", "ripped"),
+    "tv": ("uhd_4k", "digital", "bluray", "bluray_3d", "dvd", "vhs", "ripped"),
 }
 CASE_CLASS = {"uhd_4k": "case-4k", "bluray_3d": "case-3d", "bluray": "case-blu",
               "dvd": "case-dvd", "cd": "case-jewel", "vinyl": "case-sleeve",
@@ -307,8 +307,8 @@ PAGE = Template("""<!doctype html>
   /* Blu-ray, 3D and 4K cases: coloured plastic with a printed band across the top,
      the way the real boxes look (blue / blue with 3D / black with 4K Ultra HD) */
   .thumb.case-blu, .thumb.case-3d, .thumb.case-4k, .thumb.case-dvd {
-      aspect-ratio: 5 / 7; border-radius: 5px; overflow: hidden;
-      display: grid; grid-template-rows: auto 1fr; align-items: stretch;
+      aspect-ratio: auto; border-radius: 5px; overflow: hidden;
+      display: grid; grid-template-rows: auto auto; align-items: stretch;
       box-shadow: inset 0 0 0 1px #ffffff2e, 0 6px 14px #0006; }
   .thumb .band {
       display: flex; align-items: center; justify-content: center;
@@ -326,6 +326,8 @@ PAGE = Template("""<!doctype html>
   .thumb.case-dvd { background: linear-gradient(180deg, #23252b, #0c0d10 60%, #050506); }
   .thumb.case-blu img, .thumb.case-3d img,
   .thumb.case-4k img, .thumb.case-dvd img {
+      /* the band sits on top, so the cover keeps its full 2:3 and nothing is cropped */
+      width: 100%; height: auto; aspect-ratio: 2 / 3; object-fit: cover;
       border-radius: 0; box-shadow: none; }
   /* a CD sits in a clear jewel case: hinge on the left, inlay under the plastic */
   .thumb.case-jewel { aspect-ratio: 1 / 1; padding: 0 0 0 12%; border-radius: 3px;
@@ -398,6 +400,8 @@ $library
   <input name="title" placeholder="Title" required>
   <input name="release_year" placeholder="Year" inputmode="numeric" pattern="[0-9]{0,4}">
   <select name="format">$format_options</select>
+  <select name="owner_id">$owner_options</select>
+  <select name="store">$store_options</select>
   <input name="edition" placeholder="Edition (optional)">
   <input name="upc_ean" placeholder="UPC / EAN (optional)" inputmode="numeric">
   <input name="imdb_id" placeholder="IMDb ID (optional, tt…)">
@@ -647,6 +651,14 @@ def render_index(con, viewer, base, error=None, query="", pending=0, merged=0,
         format_options="".join(
             '<option value="{0}">{1}</option>'.format(f, FORMAT_LABELS[f]) for f in FORMATS
         ),
+        owner_options="".join(
+            '<option value="{0}"{2}>{1}</option>'.format(
+                row["id"], html.escape(row["display_name"]),
+                " selected" if row["id"] == viewer["id"] else "")
+            for row in owner_rows),
+        store_options="".join(
+            '<option value="{0}">{1}</option>'.format(s, ui_title.STORE_LABELS[s])
+            for s in PURCHASE_STORES),
     )
 
 
@@ -1137,7 +1149,8 @@ class Handler(BaseHTTPRequestHandler):
             if route.rstrip("/").endswith("/merge"):
                 result = merger.merge(con)
                 added = result["items"] if result else 0
-                return self.respond(303, "", extra={"Location": base + "admin?merged=%d" % added})
+                return self.respond(303, "", extra={
+                    "Location": base + "?merged=%d" % added})
 
             match = re.search(r"/title/(\d+)/sources/?$", route)
             if match:

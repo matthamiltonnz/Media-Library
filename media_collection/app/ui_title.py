@@ -7,7 +7,7 @@ import ui
 KIND_LABELS = {"movie": "Film", "tv": "TV", "music": "Music", "other": "Other"}
 
 STORE_LABELS = {
-    "itunes": "iTunes",
+    "itunes": "Apple TV",
     "appletv": "Apple TV",
     "rip": "ripped file",
     "jellyfin": "Jellyfin",
@@ -291,7 +291,8 @@ def _copies_tab(base, row, items, digital, formats, labels, users,
              "acquired_on": None, "last_watched_on": None,
              "visibility": "shared", "notes": None}
     parts.append(
-        '<h2>Add a copy</h2>'
+        '<p><button type="button" onclick="addcopy.showModal()">+ Add a copy</button></p>'
+        '<dialog id="addcopy"><h2>Add a copy</h2>'
         '<form method="post" action="%sitems">'
         '<input type="hidden" name="title" value="%s">'
         '<input type="hidden" name="kind" value="%s">'
@@ -299,7 +300,9 @@ def _copies_tab(base, row, items, digital, formats, labels, users,
         '<input type="hidden" name="from" value="title">'
         '<div class="grid"><label>Owner<select name="owner_id">%s</select>'
         '</label></div>%s'
-        '<p><button type="submit">Add copy</button></p></form>'
+        '<p><button type="submit">Add copy</button>'
+        ' <button type="button" onclick="addcopy.close()">Cancel</button></p>'
+        '</form></dialog>'
         % (_text(base), _text(row["name"]), _text(row["kind"]),
            _text(row["release_year"] or ""), owner_options,
            _copy_fields(blank, formats, labels, "")))
