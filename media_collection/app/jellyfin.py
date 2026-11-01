@@ -254,6 +254,9 @@ def sync_links(con, log=print, server=None):
         totals = {}
         for one in found:
             part = sync_links(con, log=log, server=one)
+            copies = materialise(con, one, log=log)
+            if copies:
+                log("jellyfin[%s]: %d copies added" % (one["label"], copies))
             # whatever was just linked belongs to the server we just read
             con.execute("UPDATE jellyfin_links SET server_id = ?"
                         " WHERE server_id IS NULL", (one["id"],))
@@ -307,6 +310,41 @@ def sync_links(con, log=print, server=None):
     log("jellyfin: %(copies)d copies, %(by_path)d by path, %(by_name)d by name,"
         " %(unmatched)d unmatched" % stats)
     return stats
+
+
+def materialise(con, server, log=print):
+    """Give every linked library item a copy of its own.
+
+    A Jellyfin copy is a discrete copy, not a note on a file copy, so the
+    app still works when Jellyfin is the only playback source. The route
+    records the server, the library id and the server's name.
+    """
+    owner = con.execute("SELECT id FROM users WHERE username = 'rips'"
+                        ).fetchone()
+    if owner is None:
+        return 0
+    made = 0
+    rows = con.execute(
+        "SELECT l.jf_id, i.title_id FROM jellyfin_links l"
+        "  JOIN items i ON i.id = l.item_id"
+        " WHERE l.server_id = ?", (server["id"],)).fetchall()
+    for row in rows:
+        if con.execute(
+                "SELECT 1 FROM digital_sources WHERE provider = 'jellyfin'"
+                "   AND server_id = ? AND external_id = ?",
+                (server["id"], row["jf_id"])).fetchone():
+            continue
+        new_id = con.execute(
+            "INSERT INTO items (title_id, owner_id, format, visibility,"
+            " added_by) VALUES (?, ?, 'ripped', 'shared', ?)",
+            (row["title_id"], owner["id"], owner["id"])).lastrowid
+        con.execute(
+            "INSERT INTO digital_sources (item_id, provider, server_id,"
+            " external_id, notes) VALUES (?, 'jellyfin', ?, ?, ?)",
+            (new_id, server["id"], row["jf_id"], server["label"]))
+        made += 1
+    con.commit()
+    return made
 
 
 def forget_server(con, server_id):
