@@ -556,9 +556,8 @@ def render_index(con, viewer, base, error=None, query="",
         "SELECT t.kind AS kind, COUNT(DISTINCT t.id) AS n FROM items i"
         " JOIN titles t ON t.id = i.title_id"
         " WHERE (i.visibility = 'shared' OR i.owner_id = ?)"
-        " AND EXISTS (SELECT 1 FROM items oi"
-        "   JOIN users ou ON ou.id = oi.owner_id"
-        "   WHERE oi.title_id = t.id AND ou.username <> 'rips')"
+        " AND i.owner_id IN (SELECT id FROM users"
+        "   WHERE username <> 'rips')"
         " GROUP BY t.kind", (viewer["id"],))}
     modes = "".join(
         '<a class="%s" href="%s?kind=%s%s">%s<span class="n">%d</span></a>'
@@ -582,11 +581,18 @@ def render_index(con, viewer, base, error=None, query="",
         " GROUP BY i.owner_id"
         % (" AND t.kind = ?" if kind else ""),
         [viewer["id"]] + ([kind] if kind else []))}
+    everyone = con.execute(
+        "SELECT COUNT(DISTINCT t.id) FROM items i"
+        " JOIN titles t ON t.id = i.title_id"
+        " WHERE (i.visibility = 'shared' OR i.owner_id = ?)"
+        "   AND i.owner_id IN (SELECT id FROM users"
+        "                   WHERE username <> 'rips')",
+        (viewer["id"],)).fetchone()[0]
     owner_tabs = "".join(
         ['<a class="%s" href="%s?kind=%s%s">Everyone<span class="n">%d</span></a>'
          % ("" if owner else "current", html.escape(base), kind,
             "&amp;view=grid" if view == "grid" else "",
-            sum(owner_counts.get(row["id"], 0) for row in owner_rows))]
+            everyone)]
         + ['<a class="%s" href="%s?kind=%s&amp;owner=%d%s">%s<span class="n">%d</span></a>'
            % ("current" if owner == row["id"] else "", html.escape(base), kind,
               row["id"], "&amp;view=grid" if view == "grid" else "",
