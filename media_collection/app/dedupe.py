@@ -76,6 +76,52 @@ def reclassify_rips(con):
     return changed
 
 
+def sync_rips(con):
+    """Keep the file the copy plays on the copy itself."""
+    changed = con.execute(
+        "UPDATE items SET"
+        "  rip_path    = (SELECT d.path    FROM digital_sources d"
+        "                  WHERE d.item_id = items.id AND d.provider = 'rip'"
+        "                  ORDER BY d.id LIMIT 1),"
+        "  rip_root_id = (SELECT d.root_id FROM digital_sources d"
+        "                  WHERE d.item_id = items.id AND d.provider = 'rip'"
+        "                  ORDER BY d.id LIMIT 1)"
+        " WHERE EXISTS (SELECT 1 FROM digital_sources d"
+        "                WHERE d.item_id = items.id AND d.provider = 'rip')"
+        "   AND (rip_path IS NULL OR rip_root_id IS NULL)").rowcount
+    con.commit()
+    return changed
+
+
+def split_files(con):
+    """One copy per file: a copy holding two sources becomes two copies."""
+    made = 0
+    rows = con.execute(
+        "SELECT item_id, COUNT(*) AS files FROM digital_sources"
+        " WHERE provider = 'rip' GROUP BY item_id HAVING files > 1").fetchall()
+    for row in rows:
+        item = con.execute("SELECT * FROM items WHERE id = ?",
+                           (row["item_id"],)).fetchone()
+        extra = con.execute(
+            "SELECT id, path, root_id FROM digital_sources"
+            " WHERE item_id = ? AND provider = 'rip' ORDER BY id",
+            (row["item_id"],)).fetchall()[1:]
+        if item is None:
+            continue
+        for source in extra:
+            new_id = con.execute(
+                "INSERT INTO items (title_id, owner_id, format, edition,"
+                " visibility, rip_path, rip_root_id)"
+                " VALUES (?, ?, 'ripped', ?, ?, ?, ?)",
+                (item["title_id"], item["owner_id"], item["edition"],
+                 item["visibility"], source["path"], source["root_id"])).lastrowid
+            con.execute("UPDATE digital_sources SET item_id = ? WHERE id = ?",
+                        (new_id, source["id"]))
+            made += 1
+    con.commit()
+    return made
+
+
 def orphans(con):
     """Drop ripped copies that have no file and no barcode behind them.
 
@@ -201,9 +247,10 @@ def copies(con):
 
     groups = con.execute(
         "SELECT title_id, owner_id, format, COALESCE(edition, '') AS edition,"
-        "       visibility, group_concat(id) AS ids"
+        "       visibility, COALESCE(rip_path, '') AS file, group_concat(id) AS ids"
         "  FROM items WHERE upc_ean IS NULL"
-        " GROUP BY title_id, owner_id, format, COALESCE(edition, ''), visibility"
+        " GROUP BY title_id, owner_id, format, COALESCE(edition, ''), visibility,"
+        "          COALESCE(rip_path, '')"
         " HAVING COUNT(*) > 1").fetchall()
     for group in groups:                 # the same copy added twice
         ids = [int(i) for i in group["ids"].split(",")]
@@ -244,6 +291,8 @@ def main():
         return
     print("dedupe: %d duplicate title(s) folded" % merge(con))
     print("dedupe: %d copy(s) relabelled as ripped files" % reclassify_rips(con))
+    print("dedupe: %d copy(s) split per file" % split_files(con))
+    print("dedupe: %d copy(s) given their file" % sync_rips(con))
     print("dedupe: %d empty ripped copy(s) dropped" % orphans(con))
     print("dedupe: %d duplicate user(s) folded" % users(con))
     print("dedupe: %d mixed copy(s) split" % split_mixed(con))

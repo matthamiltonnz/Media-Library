@@ -286,7 +286,9 @@ def _copies_tab(base, row, items, digital, formats, labels, users,
             '</details>'
             % (item["id"], _copy_line(item, labels, store,
                                       item["id"] in _ripped(digital),
-                                      files.get(item["id"])),
+                                      (item["rip_path"]
+                                       if "rip_path" in item.keys() else None)
+                                      or files.get(item["id"])),
                _text(base),
                item["id"], _copy_fields(item, formats, labels, store),
                remove))
