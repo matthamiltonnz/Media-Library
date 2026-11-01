@@ -20,7 +20,6 @@ from urllib.parse import parse_qs, quote, urlparse
 import dedupe
 import importer
 import jellyfin
-import merger
 import metadata
 import playback
 import refresh_job
@@ -440,8 +439,7 @@ ROW = Template("""<tr>
 </tr>""")
 
 
-def render_index(con, viewer, base, error=None, query="", pending=0, merged=0,
-                 merge_ran=False,
+def render_index(con, viewer, base, error=None, query="",
                  view="list", kind="", owner=None, format="", rips=False):
     bits = []
     if query:
@@ -546,18 +544,7 @@ def render_index(con, viewer, base, error=None, query="", pending=0, merged=0,
               row["id"], "&amp;view=grid" if view == "grid" else "",
               html.escape(row["display_name"]), owner_counts.get(row["id"], 0))
            for row in owner_rows])
-    if merged:
-        notice = ('<p class="banner good">Merged %d item(s) from the bundled catalogue — '
-                  "reload to see everything.</p>" % merged)
-    elif merge_ran:
-        notice = ('<p class="banner good">The bundled catalogue is already in this '
-                  "library — nothing to merge.</p>")
-    elif pending:
-        notice = ('<form method="post" action="%smerge"><p class="banner">%d item(s) in the '
-                  'bundled catalogue are not in this library. '
-                  '<button type="submit">Merge them</button></p></form>' % (base, pending))
-    else:
-        notice = ""
+    notice = ""
     if view == "grid":
         clause, extra = visible_clause(query, kind, owner, format,
                                        rips)
@@ -907,12 +894,9 @@ class Handler(BaseHTTPRequestHandler):
 
             if route.rstrip("/").endswith("/admin"):
                 params = parse_qs(urlparse(self.path).query)
-                merged = (params.get("merged") or ["0"])[0]
                 deduped = (params.get("deduped") or ["0"])[0]
                 message = None
-                if merged.isdigit() and int(merged):
-                    message = "Merged %d item(s) from the bundled catalogue." % int(merged)
-                elif deduped.isdigit() and int(deduped):
+                if deduped.isdigit() and int(deduped):
                     message = "Folded %d duplicate title(s)." % int(deduped)
                 elif params.get("jellyfin"):
                     message = params["jellyfin"][0]
@@ -923,7 +907,7 @@ class Handler(BaseHTTPRequestHandler):
                 elif params.get("scan") and scan.summary():
                     message = scan.summary()
                 return self.respond(200, ui_admin.render(
-                    base, viewer, stats(con), merger.pending_count(con), message,
+                    base, viewer, stats(con), message,
                     refresh_job.status(), len(dedupe.groups(con)),
                     con.execute("SELECT * FROM media_roots ORDER BY medium, label").fetchall(),
                     jellyfin.status(con), scan.summary(),
@@ -970,9 +954,6 @@ class Handler(BaseHTTPRequestHandler):
             fmt = ",".join(f for f in parse_qs(urlparse(self.path).query)
                            .get("format", []) if f)
             rips = bool(parse_qs(urlparse(self.path).query).get("rips"))
-            merged = (parse_qs(urlparse(self.path).query).get("merged") or ["0"])[0]
-            merge_failed = bool(parse_qs(urlparse(self.path).query).get("merge_failed"))
-            merge_ran = "merged" in parse_qs(urlparse(self.path).query)
             if route.rstrip("/").endswith("/artists"):
                 want = (parse_qs(urlparse(self.path).query).get("view")
                         or ["list"])[0]
@@ -1000,11 +981,6 @@ class Handler(BaseHTTPRequestHandler):
                                        owner=owner)
             return self.respond(200, render_index(
                 con, viewer, base, query=query,
-                error="Merge failed - the bundled catalogue could not be read;"
-                      " see the add-on log." if merge_failed else None,
-                pending=merger.pending_count(con),
-                merged=int(merged) if merged.isdigit() else 0,
-                merge_ran=merge_ran,
                 view="grid" if view == "grid" else "list",
                 owner=owner,
                 kind=kind if kind in ("movie", "tv", "music", "other") else "movie",
@@ -1156,16 +1132,6 @@ class Handler(BaseHTTPRequestHandler):
                     "Location": base + "admin?jellyfin=" + quote(message)})
                 return self.respond(303, "", extra={
                     "Location": base + "admin?jellyfin=" + quote(message)})
-
-            if route.rstrip("/").endswith("/merge"):
-                try:
-                    result = merger.merge(con)
-                    added = result["items"] if result else 0
-                    back = "?merged=%d" % added
-                except Exception as exc:          # say so instead of failing quietly
-                    log("merge failed: %s" % exc)
-                    back = "?merge_failed=1"
-                return self.respond(303, "", extra={"Location": base + back})
 
             match = re.search(r"/title/(\d+)/art/?$", route)
             if match:

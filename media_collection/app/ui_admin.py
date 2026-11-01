@@ -118,7 +118,7 @@ def _roots_block(base, roots):
 """ % (table, html.escape(base))
 
 
-def render(base, viewer, stats, pending=0, message=None, refresh=None, duplicates=0,
+def render(base, viewer, stats, message=None, refresh=None, duplicates=0,
            roots=(), jellyfin=None, scan_message="", players=(), chosen=None):
     parts = []
     if message:
@@ -146,15 +146,7 @@ def render(base, viewer, stats, pending=0, message=None, refresh=None, duplicate
 </p>
 """ % (html.escape(base), html.escape(base)))
 
-    if pending:
-        merge = ('<form method="post" action="%smerge"><p>%d item(s) from the bundled '
-                 "catalogue are not in this library. "
-                 '<button type="submit">Merge them</button></p></form>'
-                 % (html.escape(base), pending))
-    else:
-        merge = ('<p class="muted">Nothing pending from the bundled catalogue - every '
-                 "row it carries is already in this library. Duplicate titles are "
-                 "listed below.</p>")
+    merge = ""
     dedupe = ('<form method="post" action="%sadmin/dedupe"><p>%d title(s) exist twice — '
               "typically one row from the disc import (no year) and one from iTunes. "
               '<button type="submit">Merge duplicate titles</button></p></form>'

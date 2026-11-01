@@ -6,12 +6,6 @@ DB=${DB_PATH:-/data/media.db}
 APP=${APP_DIR:-/app}
 mkdir -p "$(dirname "$DB")"
 
-# First run: adopt a bundled catalogue (owner "Matt", imported from the CSV export).
-if [ ! -f "$DB" ] && [ -f "$APP/seed/media.db" ]; then
-    echo "seeding $DB from bundled catalogue"
-    cp "$APP/seed/media.db" "$DB"
-fi
-
 VERSION=${ADDON_VERSION:-}
 if [ -z "$VERSION" ] && [ -f "$APP/addon-config.yaml" ]; then
     VERSION=$(sed -n 's/^version: *//p' "$APP/addon-config.yaml" | tr -d '"' | head -1)
@@ -32,9 +26,7 @@ if ! "$APP/migrate.sh" "$DB"; then
     exit 1
 fi
 
-# Adopt anything the bundled catalogue has that this database is missing, then
-# fix formats that were embedded in titles ("... 3D" / "... 4K").
-DB_PATH="$DB" python3 "$APP/merger.py" "$DB" || echo "merge step skipped"
+# Fix formats that were embedded in titles ("... 3D" / "... 4K").
 DB_PATH="$DB" python3 "$APP/normalise.py" "$DB" || echo "normalise step skipped"
 DB_PATH="$DB" python3 "$APP/dedupe.py" "$DB" || echo "dedupe step skipped"
 

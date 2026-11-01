@@ -14,7 +14,6 @@ RUN apk add --no-cache python3 sqlite
 WORKDIR /app
 COPY app/        /app/
 COPY config.yaml /app/addon-config.yaml
-COPY seed/       /app/seed/
 COPY migrations/ /app/migrations/
 COPY migrate.sh  /app/migrate.sh
 COPY run.sh      /run.sh

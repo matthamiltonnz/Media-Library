@@ -30,8 +30,7 @@ occasional jobs:
 - **Import a CSV** — staged review, as described above.
 - **Export** — `export.csv` (every copy you can see, UTF-8 with BOM so Excel opens
   it cleanly) and `export.json` (the same rows as a backup-friendly document).
-- **Maintenance** — the bundled-catalogue merge, with a count of anything still
-  missing.
+- **Maintenance** — folding duplicate titles the importers created.
 
 Exports are per viewer: shared copies plus your own private ones.
 
@@ -347,19 +346,16 @@ catalogue fills that gap itself:
 
 ## Updating a running install
 
-`/data/media.db` is created once — later versions of the bundled catalogue never
-overwrite it. On every start the add-on now:
+`/data/media.db` is created once and never replaced. The image ships no catalogue at
+all — a fresh install starts empty. On every start the add-on:
 
-1. **merges** any bundled rows your library is missing (discs match on barcode,
-   barcodeless copies on title + year + owner), and
-2. **normalises** titles that carry the format in their name: copies of
+1. **normalises** titles that carry the format in their name: copies of
    `… 3D` / `… 4K` / `… Ultra HD` are flagged **3D Blu-ray** / **4K Blu-ray** and
    the suffix is stripped from the title (folding into an existing title of the
    same name and year if there is one).
 
-Both steps are idempotent and log a one-line summary (`merge: +N copies`,
-`normalise: N copies flagged …`). The catalogue page still offers a **Merge them**
-button if you'd rather trigger the merge by hand.
+All of these steps are idempotent and log a one-line summary (`normalise: N copies
+flagged …`).
 
 A third step, **dedupe**, then folds titles that describe the same film: the disc
 import has no year while the iTunes import does, so "Avengers: Endgame" could exist

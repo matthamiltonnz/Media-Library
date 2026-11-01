@@ -50,15 +50,15 @@ media_collection/            the add-on
 ├── Dockerfile / build.yaml  image build (python3 + sqlite, no pip packages)
 ├── run.sh                   repair → migrate → merge → normalise → serve
 ├── migrate.sh               transactional migration runner
-├── migrations/              0001…0005
-├── app/                     the web app (stdlib only)
-└── seed/                    optional bundled catalogue (see seed/README.md)
+├── migrations/              the schema, one file per change
+└── app/                     the web app (stdlib only)
 ```
 
 ## Privacy
 
-The database is not part of this repository. `seed/media.db` and personal CSVs are
-git-ignored, so a clone starts empty and imports your own exports.
+The database is not part of this repository, and the image ships no catalogue at all:
+a fresh install starts empty and is filled by your own imports or by adding copies by
+hand. Personal CSVs are git-ignored too, so a clone carries no household data.
 
 ## Licence
 
