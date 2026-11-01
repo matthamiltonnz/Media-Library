@@ -234,7 +234,7 @@ def visible_clause(query="", kind="", owner=None, format="",
     if owner:
         where.append("i.owner_id = ?")
         params.append(int(owner))
-    else:
+    if True:  # an owner filter must not switch the format filter off
         wanted = [f for f in (format or "").split(",") if f]
         discs = [f for f in wanted if f != "rip"]
         any_of = []
