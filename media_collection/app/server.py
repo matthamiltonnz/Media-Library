@@ -1371,9 +1371,6 @@ class Handler(BaseHTTPRequestHandler):
                 ).fetchone()
                 if row is None:
                     return self.respond(404, "Not found", "text/plain; charset=utf-8")
-                if row["owner_id"] != viewer["id"]:
-                    return self.respond(403, "Only the owner can remove a copy.",
-                                        "text/plain; charset=utf-8")
                 con.execute("DELETE FROM items WHERE id = ?", (int(match.group(1)),))
                 con.commit()
                 return self.respond(303, "", extra={"Location": base})

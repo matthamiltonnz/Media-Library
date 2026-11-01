@@ -259,7 +259,7 @@ def _copies_tab(base, row, items, digital, formats, labels, users,
         parts.append('<p class="muted">No copies yet.</p>')
     for item in items:
         store = stores.get(item["id"])
-        if viewer_id is None or item["owner_id"] == viewer_id:
+        if True:      # any household member may remove a copy, not just its owner
             remove = ('<form method="post" action="%sitems/%d/delete"'
                       " onsubmit=\"return confirm('Remove this copy?')\">"
                       '<p><button type="submit" class="danger">Delete copy'

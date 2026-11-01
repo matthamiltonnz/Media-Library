@@ -60,6 +60,22 @@ def merge(con):
     return folded
 
 
+def reclassify_rips(con):
+    """A copy with a file behind it is a ripped file, whatever it was called.
+
+    The film import used to name a file's copy after the folder ("... 4K"), which
+    made a rip look like a second disc. The format follows the source now.
+    """
+    changed = con.execute(
+        "UPDATE items SET format = 'ripped'"
+        " WHERE format <> 'ripped'"
+        "   AND EXISTS (SELECT 1 FROM digital_sources r"
+        "                WHERE r.item_id = items.id AND r.provider = 'rip')"
+    ).rowcount
+    con.commit()
+    return changed
+
+
 def users(con):
     """Fold users that differ only in case into the oldest profile.
 
@@ -186,6 +202,7 @@ def main():
                                    ", ".join("#%d" % o["id"] for o in others)))
         return
     print("dedupe: %d duplicate title(s) folded" % merge(con))
+    print("dedupe: %d copy(s) relabelled as ripped files" % reclassify_rips(con))
     print("dedupe: %d duplicate user(s) folded" % users(con))
     print("dedupe: %d mixed copy(s) split" % split_mixed(con))
     print("dedupe: %d duplicate copy(s) folded" % copies(con))

@@ -240,7 +240,7 @@ def main():
         item_id = con.execute(
             "INSERT INTO items (title_id, owner_id, format, edition, visibility, notes)"
             " VALUES (?, ?, ?, ?, 'shared', ?)",
-            (title_id, owner_id, fmt, edition, NOTE)).lastrowid
+            (title_id, owner_id, "ripped", edition, NOTE)).lastrowid
         if existing:
             con.execute("UPDATE digital_sources SET item_id = ?, notes = ?"
                         " WHERE id = ?", (item_id, why, existing["id"]))
