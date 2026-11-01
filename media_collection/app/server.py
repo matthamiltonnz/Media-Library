@@ -224,7 +224,7 @@ RIP_COPY = ("EXISTS (SELECT 1 FROM digital_sources r"
 
 
 def visible_clause(query="", kind="", owner=None, format="",
-                   rips=False):
+                   rips=False, only=False):
     where = ["(i.visibility = 'shared' OR i.owner_id = ?)"]
     params = []                              # viewer id is supplied by the caller
     if query:
@@ -248,12 +248,22 @@ def visible_clause(query="", kind="", owner=None, format="",
             params += discs
         if any_of:
             where.append("(" + " OR ".join(any_of) + ")")
+        if only and any_of:
+            # only the titles whose every copy is one of the picked formats
+            keep = list(discs)
+            if "rip" in wanted:
+                keep.append("ripped")
+            where.append(
+                "NOT EXISTS (SELECT 1 FROM items ox WHERE ox.title_id = t.id"
+                " AND ox.format NOT IN (%s))"
+                % ", ".join("?" * len(keep)))
+            params += keep
     return " AND ".join(where), params
 
 
 def library_stats(con, viewer_id, query="", kind="", owner=None,
-                  format="", rips=False):
-    clause, extra = visible_clause(query, kind, owner, format, rips)
+                  format="", rips=False, only=False):
+    clause, extra = visible_clause(query, kind, owner, format, rips, only)
     if not rips:
         clause += " AND NOT " + RIP_ONLY
     params = [viewer_id] + extra
@@ -473,7 +483,8 @@ ROW = Template("""<tr>
 
 
 def render_index(con, viewer, base, error=None, query="",
-                 view="list", kind="", owner=None, format="", rips=False):
+                 view="list", kind="", owner=None, format="", rips=False,
+                 only=False):
     bits = []
     if query:
         bits.append("q=" + quote(query))
@@ -526,7 +537,7 @@ def render_index(con, viewer, base, error=None, query="",
     carry = "".join(hidden(name, value) for name, value in (
         ("q", query), ("kind", kind), ("owner", owner),
         ("view", view if view != "list" else ""),
-        ("rips", 1 if rips else "")) if value not in ("", None, 0))
+        ("rips", 1 if rips else ""), ("only", 1 if only else "")) if value not in ("", None, 0))
     boxes = "".join(
         '<label class="tallybox"><input type="checkbox" name="format"'
         ' value="%s"%s onchange="this.form.submit()"> %s'
@@ -537,9 +548,12 @@ def render_index(con, viewer, base, error=None, query="",
            row["n"])
         for row in formats)
     totals = ('<form class="tally" method="get" action="%s">%s%s'
+              '<label class="tallybox"><input type="checkbox" name="only"'
+              ' value="1"%s onchange="this.form.submit()"> only these</label>'
               '<button type="submit">Apply</button>%s</form>'
               % (html.escape(base), carry,
                  boxes or '<span class="muted">nothing yet</span>',
+                 " checked" if only else "",
                  ' <a href="%s">clear</a>' % html.escape(tally_link(""))
                  if picked else ""))
     mode_counts = {row["kind"]: row["n"] for row in con.execute(
@@ -581,7 +595,7 @@ def render_index(con, viewer, base, error=None, query="",
     notice = ""
     if view == "grid":
         clause, extra = visible_clause(query, kind, owner, format,
-                                       rips)
+                                       rips, only)
         cards = con.execute(
             "SELECT t.id, t.name, t.release_year, t.poster_url, t.kind,"
             " COALESCE(t.art_source, '') AS art_source,"
@@ -988,6 +1002,7 @@ class Handler(BaseHTTPRequestHandler):
             fmt = ",".join(f for f in parse_qs(urlparse(self.path).query)
                            .get("format", []) if f)
             rips = bool(parse_qs(urlparse(self.path).query).get("rips"))
+            only = bool(parse_qs(urlparse(self.path).query).get("only"))
             if route.rstrip("/").endswith("/artists"):
                 want = (parse_qs(urlparse(self.path).query).get("view")
                         or ["grid"])[0]
@@ -1018,7 +1033,7 @@ class Handler(BaseHTTPRequestHandler):
                 view="grid" if view == "grid" else "list",
                 owner=owner,
                 kind=kind if kind in ("movie", "tv", "music", "other") else "movie",
-                format=fmt, rips=rips))
+                format=fmt, rips=rips, only=only))
         finally:
             con.close()
 
