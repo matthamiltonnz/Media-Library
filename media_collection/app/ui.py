@@ -147,6 +147,18 @@ SHELL = """<!doctype html>
   });
 })();
 </script>
+<script>
+(function () {
+  var dlg = document.getElementById('addcopy');
+  var pick = document.querySelector('select[name="kindpick"]');
+  if (!dlg || !pick) return;
+  dlg.addEventListener('toggle', function (e) {
+    if (!e.target.open) return;
+    var k = dlg.querySelector('input[name="kind"]');
+    if (k) pick.value = k.value;
+  });
+})();
+</script>
 </body>
 </html>
 """
