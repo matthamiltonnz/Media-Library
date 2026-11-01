@@ -414,7 +414,6 @@ PAGE = Template("""<!doctype html>
 </head>
 <body>
 <h1>Media Collection<a class="admin" href="${base}admin">admin</a></h1>
-   plus your own private copies.</p>
 <p class="sub"><button type="button" onclick="addcopy.showModal()">+ Add a title</button></p>
 $modes
 <nav class="modes owners">$owner_tabs</nav>
