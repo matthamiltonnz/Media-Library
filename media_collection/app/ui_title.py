@@ -369,8 +369,13 @@ def _art_block(base, row, jellyfin_link):
            _text("%stitle/%d/art" % (base, row["id"])),
            _text(kind), _text(url), _text(url), _text(label))
         for kind, url, label in picks)
-    return ('<h2>Cover art</h2><p class="sub">Pick the image the shelf shows for '
-            'this title.</p><div class="artpicks">%s</div>' % cells)
+    return ('<p><button type="button" onclick="artpick.showModal()">'
+            'Choose cover art</button></p>'
+            '<dialog id="artpick"><h2>Cover art</h2>'
+            '<p class="sub">Pick the image the shelf shows for this title.</p>'
+            '<div class="artpicks">%s</div>'
+            '<p><button type="button" onclick="artpick.close()">Close</button></p>'
+            '</dialog>' % cells)
 
 
 def render(base, row, items, digital, formats, labels, summary=None, error=None,
@@ -409,13 +414,11 @@ def render(base, row, items, digital, formats, labels, summary=None, error=None,
                  '</form>' % (_text(base), row["id"]))
 
     copies_on = tab == "copies"
-    parts.append('<nav class="tabs">'
-                 '<a href="%stitle/%d"%s>About</a>'
-                 '<a href="%stitle/%d?tab=copies"%s>Copies (%d)</a></nav>'
-                 % (_text(base), row["id"],
-                    "" if copies_on else ' class="on"',
-                    _text(base), row["id"],
-                    ' class="on"' if copies_on else "", len(items)))
+    tabs = ""
+    if copies_on:                        # a way back from the copies tab
+        tabs = ('<nav class="tabs"><a href="%stitle/%d">About</a></nav>'
+                % (_text(base), row["id"]))
+    parts.append(tabs)
 
     if copies_on:
         parts.append(_copies_tab(base, row, items, digital, formats, labels,

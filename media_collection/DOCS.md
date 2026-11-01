@@ -299,9 +299,10 @@ certification, IMDb/TMDB links and plot; every copy you own with an inline edito
 watched**); the digital sources; and **Refresh metadata** plus a **Watched today**
 button per copy.
 
-**Cover art** sits under the poster: every image the lookups have offered for the
-title (Wikipedia, Wikidata's IMDb/TMDB hand-off, MusicBrainz covers) plus the
-Jellyfin still, each a thumbnail you can click to make it the one the shelf shows.
+**Choose cover art** sits under the poster and opens a dialog with every image the
+lookups have offered for the title (Wikipedia, Wikidata's IMDb/TMDB hand-off,
+MusicBrainz covers) plus the Jellyfin still; click one to make it the image the shelf
+shows.
 The choice is stored in `titles.art_source` (`jellyfin` or `poster`), so a refresh
 no longer overwrites a poster you picked, and the urls themselves are kept in
 `titles.art_candidates` (JSON) so you can switch back later.
