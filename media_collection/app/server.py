@@ -1274,10 +1274,18 @@ class Handler(BaseHTTPRequestHandler):
                 link = jellyfin.link_for_title(con, title_id)
                 try:
                     chosen = field(form, "source_id")
-                    jf_id = (con.execute(
-                        "SELECT jf_id FROM jellyfin_links WHERE item_id = ?"
-                        " ORDER BY jf_id LIMIT 1", (int(chosen),)).fetchone()
-                        if chosen.isdigit() else None)
+                    jf_id = None
+                    if chosen.isdigit():
+                        # source_id is a digital_sources row, not an item: hop
+                        # through it, or we hand Jellyfin an unrelated id
+                        owner_item = con.execute(
+                            "SELECT item_id FROM digital_sources WHERE id = ?",
+                            (int(chosen),)).fetchone()
+                        if owner_item:
+                            jf_id = con.execute(
+                                "SELECT jf_id FROM jellyfin_links WHERE item_id = ?"
+                                " ORDER BY jf_id LIMIT 1",
+                                (owner_item["item_id"],)).fetchone()
                     summary = jellyfin.play(con, field(form, "session_id"),
                                             (jf_id["jf_id"] if jf_id else None)
                                             or (link["jf_id"] if link else ""))
