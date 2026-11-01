@@ -1155,6 +1155,19 @@ class Handler(BaseHTTPRequestHandler):
                 refresh_job.start(DB_PATH, force=bool(field(form, "force")))
                 return self.respond(303, "", extra={"Location": base + "admin"})
 
+            if route.rstrip("/").endswith("/admin/players"):
+                # the admin page posts the ticked players; the route has to
+                # exist or the form lands on "Not found"
+                if "clear" in form:
+                    picked = []
+                else:
+                    picked = [v.strip() for v in form.get("player", [])
+                              if v and v.strip()]
+                playback.choose(con, picked)
+                return self.respond(303, "",
+                                    {"Location": base + "admin?players=%d"
+                                     % len(picked)})
+
             if route.rstrip("/").endswith("/admin/scan"):
                 scan.start(DB_PATH, repair=True)
                 return self.respond(303, "", extra={"Location": base + "admin?scan=1"})
