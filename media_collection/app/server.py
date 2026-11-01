@@ -581,13 +581,16 @@ def render_index(con, viewer, base, error=None, query="",
         " GROUP BY i.owner_id"
         % (" AND t.kind = ?" if kind else ""),
         [viewer["id"]] + ([kind] if kind else []))}
+    # the current kind applies here too, or "Everyone" sits at the all-kinds
+    # total while the chips beside it count only this kind
     everyone = con.execute(
         "SELECT COUNT(DISTINCT t.id) FROM items i"
         " JOIN titles t ON t.id = i.title_id"
         " WHERE (i.visibility = 'shared' OR i.owner_id = ?)"
         "   AND i.owner_id IN (SELECT id FROM users"
-        "                   WHERE username <> 'rips')",
-        (viewer["id"],)).fetchone()[0]
+        "                   WHERE username <> 'rips')"
+        + (" AND t.kind = ?" if kind else ""),
+        [viewer["id"]] + ([kind] if kind else [])).fetchone()[0]
     owner_tabs = "".join(
         ['<a class="%s" href="%s?kind=%s%s">Everyone<span class="n">%d</span></a>'
          % ("" if owner else "current", html.escape(base), kind,
