@@ -20,6 +20,23 @@ class Throttle(Exception):
     """Wikimedia asked us to slow down (HTTP 429)."""
 
 
+def remember_art(con, title_id, source, url):
+    """Add a poster url to the title's remembered candidates (one row per url)."""
+    row = con.execute("SELECT art_candidates FROM titles WHERE id = ?",
+                      (title_id,)).fetchone()
+    if row is None:
+        return
+    try:
+        candidates = json.loads(row["art_candidates"] or "[]")
+    except ValueError:
+        candidates = []
+    if any(item.get("url") == url for item in candidates):
+        return
+    candidates.append({"source": source, "url": url})
+    con.execute("UPDATE titles SET art_candidates = ? WHERE id = ?",
+                (json.dumps(candidates[-12:]), title_id))
+
+
 def clean_title(name):
     return FORMAT_SUFFIX.sub("", name or "").strip()
 
@@ -441,6 +458,13 @@ def refresh(con, title_id):
         return "no metadata found for %s" % cleaned
 
     updates["metadata_source"] = "+".join(source) or "manual"
+    if updates.get("poster_url"):
+        # keep every poster a lookup offers, so the shelf can switch between them
+        remember_art(con, title_id, updates["metadata_source"], updates["poster_url"])
+        kept = con.execute("SELECT art_source FROM titles WHERE id = ?",
+                           (title_id,)).fetchone()
+        if kept and kept["art_source"] == "poster":
+            updates.pop("poster_url")      # a chosen poster stays chosen
     columns = ", ".join("%s = ?" % key for key in updates)
     con.execute("UPDATE titles SET %s, metadata_updated_at = datetime('now') WHERE id = ?"
                 % columns, list(updates.values()) + [title_id])

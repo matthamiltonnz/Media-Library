@@ -56,6 +56,13 @@ SHELL = """<!doctype html>
   .tally.current { font-weight: 700; border-bottom-style: solid; }
   img.cover { float: right; width: 170px; max-width: 38%; border-radius: 8px;
               margin: 0 0 .8rem 1.2rem; box-shadow: 0 6px 18px #0003; }
+  .artpicks { display: flex; flex-wrap: wrap; gap: .5rem; margin: 0 0 1rem; }
+  .artpick { margin: 0; display: grid; gap: .2rem; justify-items: center; }
+  .artpick button { padding: 0; border: 1px solid #8886; border-radius: 6px;
+                    overflow: hidden; background: none; line-height: 0; }
+  .artpick img { width: 74px; height: 111px; object-fit: cover; display: block; }
+  .artpick span { font-size: .7rem; opacity: .7; }
+  .artpick.current button { outline: 2px solid #4a9c6d; outline-offset: 1px; }
   button.danger { border-color: #b4453c; color: #e8837a; }
   dialog.sheet { border: 1px solid #8886; border-radius: 10px; padding: 1.2rem 1.4rem;
                  max-width: 34rem; width: 92%; background: Canvas; color: CanvasText; }
@@ -124,6 +131,20 @@ SHELL = """<!doctype html>
 </body>
 </html>
 """
+
+
+def pick_cover(base, jf_id, poster_url, art_source=""):
+    """The image to show for a title: a chosen one first, else Jellyfin, else the poster.
+
+    art_source is empty for titles nobody has chosen art for, which keeps the old
+    behaviour (a Jellyfin still beats the fetched poster).
+    """
+    still = base + "art/" + jf_id if jf_id else ""
+    if art_source == "poster" and poster_url:
+        return poster_url
+    if art_source == "jellyfin" and still:
+        return still
+    return still or (poster_url or "")
 
 
 def page(base, title, content, back=""):

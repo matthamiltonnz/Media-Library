@@ -1,6 +1,7 @@
 """Title detail page: the title itself, its copies, and one button to play it."""
 
 import html
+import json
 
 import ui
 
@@ -339,6 +340,39 @@ def _title_form(base, row):
              _text(row["release_year"] or ""), options, ids)
 
 
+def _art_block(base, row, jellyfin_link):
+    """Pick which image the shelf shows: the Jellyfin still or a fetched poster."""
+    picks = []
+    if jellyfin_link:
+        picks.append(("jellyfin", base + "art/" + jellyfin_link["jf_id"], "Jellyfin"))
+    try:
+        for item in json.loads(row["art_candidates"] or "[]"):
+            url = item.get("url")
+            if url:
+                picks.append(("poster", url, item.get("source") or "lookup"))
+    except (ValueError, AttributeError):
+        pass
+    if row["poster_url"] and not any(p[1] == row["poster_url"] for p in picks):
+        picks.append(("poster", row["poster_url"],
+                      row["metadata_source"] or "poster"))
+    if len(picks) < 2:                   # nothing to choose between
+        return ""
+    current = ui.pick_cover(base, jellyfin_link["jf_id"] if jellyfin_link else None,
+                            row["poster_url"], row["art_source"] or "")
+    cells = "".join(
+        '<form class="artpick%s" method="post" action="%s">'
+        '<input type="hidden" name="source" value="%s">'
+        '<input type="hidden" name="url" value="%s">'
+        '<button type="submit"><img src="%s" alt="" loading="lazy"></button>'
+        '<span>%s</span></form>'
+        % (" current" if url == current else "",
+           _text("%stitle/%d/art" % (base, row["id"])),
+           _text(kind), _text(url), _text(url), _text(label))
+        for kind, url, label in picks)
+    return ('<h2>Cover art</h2><p class="sub">Pick the image the shelf shows for '
+            'this title.</p><div class="artpicks">%s</div>' % cells)
+
+
 def render(base, row, items, digital, formats, labels, summary=None, error=None,
            ripped_root="", roots=(), owner=None, players=(), last_player=None,
            jellyfin_link=None, jellyfin_sessions=(),
@@ -350,11 +384,12 @@ def render(base, row, items, digital, formats, labels, summary=None, error=None,
     if error:
         parts.append('<p class="banner bad">%s</p>' % _text(error))
 
-    cover = (base + "art/" + jellyfin_link["jf_id"] if jellyfin_link
-             else (row["poster_url"] or ""))
+    cover = ui.pick_cover(base, jellyfin_link["jf_id"] if jellyfin_link else None,
+                          row["poster_url"], row["art_source"] or "")
     if cover:
         parts.append('<img class="cover" src="%s" alt="" loading="lazy">'
                      % _text(cover))
+    parts.append(_art_block(base, row, jellyfin_link))
 
     facts = _facts(row)
     if facts:

@@ -26,6 +26,7 @@ import playback
 import refresh_job
 import scan
 import artists
+import ui
 import ui_artists
 import ui_admin
 import ui_import
@@ -558,6 +559,7 @@ def render_index(con, viewer, base, error=None, query="", pending=0, merged=0,
                                        rips)
         cards = con.execute(
             "SELECT t.id, t.name, t.release_year, t.poster_url, t.kind,"
+            " COALESCE(t.art_source, '') AS art_source,"
             " (SELECT l.jf_id FROM jellyfin_links l"
             "   JOIN items li ON li.id = l.item_id"
             "   WHERE li.title_id = t.id ORDER BY l.jf_kind LIMIT 1) AS jf_id,"
@@ -579,8 +581,8 @@ def render_index(con, viewer, base, error=None, query="", pending=0, merged=0,
                     case_class(card["kind"], card["formats"]),
                     case_band(card["kind"], card["formats"]),
                     '<img src="%s" alt="" loading="lazy">' % html.escape(
-                        base + "art/" + card["jf_id"] if card["jf_id"]
-                        else card["poster_url"])
+                        ui.pick_cover(base, card["jf_id"], card["poster_url"],
+                                      card["art_source"]))
                     if (card["jf_id"] or card["poster_url"])
                     else '<span class="muted">no image</span>'),
                 html.escape(card["name"]),
@@ -1151,6 +1153,22 @@ class Handler(BaseHTTPRequestHandler):
                 added = result["items"] if result else 0
                 return self.respond(303, "", extra={
                     "Location": base + "?merged=%d" % added})
+
+            match = re.search(r"/title/(\d+)/art/?$", route)
+            if match:
+                title_id = int(match.group(1))
+                source = field(form, "source")
+                url = field(form, "url").strip()
+                if source == "jellyfin":
+                    con.execute("UPDATE titles SET art_source = 'jellyfin'"
+                                " WHERE id = ?", (title_id,))
+                elif source == "poster" and url.startswith(("http://", "https://", "/")):
+                    con.execute("UPDATE titles SET poster_url = ?,"
+                                " art_source = 'poster' WHERE id = ?",
+                                (url, title_id))
+                con.commit()
+                return self.respond(303, "", extra={
+                    "Location": base + "title/%d" % title_id})
 
             match = re.search(r"/title/(\d+)/sources/?$", route)
             if match:
