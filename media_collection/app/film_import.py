@@ -218,12 +218,13 @@ def main():
             continue
         relative = "/".join(part for part in (prefix, folder) if part and part != ".")
         existing = None
-        if root_id:
+        if relative:
             existing = con.execute(
                 "SELECT d.id, i.owner_id FROM digital_sources d"
                 " JOIN items i ON i.id = d.item_id"
-                " WHERE d.root_id = ? AND d.path = ?",
-                (root_id, relative)).fetchone()
+                " WHERE d.provider = 'rip' AND d.path = ?"
+                "   AND COALESCE(d.root_id, 0) = COALESCE(?, 0)",
+                (relative, root_id)).fetchone()
         if existing and existing["owner_id"] == owner_id:
             continue
         films += 1

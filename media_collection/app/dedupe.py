@@ -60,6 +60,42 @@ def merge(con):
     return folded
 
 
+def copies(con):
+    """Fold copies created from the same file into the oldest one.
+
+    A rip import that runs before its media root is known used to add a fresh copy
+    on every start (digital_sources.root_id is NULL, so the "already imported"
+    lookup was skipped). This puts them back together: the first item keeps the
+    sources, later duplicates are dropped with anything hanging off them.
+    """
+    folded = 0
+    rows = con.execute(
+        "SELECT d.id AS source_id, d.item_id, d.root_id, d.path"
+        "  FROM digital_sources d JOIN items i ON i.id = d.item_id"
+        " WHERE d.path IS NOT NULL"
+        " ORDER BY i.id, d.id").fetchall()
+    keep = {}
+    for row in rows:
+        key = (row["root_id"] or 0, row["path"])
+        first = keep.get(key)
+        if first is None:
+            keep[key] = row["item_id"]
+            continue
+        if row["item_id"] == first:
+            continue
+        con.execute("UPDATE digital_sources SET item_id = ? WHERE id = ?",
+                    (first, row["source_id"]))
+        duplicate = row["item_id"]
+        if con.execute("SELECT 1 FROM digital_sources WHERE item_id = ? LIMIT 1",
+                       (duplicate,)).fetchone():
+            continue                     # it still has a file of its own
+        con.execute("DELETE FROM jellyfin_links WHERE item_id = ?", (duplicate,))
+        con.execute("DELETE FROM items WHERE id = ?", (duplicate,))
+        folded += 1
+    con.commit()
+    return folded
+
+
 def main():
     path = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("DB_PATH", "/data/media.db")
     con = sqlite3.connect(path)
@@ -71,6 +107,7 @@ def main():
                                    ", ".join("#%d" % o["id"] for o in others)))
         return
     print("dedupe: %d duplicate title(s) folded" % merge(con))
+    print("dedupe: %d duplicate copy(s) folded" % copies(con))
 
 
 if __name__ == "__main__":
