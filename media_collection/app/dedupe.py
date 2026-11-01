@@ -61,12 +61,12 @@ def merge(con):
 
 
 def copies(con):
-    """Fold copies created from the same file into the oldest one.
+    """Fold repeated copies of the same thing into one.
 
-    A rip import that runs before its media root is known used to add a fresh copy
-    on every start (digital_sources.root_id is NULL, so the "already imported"
-    lookup was skipped). This puts them back together: the first item keeps the
-    sources, later duplicates are dropped with anything hanging off them.
+    Two shapes of duplicate build up when a rip import runs on every start: the
+    same file re-imported (same digital_sources.path), and the copy the import
+    left behind after moving its source to a newer row. Barcoded copies are never
+    folded — two discs with different barcodes are two discs.
     """
     folded = 0
     rows = con.execute(
@@ -75,25 +75,47 @@ def copies(con):
         " WHERE d.path IS NOT NULL"
         " ORDER BY i.id, d.id").fetchall()
     keep = {}
-    for row in rows:
+    for row in rows:                     # the same file imported twice
         key = (row["root_id"] or 0, row["path"])
-        first = keep.get(key)
-        if first is None:
-            keep[key] = row["item_id"]
-            continue
+        first = keep.setdefault(key, row["item_id"])
         if row["item_id"] == first:
             continue
         con.execute("UPDATE digital_sources SET item_id = ? WHERE id = ?",
                     (first, row["source_id"]))
-        duplicate = row["item_id"]
-        if con.execute("SELECT 1 FROM digital_sources WHERE item_id = ? LIMIT 1",
-                       (duplicate,)).fetchone():
-            continue                     # it still has a file of its own
-        con.execute("DELETE FROM jellyfin_links WHERE item_id = ?", (duplicate,))
-        con.execute("DELETE FROM items WHERE id = ?", (duplicate,))
-        folded += 1
+        if _drop_if_empty(con, row["item_id"]):
+            folded += 1
+
+    groups = con.execute(
+        "SELECT title_id, owner_id, format, COALESCE(edition, '') AS edition,"
+        "       visibility, group_concat(id) AS ids"
+        "  FROM items WHERE upc_ean IS NULL"
+        " GROUP BY title_id, owner_id, format, COALESCE(edition, ''), visibility"
+        " HAVING COUNT(*) > 1").fetchall()
+    for group in groups:                 # the same copy added twice
+        ids = [int(i) for i in group["ids"].split(",")]
+        with_source = con.execute(
+            "SELECT item_id FROM digital_sources WHERE item_id IN (%s) LIMIT 1"
+            % ", ".join("?" * len(ids)), ids).fetchone()
+        keeper = with_source["item_id"] if with_source else min(ids)
+        for item_id in ids:
+            if item_id == keeper:
+                continue
+            con.execute("UPDATE digital_sources SET item_id = ? WHERE item_id = ?",
+                        (keeper, item_id))
+            if _drop_if_empty(con, item_id):
+                folded += 1
     con.commit()
     return folded
+
+
+def _drop_if_empty(con, item_id):
+    """Remove a copy that no longer has a file of its own behind it."""
+    if con.execute("SELECT 1 FROM digital_sources WHERE item_id = ? LIMIT 1",
+                   (item_id,)).fetchone():
+        return False
+    con.execute("DELETE FROM jellyfin_links WHERE item_id = ?", (item_id,))
+    con.execute("DELETE FROM items WHERE id = ?", (item_id,))
+    return True
 
 
 def main():

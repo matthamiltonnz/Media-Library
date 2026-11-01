@@ -220,7 +220,7 @@ def main():
         existing = None
         if relative:
             existing = con.execute(
-                "SELECT d.id, i.owner_id FROM digital_sources d"
+                "SELECT d.id, d.item_id, i.owner_id FROM digital_sources d"
                 " JOIN items i ON i.id = d.item_id"
                 " WHERE d.provider = 'rip' AND d.path = ?"
                 "   AND COALESCE(d.root_id, 0) = COALESCE(?, 0)",
@@ -244,6 +244,14 @@ def main():
         if existing:
             con.execute("UPDATE digital_sources SET item_id = ?, notes = ?"
                         " WHERE id = ?", (item_id, why, existing["id"]))
+            # the row we adopted from must not be left as a sourceless copy
+            if existing["item_id"] != item_id:
+                still = con.execute("SELECT 1 FROM digital_sources WHERE item_id = ?"
+                                    " LIMIT 1", (existing["item_id"],)).fetchone()
+                if not still:
+                    con.execute("DELETE FROM jellyfin_links WHERE item_id = ?",
+                                (existing["item_id"],))
+                    con.execute("DELETE FROM items WHERE id = ?", (existing["item_id"],))
             adopted += 1
         else:
             con.execute("INSERT INTO digital_sources"
