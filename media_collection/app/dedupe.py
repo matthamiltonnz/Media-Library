@@ -131,7 +131,7 @@ def orphans(con):
     """
     dropped = con.execute(
         "DELETE FROM items"
-        " WHERE format = 'ripped' AND upc_ean IS NULL"
+        " WHERE format = 'ripped' AND upc_ean IS NULL AND notes IS NULL"
         "   AND NOT EXISTS (SELECT 1 FROM digital_sources d"
         "                    WHERE d.item_id = items.id AND d.provider = 'rip')").rowcount
     # a stale pointer is worse than none: only a copy with a file keeps rip_path
