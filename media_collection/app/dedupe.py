@@ -100,6 +100,29 @@ def users(con):
                     (first, row["id"]))
         con.execute("DELETE FROM users WHERE id = ?", (row["id"],))
         folded += 1
+
+    # "Matt" and "Matt Hamilton" are one person: fold the short name into the
+    # longer one, keeping the profile Home Assistant knows (username "ha-…").
+    left = con.execute("SELECT id, username, display_name FROM users"
+                       " ORDER BY id").fetchall()
+    for short in left:
+        name = (short["display_name"] or "").strip()
+        if not name or " " in name:
+            continue
+        for long in left:
+            other = (long["display_name"] or "").strip()
+            if long["id"] == short["id"] or not other.lower().startswith(name.lower() + " "):
+                continue
+            target, gone = long["id"], short["id"]
+            if (short["username"] or "").startswith("ha-"):
+                target, gone = short["id"], long["id"]
+            con.execute("UPDATE items SET owner_id = ? WHERE owner_id = ?", (target, gone))
+            con.execute("UPDATE items SET added_by = ? WHERE added_by = ?", (target, gone))
+            con.execute("UPDATE titles SET created_by = ? WHERE created_by = ?",
+                        (target, gone))
+            con.execute("DELETE FROM users WHERE id = ?", (gone,))
+            folded += 1
+            break
     con.commit()
     return folded
 
