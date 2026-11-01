@@ -1503,6 +1503,14 @@ class Handler(BaseHTTPRequestHandler):
                 ).fetchone()
                 if row is None:
                     return self.respond(404, "Not found", "text/plain; charset=utf-8")
+                title_id = con.execute("SELECT title_id FROM items WHERE id = ?",
+                                        (int(match.group(1)),)).fetchone()["title_id"]
+                con.execute("DELETE FROM digital_sources WHERE item_id = ?",
+                            (int(match.group(1)),))
+                # a title with no copies left is not a title: it goes, with its file rows
+                con.execute("DELETE FROM titles WHERE id = ? AND NOT EXISTS"
+                            " (SELECT 1 FROM items WHERE title_id = ?)",
+                            (title_id, title_id))
                 con.execute("DELETE FROM items WHERE id = ?", (int(match.group(1)),))
                 con.commit()
                 return self.respond(303, "", extra={"Location": base})
