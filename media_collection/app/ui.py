@@ -134,6 +134,19 @@ SHELL = """<!doctype html>
 <p class="sub" style="display:flex;justify-content:space-between;gap:1rem"><a href="@@BACK@@">← Back to the catalogue</a><a href="@@ADMIN@@">admin</a></p>
 <h1>@@TITLE@@</h1>
 @@CONTENT@@
+<script>
+(function () {
+  var dlg = document.getElementById('play');
+  if (!dlg) return;
+  dlg.addEventListener('toggle', function (e) {
+    if (!e.target.open) return;
+    var file = document.getElementById('playfile');
+    if (!file) return;
+    var row = file.closest('p');
+    if (row && dlg.firstElementChild !== row) dlg.insertBefore(row, dlg.firstElementChild);
+  });
+})();
+</script>
 </body>
 </html>
 """

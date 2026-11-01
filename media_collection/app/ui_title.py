@@ -154,7 +154,7 @@ def _play_block(base, row, items, digital, players, last_player,
                       % (source["id"], _label(source)))
         else:
             copies = ('<p class="copy-play">Which file: '
-                      '<select name="source_id">%s</select> '
+                      '<select name="source_id" id="playfile">%s</select> '
                       '<button type="submit">Play</button></p>'
                       % "".join('<option value="%d">%s</option>'
                                 % (source["id"], _label(source))
@@ -181,7 +181,10 @@ def _play_block(base, row, items, digital, players, last_player,
         jellyfin = ('<h3>On the Jellyfin server</h3>'
                     '<p class="sub">Starts it on a Jellyfin app that is open'
                     ' right now.</p>'
-                    '<form method="post" action="%stitle/%d/jellyfin">'
+                    '<form method="post" action="%stitle/%d/jellyfin"'
+                    ' onsubmit="var f=document.getElementById(\'playfile\');'
+                    'this.source_id.value=f?f.value:\'\'">'
+                    '<input type="hidden" name="source_id" value="">'
                     '<label>Jellyfin device<select name="session_id">%s'
                     '</select></label>'
                     '<p><button type="submit">Play in Jellyfin</button></p>'

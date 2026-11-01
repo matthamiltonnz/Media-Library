@@ -1273,8 +1273,14 @@ class Handler(BaseHTTPRequestHandler):
                 title_id = int(match.group(1))
                 link = jellyfin.link_for_title(con, title_id)
                 try:
+                    chosen = field(form, "source_id")
+                    jf_id = (con.execute(
+                        "SELECT jf_id FROM jellyfin_links WHERE item_id = ?"
+                        " ORDER BY jf_id LIMIT 1", (int(chosen),)).fetchone()
+                        if chosen.isdigit() else None)
                     summary = jellyfin.play(con, field(form, "session_id"),
-                                            link["jf_id"] if link else "")
+                                            (jf_id["jf_id"] if jf_id else None)
+                                            or (link["jf_id"] if link else ""))
                     return self.title_page(con, viewer, base, title_id, summary=summary)
                 except jellyfin.JellyfinError as exc:
                     return self.title_page(con, viewer, base, title_id,
