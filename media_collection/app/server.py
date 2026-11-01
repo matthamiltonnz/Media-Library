@@ -36,7 +36,7 @@ OPTIONS_PATH = "/data/options.json"
 FORMATS = ["bluray_3d", "bluray", "uhd_4k", "dvd", "digital", "ripped", "cd", "vinyl", "sacd",
            "cassette", "vhs", "other"]
 # A digital copy either came from one of these stores or is a ripped file.
-PURCHASE_STORES = ("itunes", "appletv", "other")
+PURCHASE_STORES = ("itunes", "other")  # appletv folded into itunes: one Apple TV
 
 FORMAT_LABELS = {
     "bluray_3d": "3D Blu-ray",
