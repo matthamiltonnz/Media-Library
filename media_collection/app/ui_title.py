@@ -462,10 +462,10 @@ def render(base, row, items, digital, formats, labels, summary=None, error=None,
     tabs = ""
     parts.append(tabs)
 
-    if copies_on:
+    if True:   # the copies sit below; this branch is no longer exclusive
         parts.append(_copies_tab(base, row, items, digital, formats, labels,
                                  users, viewer_id))
-    else:
+    if True:   # play sheet and the about block belong on every view
         parts.append(_play_block(base, row, items, digital, players,
                                  last_player, jellyfin_link,
                                  jellyfin_configured, jellyfin_sessions,
