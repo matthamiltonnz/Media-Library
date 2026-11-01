@@ -35,6 +35,10 @@ def _run(db_path):
     try:
         roots = {row["id"]: row["path"] for row in con.execute(
             "SELECT id, path FROM media_roots")}
+        # a Jellyfin route without its server is dead weight too
+        con.execute("DELETE FROM digital_sources WHERE provider = 'jellyfin'"
+                    "   AND (server_id IS NULL OR server_id NOT IN"
+                    "        (SELECT id FROM jellyfin_servers))")
         # a file row is only real while its folder still exists
         orphans = con.execute(
             "DELETE FROM digital_sources WHERE provider = 'rip'"

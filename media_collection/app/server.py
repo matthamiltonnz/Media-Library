@@ -1037,6 +1037,35 @@ class Handler(BaseHTTPRequestHandler):
                                  ' location.reload(); }, 2000);</script>')
                     page = page.replace("<h2>Media folders</h2>",
                                         note + "<h2>Media folders</h2>", 1)
+                found = con.execute("SELECT id, label, url, is_active"
+                                    " FROM jellyfin_servers ORDER BY id").fetchall()
+                if found:
+                    listed = "".join(
+                        '<li>%s <span class="muted">%s</span>'
+                        '<form method="post" action="%sjellyfin/server/%d/delete"'
+                        ' onsubmit="return confirm(\'Remove this server? Its links,'
+                        ' and any copy it alone backed, go too.\')">'
+                        '<button type="submit">Remove</button></form></li>'
+                        % (html.escape(row["label"]), html.escape(row["url"]),
+                           html.escape(base), row["id"])
+                        for row in found)
+                    panel = ('<h2>Jellyfin servers</h2><ul class="servers">%s</ul>'
+                             % listed)
+                else:
+                    panel = ('<h2>Jellyfin servers</h2><p class="muted">None '
+                             'configured: the catalogue is built from media '
+                             'folders alone.</p>')
+                panel += ('<form method="post" action="%sjellyfin/server">'
+                          '<div class="grid">'
+                          '<label>Label<input name="label" placeholder="Jellyfin"></label>'
+                          '<label>URL<input name="url"'
+                          ' placeholder="http://host:8096"></label>'
+                          '<label>API key<input name="api_key" type="password"'
+                          ' placeholder="optional"></label></div>'
+                          '<p><button type="submit">Add server</button></p></form>'
+                          % html.escape(base))
+                page = page.replace("<h2>Media folders</h2>",
+                                    panel + "<h2>Media folders</h2>", 1)
                 page = page.replace(
                     "<h2>Media folders</h2>",
                     '<form method="post" action="%sadmin/clean"' ' onsubmit="return confirm(\'Check every recorded file and forget '
@@ -1277,6 +1306,24 @@ class Handler(BaseHTTPRequestHandler):
                 return self.respond(303, "", extra={
                     "Location": base + "admin?players="
                     + quote("Player list saved.")})
+
+            if route.rstrip("/").endswith("/jellyfin/server"):
+                label = field(form, "label") or "Jellyfin"
+                url = field(form, "url").rstrip("/")
+                key = field(form, "api_key")
+                if url:
+                    con.execute("INSERT INTO jellyfin_servers (label, url, api_key)"
+                                " VALUES (?, ?, ?)", (label, url, key))
+                    con.commit()
+                return self.respond(303, "", extra={
+                    "Location": (base or "/") + "admin"})
+
+            match = re.search(r"/jellyfin/server/(\d+)/delete/?$", route)
+            if match:
+                # a server goes, and the copies only it backed go with it
+                jellyfin.forget_server(con, int(match.group(1)))
+                return self.respond(303, "", extra={
+                    "Location": (base or "/") + "admin"})
 
             if route.rstrip("/").endswith("/jellyfin/sync"):
                 if jellyfin.start_sync(DB_PATH):

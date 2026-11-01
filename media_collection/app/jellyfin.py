@@ -51,6 +51,13 @@ def config(con=None):
     return (url or DEFAULT_URL).rstrip("/"), key
 
 
+def servers(con):
+    """Every configured Jellyfin server; an empty list means none."""
+    return [dict(row) for row in con.execute(
+        "SELECT id, label, url, api_key FROM jellyfin_servers"
+        " WHERE is_active = 1 ORDER BY id")]
+
+
 def _call(base, key, path, params=None, method="GET", payload=None, timeout=TIMEOUT):
     if not key:
         raise JellyfinError("No Jellyfin API key yet - add one in the add-on options")
@@ -237,9 +244,29 @@ def _name_match(index, name, year, kind):
         return by_name.get(("season", _norm(season.group(1)), _year(season.group(2))))
 
 
-def sync_links(con, log=print):
+def sync_links(con, log=print, server=None):
+    """Rebuild jellyfin_links from every server, or from the one given."""
+    if server is None:
+        found = servers(con)
+        if not found:
+            log("jellyfin: no server configured")
+            return {"copies": 0, "unknown": 0}
+        totals = {}
+        for one in found:
+            part = sync_links(con, log=log, server=one)
+            # whatever was just linked belongs to the server we just read
+            con.execute("UPDATE jellyfin_links SET server_id = ?"
+                        " WHERE server_id IS NULL", (one["id"],))
+            con.commit()
+            log("jellyfin[%s]: linked %d copies, %d still unknown"
+                % (one["label"], part.get("copies", 0),
+                   part.get("unknown", 0)))
+            for key_, value in part.items():
+                totals[key_] = totals.get(key_, 0) + value
+        return totals
+
     """Rebuild jellyfin_links from the server: one playable id per catalogue copy."""
-    base, key = config(con)
+    base, key = server["url"], server.get("api_key") or ""
     if not key:
         raise JellyfinError("No Jellyfin API key yet - add one in the add-on options")
     log("jellyfin: reading the library from %s" % base)
@@ -280,6 +307,27 @@ def sync_links(con, log=print):
     log("jellyfin: %(copies)d copies, %(by_path)d by path, %(by_name)d by name,"
         " %(unmatched)d unmatched" % stats)
     return stats
+
+
+def forget_server(con, server_id):
+    """Remove a server: its links, its routes, and any copy only it backed."""
+    touched = [row["item_id"] for row in con.execute(
+        "SELECT item_id FROM digital_sources WHERE provider = 'jellyfin'"
+        " AND server_id = ?", (server_id,))]
+    con.execute("DELETE FROM jellyfin_links WHERE server_id = ?", (server_id,))
+    con.execute("DELETE FROM digital_sources WHERE provider = 'jellyfin'"
+                " AND server_id = ?", (server_id,))
+    gone = 0
+    for item_id in touched:
+        if not con.execute("SELECT 1 FROM digital_sources WHERE item_id = ?",
+                           (item_id,)).fetchone():
+            con.execute("DELETE FROM items WHERE id = ?", (item_id,))
+            gone += 1
+    con.execute("DELETE FROM jellyfin_servers WHERE id = ?", (server_id,))
+    con.commit()
+    import dedupe
+    dedupe.stray_titles(con)
+    return len(touched), gone
 
 
 def sessions(con=None):
