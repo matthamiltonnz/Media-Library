@@ -65,7 +65,7 @@ CASE_CLASS = {"uhd_4k": "case-4k", "bluray_3d": "case-3d", "bluray": "case-blu",
               "dvd": "case-dvd", "cd": "case-jewel", "vinyl": "case-sleeve",
               "digital": "case-digital", "ripped": "case-digital"}
 
-# the shelf order: best picture first, a file on the NAS always last
+# the shelf order: best picture first, a file on a media folder always last
 QUALITY = {"uhd_4k": 0, "digital": 1, "bluray": 2, "bluray_3d": 3, "dvd": 4,
            "cd": 5, "vinyl": 6, "sacd": 7, "cassette": 8, "vhs": 9,
            "other": 10, "ripped": 11}
@@ -212,7 +212,7 @@ def library_rows(con, viewer_id, query="", kind="", owner=None, format="",
     return con.execute(sql, params).fetchall()
 
 
-# A title whose only copies are files on the NAS: hidden by default so the shelf is
+# A title whose only copies are files on a media folder: hidden by default so the shelf is
 # about discs, one click away when browsing what can actually be played.
 RIP_ONLY = ("NOT EXISTS (SELECT 1 FROM items o WHERE o.title_id = t.id"
             " AND NOT EXISTS (SELECT 1 FROM digital_sources r"
@@ -1023,8 +1023,8 @@ class Handler(BaseHTTPRequestHandler):
                                     html.escape(base), root["id"],
                                     html.escape(base)))
                         page = page.replace(
-                            "<h2>Media roots (NAS folders)</h2>",
-                            panel + "<h2>Media roots (NAS folders)</h2>", 1)
+                            "<h2>Media folders</h2>",
+                            panel + "<h2>Media folders</h2>", 1)
                 state = clean_job.status()
                 if state["running"] or state["finished"]:
                     note = ('<p class="sub">Clean: %d of %d checked, '
@@ -1035,16 +1035,16 @@ class Handler(BaseHTTPRequestHandler):
                     if state["running"]:
                         note += ('<script>setTimeout(function () {'
                                  ' location.reload(); }, 2000);</script>')
-                    page = page.replace("<h2>Media roots (NAS folders)</h2>",
-                                        note + "<h2>Media roots (NAS folders)</h2>", 1)
+                    page = page.replace("<h2>Media folders</h2>",
+                                        note + "<h2>Media folders</h2>", 1)
                 page = page.replace(
-                    "<h2>Media roots (NAS folders)</h2>",
+                    "<h2>Media folders</h2>",
                     '<form method="post" action="%sadmin/clean"' ' onsubmit="return confirm(\'Check every recorded file and forget '
                     'the ones that are gone?\')">'
                     '<p><button type="submit">Clean database</button> '
                     '<span class="muted">forget file entries whose '
                     'path no longer exists</span></p></form>' % base
-                    + "<h2>Media roots (NAS folders)</h2>", 1)
+                    + "<h2>Media folders</h2>", 1)
                 return self.respond(200, page)
 
             if route.rstrip("/").endswith("/export.csv"):

@@ -103,9 +103,9 @@ def _roots_block(base, roots):
              "</tr></thead><tbody>%s</tbody></table>" % rows) if roots else \
             '<p class="muted">No roots yet.</p>'
     return """
-<h2>Media roots (NAS folders)</h2>
+<h2>Media folders</h2>
 <p>The folders that ripped files live in. A playback source stores a root plus the
-   path inside it, so moving the NAS only means editing the root — every row below
+   path inside it, so moving the drive only means editing the folder — every row below
    can be changed in place and saved.</p>
 %s
 <form method="post" action="%sadmin/roots">
