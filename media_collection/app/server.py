@@ -446,6 +446,11 @@ $library
   <select name="store">$store_options</select>
   <input name="edition" placeholder="Edition (optional)">
   <input name="upc_ean" placeholder="UPC / EAN (optional)" inputmode="numeric">
+  <label>Media type<select name="kind" onchange="applyKind(this.value)">
+    <option value="movie">Film</option>
+    <option value="tv">TV</option>
+    <option value="music">Music</option>
+  </select></label>
   <input name="imdb_id" placeholder="IMDb ID (optional, tt…)">
   <input name="location" placeholder="Where it lives (optional)">
   <select name="visibility">

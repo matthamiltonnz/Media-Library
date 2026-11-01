@@ -159,6 +159,27 @@ SHELL = """<!doctype html>
   });
 })();
 </script>
+<script>
+function applyKind(kind) {
+  var music = kind === "music";
+  var film = kind === "movie" || kind === "tv";
+  ["artist", "artist_mbid", "musicbrainz_id"].forEach(function (name) {
+    var el = document.querySelector('#addcopy input[name="' + name + '"]');
+    if (!el) return;
+    var box = el.closest("fieldset") || el.closest("label");
+    if (box) box.style.display = music ? "" : "none";
+  });
+  var imdb = document.querySelector('#addcopy input[name="imdb_id"]');
+  if (imdb) {
+    var box2 = imdb.closest("label") || imdb.closest("fieldset");
+    if (box2) box2.style.display = film ? "" : "none";
+  }
+}
+document.addEventListener("DOMContentLoaded", function () {
+  var pick = document.querySelector('#addcopy select[name="kind"]');
+  if (pick) applyKind(pick.value);
+});
+</script>
 </body>
 </html>
 """
