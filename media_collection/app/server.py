@@ -626,7 +626,7 @@ def render_index(con, viewer, base, error=None, query="",
                 html.escape(" · ".join(filter(None, [
                     str(card["release_year"] or ""),
                     " · ".join(FORMAT_LABELS.get(f, f)
-                               for f in quality_sorted(f for f in card["formats"] if f != "ripped")),
+                               for f in quality_sorted(",".join(f for f in (card["formats"] or "").split(",") if f != "ripped"))),
                     ])))
                 , html.escape(here)
             )
