@@ -1164,9 +1164,10 @@ class Handler(BaseHTTPRequestHandler):
                     picked = [v.strip() for v in form.get("player", [])
                               if v and v.strip()]
                 playback.choose(con, picked)
-                return self.respond(303, "",
-                                    {"Location": base + "admin?players=%d"
-                                     % len(picked)})
+                # a relative Location resolves against /admin/players and
+                # lands on /admin/admin: go absolute
+                where = (base or "/") + "admin?players=%d" % len(picked)
+                return self.respond(303, "", {"Location": where})
 
             if route.rstrip("/").endswith("/admin/scan"):
                 scan.start(DB_PATH, repair=True)
