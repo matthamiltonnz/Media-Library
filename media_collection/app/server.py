@@ -385,6 +385,7 @@ PAGE = Template("""<!doctype html>
   .thumb.case-digital { background: #8881; }
   .card .cap { padding: .4rem .5rem; font-size: .82rem; display: grid; gap: .15rem; }
   .card .cap .muted { font-size: .74rem; }
+  .card .cap .playmark { display: block; margin-top: .2rem; font-size: .78rem; }
   label.check { display: flex; align-items: center; gap: .4rem; font-size: .85rem; }
   label.check input { width: auto; }
   nav.modes { display: flex; gap: .4rem; margin: 0 0 .7rem; flex-wrap: wrap; }
@@ -592,6 +593,9 @@ def render_index(con, viewer, base, error=None, query="",
     if view == "grid":
         clause, extra = visible_clause(query, kind, owner, format,
                                        rips, only)
+        if not rips:  # unticked, a title that is nothing but files stays out
+            clause += " AND NOT " + RIP_ONLY
+
         cards = con.execute(
             "SELECT t.id, t.name, t.release_year, t.poster_url, t.kind,"
             " COALESCE(t.art_source, '') AS art_source,"
@@ -599,6 +603,12 @@ def render_index(con, viewer, base, error=None, query="",
             "   JOIN items li ON li.id = l.item_id"
             "   WHERE li.title_id = t.id ORDER BY l.jf_kind LIMIT 1) AS jf_id,"
             " COUNT(i.id) AS copies,"
+            # a file behind this title, so the card can offer to play it
+            " (SELECT 1 FROM items ri JOIN digital_sources rd"
+            "   ON rd.item_id = ri.id"
+            "   WHERE ri.title_id = t.id AND rd.provider = 'rip'"
+            "   LIMIT 1) AS has_rip,"
+
             # every format the title holds, not just the ones being filtered
             " (SELECT group_concat(DISTINCT ai.format) FROM items ai"
             "   WHERE ai.title_id = t.id"
@@ -620,7 +630,9 @@ def render_index(con, viewer, base, error=None, query="",
                                       card["art_source"]))
                     if (card["jf_id"] or card["poster_url"])
                     else '<span class="muted">no image</span>'),
-                html.escape(card["name"]),
+                html.escape(card["name"])
+                    + (' <span class="playmark" title="a file is ready to play">&#9654;</span>'
+                       if card["has_rip"] else ""),
                 html.escape(" · ".join(filter(None, [
                     str(card["release_year"] or ""),
                     " · ".join(FORMAT_LABELS.get(f, f)

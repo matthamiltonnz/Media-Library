@@ -127,6 +127,7 @@ SHELL = """<!doctype html>
   .thumb .band.plain { background: #fff; color: #111; border-bottom-color: #ccc; }
   .card .cap { padding: .4rem .5rem; font-size: .82rem; display: grid; gap: .15rem; }
   .card .cap .muted { font-size: .74rem; }
+  .card .cap .playmark { display: block; margin-top: .2rem; font-size: .78rem; }
 </style>
 </head>
 <body>
