@@ -1007,14 +1007,14 @@ class Handler(BaseHTTPRequestHandler):
                             "SELECT COUNT(DISTINCT item_id) FROM digital_sources"
                             " WHERE root_id = ? AND provider = 'rip'",
                             (root["id"],)).fetchone()[0]
-                        panel = ('<div class="confirm"><p>Remove <strong>%s</strong>?'
+                        panel = ('<dialog class="sheet" open><h2>Remove %s?</h2>'
                                  ' It accounts for %d file entr%s and %d cop%s.</p>'
                                  '<form method="post" action="%sadmin/roots/%d/delete">'
                                  '<button type="submit" name="choice" value="files">'
                                  'Remove and forget its files</button> '
                                  '<button type="submit" name="choice" value="keep">'
                                  'Remove the source only</button> '
-                                 '<a href="%sadmin">Cancel</a></form></div>'
+                                 '<a href="%sadmin">Cancel</a></form></dialog>'
                                  % (html.escape(root["label"]), files,
                                     "y" if files == 1 else "ies", copies,
                                     "y" if copies == 1 else "ies",
