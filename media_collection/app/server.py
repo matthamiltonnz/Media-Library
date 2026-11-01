@@ -546,14 +546,11 @@ def render_index(con, viewer, base, error=None, query="",
            " checked" if row["fmt"] in picked else "",
            html.escape(FORMAT_LABELS.get(row["fmt"], row["fmt"])),
            row["n"])
-        for row in formats)
+        for row in formats if rips or row["fmt"] != "ripped")
     totals = ('<form class="tally" method="get" action="%s">%s%s'
-              '<label class="tallybox"><input type="checkbox" name="only"'
-              ' value="1"%s onchange="this.form.submit()"> only these</label>'
               '<button type="submit">Apply</button>%s</form>'
               % (html.escape(base), carry,
                  boxes or '<span class="muted">nothing yet</span>',
-                 " checked" if only else "",
                  ' <a href="%s">clear</a>' % html.escape(tally_link(""))
                  if picked else ""))
     mode_counts = {row["kind"]: row["n"] for row in con.execute(
@@ -629,7 +626,7 @@ def render_index(con, viewer, base, error=None, query="",
                 html.escape(" · ".join(filter(None, [
                     str(card["release_year"] or ""),
                     " · ".join(FORMAT_LABELS.get(f, f)
-                               for f in quality_sorted(card["formats"])),
+                               for f in quality_sorted(f for f in card["formats"] if f != "ripped")),
                     ])))
                 , html.escape(here)
             )
@@ -1070,6 +1067,10 @@ class Handler(BaseHTTPRequestHandler):
         source = (parse_qs(urlparse(self.path).query).get("from")
                   or [""])[0]
         back = source if source.startswith("?") else None
+        if back is None:  # a plain card link carries no filter, so ask the browser
+            seen = urlparse(self.headers.get("Referer") or "")
+            if seen.query and not seen.path.startswith("/title"):
+                back = "?" + seen.query
         return self.respond(200, ui_title.render(
             base, row, items, digital, FORMATS, FORMAT_LABELS, summary=summary,
             error=error, ripped_root=RIPPED_ROOT, roots=roots, owner=owner,

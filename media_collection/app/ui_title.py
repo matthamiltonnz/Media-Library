@@ -14,7 +14,7 @@ STORE_LABELS = {
     "jellyfin": "Jellyfin",
     "other": "other store",
 }
-PURCHASE_STORES = ("itunes", "appletv", "other")
+PURCHASE_STORES = ("itunes", "other")
 
 
 def _text(value):
