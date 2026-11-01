@@ -1151,12 +1151,21 @@ class Handler(BaseHTTPRequestHandler):
                 roots = {row["id"]: row["path"] for row in con.execute(
                     "SELECT id, path FROM media_roots")}
                 gone = []
+                # only file entries: a link row has no path to check
                 for row in con.execute(
-                        "SELECT id, root_id, path FROM digital_sources"):
+                        "SELECT id, root_id, path FROM digital_sources"
+                        " WHERE provider = 'rip'"):
                     base_dir = roots.get(row["root_id"])
-                    full = (os.path.join(base_dir, row["path"])
-                            if base_dir else row["path"])
-                    if not os.path.exists(full):
+                    where = row["path"]
+                    if not where:
+                        continue
+                    full = (os.path.join(base_dir, where)
+                            if base_dir else where)
+                    try:
+                        there = os.path.exists(full)
+                    except (OSError, TypeError, ValueError):
+                        there = False
+                    if not there:
                         gone.append(row["id"])
                 for start in range(0, len(gone), 400):
                     chunk = gone[start:start + 400]
