@@ -1471,6 +1471,13 @@ def main():
     log("media collection listening on :%d (db=%s)" % (PORT, DB_PATH))
     scan.start(DB_PATH)
     jellyfin.start_sync(DB_PATH)
+    try:
+        streamed, dropped = dedupe.after_links(DB_PATH)
+        if streamed or dropped:
+            log("linkers: %d stream-only copy(s), %d empty copy(s) dropped"
+                % (streamed, dropped))
+    except Exception as exc:  # a tidy-up must never stop the shelf coming up
+        log("linkers: tidy up skipped (%s)" % exc)
     artists.start(DB_PATH, limit=60)          # a few details per start
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
 

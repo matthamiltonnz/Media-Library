@@ -282,6 +282,29 @@ def _drop_if_empty(con, item_id):
     return True
 
 
+def after_links(path):
+    """Tidy the copies the linkers mint, since they run after run.sh's pass.
+
+    A copy that Jellyfin knows but no file backs is a stream we can play, not a
+    rip: relabel it so the tally and the format filter stop disagreeing.  What
+    is left with nothing behind it at all is dropped.
+    """
+    con = sqlite3.connect(path)
+    con.row_factory = sqlite3.Row
+    con.execute("PRAGMA foreign_keys = ON")
+    streamed = con.execute(
+        "UPDATE items SET format = 'digital'"
+        " WHERE format = 'ripped' AND upc_ean IS NULL"
+        "   AND NOT EXISTS (SELECT 1 FROM digital_sources d"
+        "                    WHERE d.item_id = items.id AND d.provider = 'rip')"
+        "   AND EXISTS (SELECT 1 FROM jellyfin_links l"
+        "                WHERE l.item_id = items.id)").rowcount
+    dropped = orphans(con)
+    con.commit()
+    con.close()
+    return streamed, dropped
+
+
 def main():
     path = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("DB_PATH", "/data/media.db")
     con = sqlite3.connect(path)
