@@ -334,11 +334,14 @@ def after_links(path):
         "                    WHERE d.item_id = items.id AND d.provider = 'rip')"
         "   AND EXISTS (SELECT 1 FROM jellyfin_links l"
         "                WHERE l.item_id = items.id)").rowcount
+    # the scan now attaches a file to the copy that owns that path, so a
+    # second file no longer folds back in: splitting holds from here on
+    split = split_files(con)
     unown_rips(con)
     dropped = orphans(con)
     con.commit()
     con.close()
-    return streamed, dropped
+    return streamed, dropped + split
 
 
 def main():

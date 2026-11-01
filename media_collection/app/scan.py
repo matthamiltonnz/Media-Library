@@ -220,16 +220,32 @@ def remember_skip(con, title_id, path):
     con.commit()
 
 
-def rip_item(con, title_id):
+def rip_item(con, title_id, path=None):
     """The copy that stands for the file on the NAS, made the first time it is seen.
 
     A ripped file is its own copy, so a library of nothing but files still shows
     something on the shelf and the disc copies stay untouched.
     """
-    found = con.execute(
-        "SELECT i.id FROM items i JOIN digital_sources d ON d.item_id = i.id"
-        " WHERE i.title_id = ? AND d.provider = 'rip'"
-        " AND i.format = 'ripped' LIMIT 1",
+    if path:
+        # a file belongs to the copy that already holds that exact path;
+        # failing that, to a copy with no file at all; never to a copy
+        # that some other file is already using
+        found = con.execute(
+            "SELECT i.id FROM items i JOIN digital_sources d ON d.item_id = i.id"
+            " WHERE i.title_id = ? AND d.provider = 'rip' AND d.path = ?"
+            " LIMIT 1", (title_id, path)).fetchone()
+        if not found:
+            found = con.execute(
+                "SELECT i.id FROM items i"
+                " WHERE i.title_id = ? AND i.format = 'ripped'"
+                "   AND NOT EXISTS (SELECT 1 FROM digital_sources d"
+                "                    WHERE d.item_id = i.id AND d.provider = 'rip')"
+                " ORDER BY i.id LIMIT 1", (title_id,)).fetchone()
+    else:
+        found = con.execute(
+            "SELECT i.id FROM items i JOIN digital_sources d ON d.item_id = i.id"
+            " WHERE i.title_id = ? AND d.provider = 'rip'"
+            " AND i.format = 'ripped' LIMIT 1",
         (title_id,)).fetchone()
     if found:
         return found["id"]
@@ -281,7 +297,7 @@ def sync_files(con, log=print, repair=False):
         if "%d|%s" % (title["id"], relative) in skipped:
             counts["skipped"] = counts.get("skipped", 0) + 1
             continue
-        item_id = rip_item(con, title["id"])
+        item_id = rip_item(con, title["id"], relative)
         if not item_id:
             counts["unmatched"] += 1
             continue
@@ -306,12 +322,13 @@ def repoint_rips(con, log):
     like a Blu-ray with no file. Moving them keeps one copy per thing owned.
     """
     rows = con.execute(
-        "SELECT d.id, d.item_id, i.title_id, i.format FROM digital_sources d"
+        "SELECT d.id, d.item_id, i.title_id, i.format, d.path"
+        " FROM digital_sources d"
         " JOIN items i ON i.id = d.item_id"
         " WHERE d.provider = 'rip' AND i.format != 'digital'").fetchall()
     moved = 0
     for row in rows:
-        target = rip_item(con, row["title_id"])
+        target = rip_item(con, row["title_id"], row["path"])
         if not target or target == row["item_id"]:
             continue
         con.execute("UPDATE digital_sources SET item_id = ? WHERE id = ?",
