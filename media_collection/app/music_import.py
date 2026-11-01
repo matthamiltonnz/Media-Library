@@ -113,12 +113,9 @@ def resolve_root(con, given, dry_run, label):
     root_path = os.path.dirname(music_dir)
     if dry_run:
         return None, root_path, music_dir
-    if con.execute("SELECT 1 FROM media_roots WHERE label = ?",
-                   (label,)).fetchone():
-        label = "%s (%s)" % (label, os.path.basename(root_path) or root_path)
-    root_id = con.execute(
-        "INSERT INTO media_roots (label, path, medium) VALUES (?, ?, 'video')",
-        (label, root_path)).lastrowid
+    # a folder is the household's decision, never invented here
+    print("import: %s is outside every media folder, skipped" % root_path)
+    return None, root_path, None
     return root_id, root_path, music_dir
 
 

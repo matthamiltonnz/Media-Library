@@ -35,6 +35,12 @@ def _run(db_path):
     try:
         roots = {row["id"]: row["path"] for row in con.execute(
             "SELECT id, path FROM media_roots")}
+        # a file row is only real while its folder still exists
+        orphans = con.execute(
+            "DELETE FROM digital_sources WHERE provider = 'rip'"
+            "   AND (root_id IS NULL OR root_id NOT IN"
+            "        (SELECT id FROM media_roots))").rowcount
+        con.commit()
         rows = con.execute("SELECT id, root_id, path FROM digital_sources"
                            " WHERE provider = 'rip'").fetchall()
         with _LOCK:

@@ -1211,7 +1211,7 @@ class Handler(BaseHTTPRequestHandler):
                                 " WHERE root_id = ?", (root_id,))
                 else:
                     con.execute("DELETE FROM digital_sources"
-                                " WHERE root_id = ?", (root_id,))
+                                " WHERE root_id = ? AND provider = 'rip'", (root_id,))
                     con.execute("UPDATE items SET rip_path = NULL,"
                                 " rip_root_id = NULL WHERE rip_root_id = ?",
                                 (root_id,))

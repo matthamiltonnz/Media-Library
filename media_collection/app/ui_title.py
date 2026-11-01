@@ -309,8 +309,9 @@ def _copies_tab(base, row, items, digital, formats, labels, users,
             remove = ('<form method="post" action="%sitems/%d/delete"'
                       " onsubmit=\"return confirm('Remove this copy?')\">"
                       '<p><button type="submit" class="danger">Delete copy'
-                      '</button> <span class="muted">Drops the copy, its file'"'"'s'
-                      " placeholder and any Jellyfin link.</span></p></form>"
+                      '</button> <span class="muted">Removes this copy from the'
+                      " catalogue: files and Jellyfin stay put; only the last"
+                      " copy takes the title with it.</span></p></form>"
                       % (_text(base), item["id"]))
         else:
             remove = ('<p class="muted">Shared copy - only %s can delete'
