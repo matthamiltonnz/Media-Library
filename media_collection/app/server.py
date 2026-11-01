@@ -989,7 +989,7 @@ class Handler(BaseHTTPRequestHandler):
                     return self.respond(404, "No such artist",
                                         "text/plain; charset=utf-8")
                 want = (parse_qs(urlparse(self.path).query).get("view")
-                        or ["list"])[0]
+                        or ["grid"])[0]
                 return self.respond(200, ui_artists.render_artist(
                     base, artist,
                     artists.titles_for(con, artist["id"], viewer["id"]),

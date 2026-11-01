@@ -79,7 +79,7 @@ def render_list(base, artists, view="grid"):
     return ui.page(base, "Artists", body, back="?kind=music&view=grid")
 
 
-def render_artist(base, artist, titles, labels, view="list"):
+def render_artist(base, artist, titles, labels, view="grid"):
     """One act: what is known about them and the albums that belong to them."""
     info = []
     if artist["musicbrainz_id"]:

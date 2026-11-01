@@ -60,6 +60,35 @@ def merge(con):
     return folded
 
 
+def split_mixed(con):
+    """A copy that carries both a store source and a file is really two copies.
+
+    An iTunes purchase and the rip of the same album are different things on the
+    shelf, so the file moves onto its own "ripped" copy and the purchase stays on
+    a "digital" one.
+    """
+    made = 0
+    rows = con.execute(
+        "SELECT i.id, i.title_id, i.owner_id, i.format, i.visibility, i.edition,"
+        "       SUM(d.provider = 'rip') AS rips,"
+        "       SUM(d.provider <> 'rip') AS stores"
+        "  FROM items i JOIN digital_sources d ON d.item_id = i.id"
+        " GROUP BY i.id HAVING rips > 0 AND stores > 0").fetchall()
+    for row in rows:
+        want = "digital" if row["format"] == "ripped" else "ripped"
+        clause = "provider <> 'rip'" if want == "digital" else "provider = 'rip'"
+        new_id = con.execute(
+            "INSERT INTO items (title_id, owner_id, format, edition, visibility)"
+            " VALUES (?, ?, ?, ?, ?)",
+            (row["title_id"], row["owner_id"], want, row["edition"],
+             row["visibility"])).lastrowid
+        con.execute("UPDATE digital_sources SET item_id = ?"
+                    " WHERE item_id = ? AND " + clause, (new_id, row["id"]))
+        made += 1
+    con.commit()
+    return made
+
+
 def copies(con):
     """Fold repeated copies of the same thing into one.
 
@@ -129,6 +158,7 @@ def main():
                                    ", ".join("#%d" % o["id"] for o in others)))
         return
     print("dedupe: %d duplicate title(s) folded" % merge(con))
+    print("dedupe: %d mixed copy(s) split" % split_mixed(con))
     print("dedupe: %d duplicate copy(s) folded" % copies(con))
 
 
