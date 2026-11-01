@@ -104,20 +104,6 @@ def _badges(items, digital, labels, base=None, title_id=None):
     ripped = _ripped(digital)
     badges = []
     for item in items:
-        if item["format"] == "ripped":
-            # a file is the importer's business: where it is, nothing to edit
-            where = item["rip_path"] or files.get(item["id"]) or ""
-            jf = ""
-            for source in digital:
-                if source["item_id"] == item["id"] and "jf_id" in source.keys():
-                    jf = source["jf_id"] or ""
-                    if jf:
-                        break
-            parts.append('<p class="copy-line"><strong>Ripped file</strong>'
-                         ' <span class="muted">%s%s</span></p>'
-                         % (_text(where),
-                            " \u00b7 Jellyfin " + _text(jf) if jf else ""))
-            continue
         text = _text(_copy_title(item, labels, stores.get(item["id"]),
                                  item["id"] in ripped))
         if base and title_id:
@@ -304,6 +290,20 @@ def _copies_tab(base, row, items, digital, formats, labels, users,
     if not items:
         parts.append('<p class="muted">No copies yet.</p>')
     for item in items:
+        if item["format"] == "ripped":
+            # a file is the importer's business: where it is, nothing to edit
+            where = item["rip_path"] or files.get(item["id"]) or ""
+            jf = ""
+            for source in digital:
+                if source["item_id"] == item["id"] and "jf_id" in source.keys():
+                    jf = source["jf_id"] or ""
+                    if jf:
+                        break
+            parts.append('<p class="copy-line"><strong>Ripped file</strong>'
+                         ' <span class="muted">%s%s</span></p>'
+                         % (_text(where),
+                            " \u00b7 Jellyfin " + _text(jf) if jf else ""))
+            continue
         store = stores.get(item["id"])
         if True:      # any household member may remove a copy, not just its owner
             remove = ('<form method="post" action="%sitems/%d/delete"'
