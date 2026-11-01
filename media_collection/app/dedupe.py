@@ -136,7 +136,7 @@ def orphans(con):
         "                    WHERE d.item_id = items.id AND d.provider = 'rip')").rowcount
     # a stale pointer is worse than none: only a copy with a file keeps rip_path
     con.execute("UPDATE items SET rip_path = NULL, rip_root_id = NULL"
-                " WHERE format = 'ripped' AND rip_path IS NOT NULL"
+                " WHERE rip_path IS NOT NULL"
                 "   AND NOT EXISTS (SELECT 1 FROM digital_sources d"
                 "                    WHERE d.item_id = items.id AND d.provider = 'rip')")
     con.commit()
@@ -328,7 +328,7 @@ def after_links(path):
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA foreign_keys = ON")
     streamed = con.execute(
-        "UPDATE items SET format = 'digital'"
+        "UPDATE items SET format = 'digital',"        " rip_path = NULL, rip_root_id = NULL"
         " WHERE format = 'ripped' AND upc_ean IS NULL AND notes IS NULL"
         "   AND NOT EXISTS (SELECT 1 FROM digital_sources d"
         "                    WHERE d.item_id = items.id AND d.provider = 'rip')"
