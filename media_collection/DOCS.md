@@ -233,10 +233,13 @@ The catalogue page opens in one **mode at a time** — **Movies**, **TV** or **M
 lists **Everyone** and every household member who owns a copy (even with nothing in
 the current mode, where the count shows 0), each with their copy count inside the
 current mode; other people's private copies never appear, whichever filter is active.
-Within a mode the page shows the title/copy
-counts with a per-format breakdown (CD, 3D Blu-ray, Blu-ray, 4K Blu-ray, Digital, …),
-the search box, the list/poster toggle and the **Add a copy** form — which creates the
-new title in the mode you are in. The **admin** link sits beside the page title.
+Within a mode the page shows the title/copy counts with a per-format breakdown (CD,
+3D Blu-ray, Blu-ray, 4K Blu-ray, Ripped file, …) as tick boxes — tick several to see
+"Blu-ray **or** 4K" at once, and the count beside each box is what that format holds.
+Tick boxes stack on top of the search and owner filters, and a poster keeps showing
+every format its title holds even while the shelf is narrowed to one of them.
+The search box, the list/poster toggle and the **Add a copy** form follow — which
+creates the new title in the mode you are in. The **admin** link sits beside the page title.
 
 The poster view draws each title inside a **virtual case** picked from the best copy
 held — a clear CD jewel case with its left hinge, a vinyl sleeve (the cover edge to edge,

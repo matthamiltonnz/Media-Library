@@ -171,12 +171,17 @@ def library_rows(con, viewer_id, query="", kind="", owner=None, format="",
     if owner:
         sql += " AND i.owner_id = ?"
         params.append(int(owner))
-    if format == "rip":
-        sql += (" AND EXISTS (SELECT 1 FROM digital_sources r"
-                " WHERE r.item_id = i.id AND r.provider = 'rip')")
-    elif format:
-        sql += " AND i.format = ?"
-        params.append(format)
+    wanted = [f for f in (format or "").split(",") if f]
+    discs = [f for f in wanted if f != "rip"]
+    any_of = []
+    if "rip" in wanted:                      # a copy with a file behind it
+        any_of.append("EXISTS (SELECT 1 FROM digital_sources r"
+                      " WHERE r.item_id = i.id AND r.provider = 'rip')")
+    if discs:
+        any_of.append("i.format IN (%s)" % ", ".join("?" * len(discs)))
+        params += discs
+    if any_of:
+        sql += " AND (" + " OR ".join(any_of) + ")"
     if not rips:
         sql += " AND NOT " + RIP_ONLY
     sql += " ORDER BY t.name COLLATE NOCASE, i.format"
@@ -203,12 +208,18 @@ def visible_clause(query="", kind="", owner=None, format="",
     if owner:
         where.append("i.owner_id = ?")
         params.append(int(owner))
-    if format == "rip":
-        where.append("EXISTS (SELECT 1 FROM digital_sources r"
-                     " WHERE r.item_id = i.id AND r.provider = 'rip')")
-    elif format:
-        where.append("i.format = ?")
-        params.append(format)
+    else:
+        wanted = [f for f in (format or "").split(",") if f]
+        discs = [f for f in wanted if f != "rip"]
+        any_of = []
+        if "rip" in wanted:                  # a copy with a file behind it
+            any_of.append("EXISTS (SELECT 1 FROM digital_sources r"
+                          " WHERE r.item_id = i.id AND r.provider = 'rip')")
+        if discs:
+            any_of.append("i.format IN (%s)" % ", ".join("?" * len(discs)))
+            params += discs
+        if any_of:
+            where.append("(" + " OR ".join(any_of) + ")")
     return " AND ".join(where), params
 
 
@@ -258,6 +269,13 @@ PAGE = Template("""<!doctype html>
   h1 { font-size: 1.3rem; margin: 0 0 .2rem; }
   h1 .admin { font-size: .72rem; font-weight: 600; letter-spacing: .04em;
               margin-left: .6rem; opacity: .6; text-transform: uppercase; }
+  form.tally { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center;
+               margin: 0 0 1rem; }
+  .tallybox { display: inline-flex; gap: .35rem; align-items: center;
+              border: 1px solid #8886; border-radius: 6px;
+              padding: .15rem .45rem; font-size: .8rem; cursor: pointer; }
+  .tallybox input { margin: 0; }
+  .tallybox .n { opacity: .6; }
   h2 { font-size: 1rem; margin: 1.6rem 0 .6rem; }
   .sub { opacity: .7; margin: 0 0 1rem; }
   table { border-collapse: collapse; width: 100%; }
@@ -351,13 +369,14 @@ $modes
   <input type="hidden" name="kind" value="$kind">
   <input type="hidden" name="owner" value="$owner">
   <input type="hidden" name="view" value="$view">
+  $format_hidden
   <button type="submit">Search</button>
 </form>
 <p class="sub">$viewtoggle$clear</p>
 $notice
 $error
 <h2>$heading$scope</h2>
-<p class="sub">$totals</p>
+<div class="sub">$totals</div>
 $rips_toggle
 $library
 
@@ -439,13 +458,33 @@ def render_index(con, viewer, base, error=None, query="", pending=0, merged=0,
             bits.append("format=" + quote(fmt))
         return base + ("?" + "&".join(bits) if bits else "")
 
-    totals = " · ".join(
-        '<a class="tally%s" href="%s">%s %d</a>'
-        % (" current" if row["fmt"] == format else "",
-           html.escape(tally_link(row["fmt"])),
+    picked = [f for f in (format or "").split(",") if f]
+
+    def hidden(name, value):
+        return '<input type="hidden" name="%s" value="%s">' % (
+            name, html.escape(str(value)))
+
+    # one box per format: ticking several adds several ?format= values, so the
+    # shelf can be narrowed to "Blu-ray or 4K" instead of one format at a time
+    carry = "".join(hidden(name, value) for name, value in (
+        ("q", query), ("kind", kind), ("owner", owner),
+        ("view", view if view != "list" else ""),
+        ("rips", 1 if rips else "")) if value not in ("", None, 0))
+    boxes = "".join(
+        '<label class="tallybox"><input type="checkbox" name="format"'
+        ' value="%s"%s onchange="this.form.submit()"> %s'
+        '<span class="n">%d</span></label>'
+        % (html.escape(row["fmt"]),
+           " checked" if row["fmt"] in picked else "",
            html.escape(FORMAT_LABELS.get(row["fmt"], row["fmt"])),
            row["n"])
-        for row in formats) or "nothing yet"
+        for row in formats)
+    totals = ('<form class="tally" method="get" action="%s">%s%s'
+              '<button type="submit">Apply</button>%s</form>'
+              % (html.escape(base), carry,
+                 boxes or '<span class="muted">nothing yet</span>',
+                 ' <a href="%s">clear</a>' % html.escape(tally_link(""))
+                 if picked else ""))
     mode_counts = {row["kind"]: row["n"] for row in con.execute(
         "SELECT t.kind AS kind, COUNT(*) AS n FROM items i"
         " JOIN titles t ON t.id = i.title_id"
@@ -498,11 +537,15 @@ def render_index(con, viewer, base, error=None, query="", pending=0, merged=0,
             " (SELECT l.jf_id FROM jellyfin_links l"
             "   JOIN items li ON li.id = l.item_id"
             "   WHERE li.title_id = t.id ORDER BY l.jf_kind LIMIT 1) AS jf_id,"
-            " COUNT(i.id) AS copies, group_concat(DISTINCT i.format) AS formats"
+            " COUNT(i.id) AS copies,"
+            # every format the title holds, not just the ones being filtered
+            " (SELECT group_concat(DISTINCT ai.format) FROM items ai"
+            "   WHERE ai.title_id = t.id"
+            "     AND (ai.visibility = 'shared' OR ai.owner_id = ?)) AS formats"
             " FROM titles t JOIN items i ON i.title_id = t.id"
             " WHERE " + clause +
             " GROUP BY t.id ORDER BY t.name COLLATE NOCASE",
-            [viewer["id"]] + extra).fetchall()
+            [viewer["id"], viewer["id"]] + extra).fetchall()
         library = '<div class="cards">%s</div>' % ("".join(
             '<a class="card" href="{0}title/{1}?from={5}">{2}'
             '<div class="cap"><strong>{3}</strong><span class="muted">{4}</span></div></a>'
@@ -557,6 +600,9 @@ def render_index(con, viewer, base, error=None, query="", pending=0, merged=0,
         count=len(rows),
         heading=heading,
         totals=totals,
+        format_hidden="".join(
+            '<input type="hidden" name="format" value="%s">' % html.escape(f)
+            for f in picked),
         kind=kind,
         owner=owner or "",
         modes="<nav class=\"modes\">%s</nav>" % modes,
@@ -874,8 +920,8 @@ class Handler(BaseHTTPRequestHandler):
             kind = (parse_qs(urlparse(self.path).query).get("kind") or [""])[0]
             owner_raw = (parse_qs(urlparse(self.path).query).get("owner") or [""])[0]
             owner = int(owner_raw) if owner_raw.isdigit() else None
-            fmt = (parse_qs(urlparse(self.path).query).get("format")
-                   or [""])[0]
+            fmt = ",".join(f for f in parse_qs(urlparse(self.path).query)
+                           .get("format", []) if f)
             rips = bool(parse_qs(urlparse(self.path).query).get("rips"))
             merged = (parse_qs(urlparse(self.path).query).get("merged") or ["0"])[0]
             if route.rstrip("/").endswith("/artists"):
