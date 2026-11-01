@@ -334,11 +334,14 @@ def after_links(path):
         "                    WHERE d.item_id = items.id AND d.provider = 'rip')"
         "   AND EXISTS (SELECT 1 FROM jellyfin_links l"
         "                WHERE l.item_id = items.id)").rowcount
+    # the scan finds files after the boot pass, so split any copy that
+    # picked up a second file since then: one copy per file
+    split = split_files(con)
     unown_rips(con)
     dropped = orphans(con)
     con.commit()
     con.close()
-    return streamed, dropped
+    return streamed, dropped + split
 
 
 def main():
@@ -346,6 +349,10 @@ def main():
     con = sqlite3.connect(path)
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA foreign_keys = ON")
+    if "--split-only" in sys.argv:
+        split = split_files(con)
+        print("dedupe: %d copy(s) split per file" % split)
+        return
     if "--dry-run" in sys.argv:
         for keeper, others in groups(con):
             print("%-45s <- %s" % (keeper["name"][:45],
