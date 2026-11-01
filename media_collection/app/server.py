@@ -414,7 +414,6 @@ PAGE = Template("""<!doctype html>
 </head>
 <body>
 <h1>Media Collection<a class="admin" href="${base}admin">admin</a></h1>
-<p class="sub">Signed in as <strong>$viewer</strong> — you see everything shared
    plus your own private copies.</p>
 <p class="sub"><button type="button" onclick="addcopy.showModal()">+ Add a title</button></p>
 $modes
@@ -564,10 +563,16 @@ def render_index(con, viewer, base, error=None, query="",
         " AND i.owner_id IN (SELECT id FROM users"
         "   WHERE username <> 'rips')"
         " GROUP BY t.kind", (viewer["id"],))}
+    extra = "".join([   # the filters a kind or owner chip has to keep
+        "&amp;q=" + quote(query) if query else "",
+        "&amp;format=" + quote(format) if format else "",
+        "&amp;rips=1" if rips else "",
+        "&amp;view=grid" if view == "grid" else "",
+    ])
     modes = "".join(
         '<a class="%s" href="%s?kind=%s%s">%s<span class="n">%d</span></a>'
         % ("current" if value == kind else "", html.escape(base), value,
-           "&amp;view=grid" if view == "grid" else "", label,
+           extra, label,
            mode_counts.get(value, 0))
         for value, label in (MODES + (("other", "Other"),)
                              if mode_counts.get("other") else MODES))
@@ -599,7 +604,7 @@ def render_index(con, viewer, base, error=None, query="",
     owner_tabs = "".join(
         ['<a class="%s" href="%s?kind=%s%s">Everyone<span class="n">%d</span></a>'
          % ("" if owner else "current", html.escape(base), kind,
-            "&amp;view=grid" if view == "grid" else "",
+            extra,
             everyone)]
         + ['<a class="%s" href="%s?kind=%s&amp;owner=%d%s">%s<span class="n">%d</span></a>'
            % ("current" if owner == row["id"] else "", html.escape(base), kind,
