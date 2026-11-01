@@ -75,6 +75,15 @@ def _ripped(digital):
             if source["provider"] == "rip"}
 
 
+def _files(digital):
+    """{item_id: path} so a ripped copy can say which file it is."""
+    files = {}
+    for source in digital:
+        if source["provider"] == "rip" and source["path"]:
+            files.setdefault(source["item_id"], source["path"])
+    return files
+
+
 def _stores(digital):
     """{item_id: 'iTunes'} for copies bought from a store rather than ripped."""
     found = {}
@@ -232,11 +241,11 @@ def _copy_fields(item, formats, labels, store):
              _text(item["notes"]))
 
 
-def _copy_line(item, labels, store, ripped=False):
+def _copy_line(item, labels, store, ripped=False, path=None):
     """One line that says what the copy is and where it came from."""
     head = _copy_title(item, labels, store, ripped)
-    bits = [value for value in (item["edition"], item["location"],
-                                item["condition"]) if value]
+    bits = [path, item["edition"], item["location"], item["condition"]]
+    bits = [value for value in bits if value]
     detail = " · ".join(_text(bit) for bit in bits)
     money = []
     if item["price_paid"]:
@@ -255,6 +264,7 @@ def _copies_tab(base, row, items, digital, formats, labels, users,
                  viewer_id=None):
     parts = []
     stores = _stores(digital)
+    files = _files(digital)
     if not items:
         parts.append('<p class="muted">No copies yet.</p>')
     for item in items:
@@ -275,7 +285,8 @@ def _copies_tab(base, row, items, digital, formats, labels, users,
             '<p><button type="submit">Save copy</button></p></form>%s'
             '</details>'
             % (item["id"], _copy_line(item, labels, store,
-                                      item["id"] in _ripped(digital)),
+                                      item["id"] in _ripped(digital),
+                                      files.get(item["id"])),
                _text(base),
                item["id"], _copy_fields(item, formats, labels, store),
                remove))
