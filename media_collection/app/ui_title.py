@@ -135,16 +135,30 @@ def _play_block(base, row, items, digital, players, last_player,
                _text(player["name"]),
                " (%s)" % _text(player["state"]) if player["state"] else "")
             for player in players)
-        copies = "".join(
-            '<p class="copy-play"><button type="submit" name="source_id"'
-            ' value="%d">Play %s</button> <span class="muted">%s</span></p>'
-            % (source["id"],
-               _text("%s · %s" % (labels.get(source["copy_format"],
-                                             source["copy_format"] or "copy"),
-                                  source["owner_name"] or "unowned")),
-               _text(source["root_label"] or "media") + " · "
-               + _text(source["path"]))
-            for source in playable)
+        def _label(source):
+            return "%s \u2014 %s \u00b7 %s" % (
+                _text("%s \u00b7 %s" % (labels.get(source["copy_format"],
+                                              source["copy_format"] or "copy"),
+                                   source["owner_name"] or "unowned")),
+                _text(source["root_label"] or "media"),
+                _text(source["path"]))
+
+        if not playable:
+            copies = ""
+        elif len(playable) == 1:
+            source = playable[0]
+            copies = ('<p class="copy-play"><input type="hidden"'
+                      ' name="source_id" value="%d">'
+                      '<button type="submit">Play</button>'
+                      ' <span class="muted">%s</span></p>'
+                      % (source["id"], _label(source)))
+        else:
+            copies = ('<p class="copy-play">Which file: '
+                      '<select name="source_id">%s</select> '
+                      '<button type="submit">Play</button></p>'
+                      % "".join('<option value="%d">%s</option>'
+                                % (source["id"], _label(source))
+                                for source in playable))
         shelf = ('<h3>From the shelf</h3>'
                  '<p class="sub">Home Assistant opens the file on a player you'
                  ' choose.</p>'
