@@ -282,12 +282,47 @@ def _drop_if_empty(con, item_id):
     return True
 
 
+RIP_OWNER_NAME = "Ripped files"
+RIP_OWNER_USER = "rips"
+
+
+def rip_owner(con):
+    """The account ripped files hang off: a place, not a person."""
+    row = con.execute("SELECT id FROM users WHERE username = ?",
+                      (RIP_OWNER_USER,)).fetchone()
+    if row:
+        return row["id"]
+    return con.execute(
+        "INSERT INTO users (username, display_name, is_active)"
+        " VALUES (?, ?, 0)", (RIP_OWNER_USER, RIP_OWNER_NAME)).lastrowid
+
+
+def unown_rips(con):
+    """A ripped file is a playback route, so no member owns one.
+
+    Keeping them on a real profile is what made an owner's title count run
+    ahead of the discs they actually own; the rip itself belongs to nobody.
+    """
+    owner = rip_owner(con)
+    changed = con.execute(
+        "UPDATE items SET owner_id = ?"
+        " WHERE owner_id <> ?"
+        "   AND EXISTS (SELECT 1 FROM digital_sources d"
+        "                WHERE d.item_id = items.id AND d.provider = 'rip')",
+        (owner, owner)).rowcount
+    con.commit()
+    return changed
+
+
 def after_links(path):
     """Tidy the copies the linkers mint, since they run after run.sh's pass.
 
     A copy that Jellyfin knows but no file backs is a stream we can play, not a
     rip: relabel it so the tally and the format filter stop disagreeing.  What
     is left with nothing behind it at all is dropped.
+    print("dedupe: %d ripped copy(s) taken off an owner"
+          % unown_rips(con))
+
     """
     con = sqlite3.connect(path)
     con.row_factory = sqlite3.Row
@@ -299,6 +334,7 @@ def after_links(path):
         "                    WHERE d.item_id = items.id AND d.provider = 'rip')"
         "   AND EXISTS (SELECT 1 FROM jellyfin_links l"
         "                WHERE l.item_id = items.id)").rowcount
+    unown_rips(con)
     dropped = orphans(con)
     con.commit()
     con.close()

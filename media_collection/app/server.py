@@ -504,7 +504,7 @@ def render_index(con, viewer, base, error=None, query="",
     rips_toggle = ('<p class="sub"><a href="%s">%s</a></p>'
                    % (html.escape(rips_link),
                       "Hide ripped files from the counts" if rips
-                      else "Include ripped files in the counts"))
+                      else "Include ripped files"))
 
     rows = library_rows(con, viewer["id"], query, kind, owner, format,
                           rips)
@@ -571,7 +571,8 @@ def render_index(con, viewer, base, error=None, query="",
     # every household member appears, even with nothing in this mode, so a shared
     # library never disappears from the filter
     owner_rows = con.execute(
-        "SELECT u.id, u.display_name FROM users u WHERE EXISTS ("
+        "SELECT u.id, u.display_name FROM users u"
+        "  WHERE u.username <> 'rips' AND EXISTS ("
         "  SELECT 1 FROM items i WHERE i.owner_id = u.id"
         "  AND (i.visibility = 'shared' OR i.owner_id = ?))"
         " ORDER BY u.display_name COLLATE NOCASE", (viewer["id"],)).fetchall()
