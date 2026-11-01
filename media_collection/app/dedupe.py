@@ -60,6 +60,34 @@ def merge(con):
     return folded
 
 
+def users(con):
+    """Fold users that differ only in case into the oldest profile.
+
+    "Mitchell" and "mitchell" are one person: the import used to create a second
+    profile before looking one up, which showed up as two names in the owner tabs.
+    """
+    folded = 0
+    rows = con.execute("SELECT id, username, display_name FROM users"
+                       " ORDER BY id").fetchall()
+    seen = {}
+    for row in rows:
+        key = (row["display_name"] or row["username"] or "").lower()
+        first = seen.get(key)
+        if first is None:
+            seen[key] = row["id"]
+            continue
+        con.execute("UPDATE items SET owner_id = ? WHERE owner_id = ?",
+                    (first, row["id"]))
+        con.execute("UPDATE items SET added_by = ? WHERE added_by = ?",
+                    (first, row["id"]))
+        con.execute("UPDATE titles SET created_by = ? WHERE created_by = ?",
+                    (first, row["id"]))
+        con.execute("DELETE FROM users WHERE id = ?", (row["id"],))
+        folded += 1
+    con.commit()
+    return folded
+
+
 def split_mixed(con):
     """A copy that carries both a store source and a file is really two copies.
 
@@ -158,6 +186,7 @@ def main():
                                    ", ".join("#%d" % o["id"] for o in others)))
         return
     print("dedupe: %d duplicate title(s) folded" % merge(con))
+    print("dedupe: %d duplicate user(s) folded" % users(con))
     print("dedupe: %d mixed copy(s) split" % split_mixed(con))
     print("dedupe: %d duplicate copy(s) folded" % copies(con))
 

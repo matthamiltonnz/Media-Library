@@ -528,10 +528,9 @@ def render_index(con, viewer, base, error=None, query="",
                  ' <a href="%s">clear</a>' % html.escape(tally_link(""))
                  if picked else ""))
     mode_counts = {row["kind"]: row["n"] for row in con.execute(
-        "SELECT t.kind AS kind, COUNT(*) AS n FROM items i"
+        "SELECT t.kind AS kind, COUNT(DISTINCT t.id) AS n FROM items i"
         " JOIN titles t ON t.id = i.title_id"
         " WHERE (i.visibility = 'shared' OR i.owner_id = ?)"
-        + ("" if rips else " AND NOT " + RIP_COPY) +
         " GROUP BY t.kind", (viewer["id"],))}
     modes = "".join(
         '<a class="%s" href="%s?kind=%s%s">%s<span class="n">%d</span></a>'
@@ -548,12 +547,11 @@ def render_index(con, viewer, base, error=None, query="",
         "  AND (i.visibility = 'shared' OR i.owner_id = ?))"
         " ORDER BY u.display_name COLLATE NOCASE", (viewer["id"],)).fetchall()
     owner_counts = {row["owner_id"]: row["n"] for row in con.execute(
-        "SELECT i.owner_id AS owner_id, COUNT(*) AS n FROM items i"
+        "SELECT i.owner_id AS owner_id, COUNT(DISTINCT t.id) AS n FROM items i"
         " JOIN titles t ON t.id = i.title_id"
         " WHERE (i.visibility = 'shared' OR i.owner_id = ?)%s"
         " GROUP BY i.owner_id"
-        % ((" AND t.kind = ?" if kind else "")
-           + ("" if rips else " AND NOT " + RIP_COPY)),
+        % (" AND t.kind = ?" if kind else ""),
         [viewer["id"]] + ([kind] if kind else []))}
     owner_tabs = "".join(
         ['<a class="%s" href="%s?kind=%s%s">Everyone<span class="n">%d</span></a>'

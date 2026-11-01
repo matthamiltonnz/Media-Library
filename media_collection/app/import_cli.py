@@ -31,11 +31,14 @@ def main():
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA foreign_keys = ON")
 
-    con.execute("INSERT OR IGNORE INTO users (username, display_name) VALUES (?, ?)",
-                (args.owner, args.name or args.owner.title()))
-    con.commit()
     owner = con.execute("SELECT id FROM users WHERE lower(username) = lower(?)",
                         (args.owner,)).fetchone()
+    if owner is None:      # only create the profile when nobody matches by name
+        con.execute("INSERT INTO users (username, display_name) VALUES (?, ?)",
+                    (args.owner, args.name or args.owner.title()))
+        con.commit()
+        owner = con.execute("SELECT id FROM users WHERE lower(username) = lower(?)",
+                            (args.owner,)).fetchone()
 
     with open(args.csv, "rb") as fh:
         raw = fh.read()
