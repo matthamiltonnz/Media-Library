@@ -159,8 +159,8 @@ def stage(con, import_row, mapping):
                 "SELECT u.display_name FROM items i JOIN users u ON u.id = i.owner_id "
                 "WHERE i.upc_ean = ?", (upc,)
             ).fetchone()
-            if owner:
-                status, message = "duplicate", "already owned by %s" % owner[0]
+            if owner:      # someone already has this disc: this row is a second copy
+                message = "also held by %s" % owner[0]
 
         if upc and status == "ok":
             seen_upc[upc] = line_no

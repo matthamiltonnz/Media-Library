@@ -79,6 +79,13 @@ def case_band(kind, formats):
     for name, label in CASE_LABEL.items():
         if name in case:
             return '<span class="band">%s</span>' % html.escape(label)
+    if case.startswith("case-digital"):
+        # a file has no printed band, but the white one keeps the shelf aligned
+        have = set(filter(None, (formats or "").split(",")))
+        for fmt in ("digital", "ripped"):
+            if fmt in have:
+                return ('<span class="band plain">%s</span>'
+                        % html.escape(FORMAT_LABELS.get(fmt, fmt)))
     return ""
 
 
@@ -193,6 +200,9 @@ def library_rows(con, viewer_id, query="", kind="", owner=None, format="",
 RIP_ONLY = ("NOT EXISTS (SELECT 1 FROM items o WHERE o.title_id = t.id"
             " AND NOT EXISTS (SELECT 1 FROM digital_sources r"
             "   WHERE r.item_id = o.id AND r.provider = 'rip'))")
+# the same test for a single copy: true when this row has a file behind it
+RIP_COPY = ("EXISTS (SELECT 1 FROM digital_sources r"
+            " WHERE r.item_id = i.id AND r.provider = 'rip')")
 
 
 def visible_clause(query="", kind="", owner=None, format="",
@@ -230,14 +240,17 @@ def library_stats(con, viewer_id, query="", kind="", owner=None,
         clause += " AND NOT " + RIP_ONLY
     params = [viewer_id] + extra
     base = ("FROM items i JOIN titles t ON t.id = i.title_id WHERE " + clause)
+    # ripped files are a playback convenience, so the headline counts leave them
+    # out unless the toggle asks for them
+    counted = base if rips else base + " AND NOT " + RIP_COPY
     titles = con.execute("SELECT COUNT(DISTINCT t.id) " + base, params).fetchone()[0]
-    copies = con.execute("SELECT COUNT(*) " + base, params).fetchone()[0]
+    copies = con.execute("SELECT COUNT(*) " + counted, params).fetchone()[0]
     # a copy that is a file on the NAS counts as "ripped", not as the format of
     # whatever disc it came from, so the tally matches what is on the shelf
     formats = con.execute(
         "SELECT CASE WHEN EXISTS (SELECT 1 FROM digital_sources r"
         "                    WHERE r.item_id = i.id AND r.provider = 'rip')"
-        " THEN 'rip' ELSE i.format END AS fmt, COUNT(*) AS n " + base +
+        " THEN 'rip' ELSE i.format END AS fmt, COUNT(*) AS n " + counted +
         " GROUP BY fmt ORDER BY n DESC", params).fetchall()
     return titles, copies, formats
 
@@ -341,6 +354,11 @@ PAGE = Template("""<!doctype html>
   .thumb.case-sleeve { aspect-ratio: 1 / 1; border-radius: 3px;
                        overflow: hidden; padding: 0; background: none; }
   .thumb.case-sleeve img { box-shadow: none; }
+  .thumb.case-digital { aspect-ratio: auto; border-radius: 5px; overflow: hidden;
+                        display: grid; grid-template-rows: auto auto; }
+  .thumb.case-digital img { width: 100%; height: auto; aspect-ratio: 2 / 3;
+                            object-fit: cover; }
+  .thumb .band.plain { background: #fff; color: #111; border-bottom-color: #ccc; }
   .thumb.case-digital { background: #8881; }
   .card .cap { padding: .4rem .5rem; font-size: .82rem; display: grid; gap: .15rem; }
   .card .cap .muted { font-size: .74rem; }
@@ -459,8 +477,8 @@ def render_index(con, viewer, base, error=None, query="",
     rips_link = base + ("?" + "&".join(bits_rips) if bits_rips else "")
     rips_toggle = ('<p class="sub"><a href="%s">%s</a></p>'
                    % (html.escape(rips_link),
-                      "Hide titles that are only ripped files" if rips
-                      else "Show titles that are only ripped files"))
+                      "Hide ripped files from the counts" if rips
+                      else "Include ripped files in the counts"))
 
     rows = library_rows(con, viewer["id"], query, kind, owner, format,
                           rips)
@@ -512,8 +530,9 @@ def render_index(con, viewer, base, error=None, query="",
     mode_counts = {row["kind"]: row["n"] for row in con.execute(
         "SELECT t.kind AS kind, COUNT(*) AS n FROM items i"
         " JOIN titles t ON t.id = i.title_id"
-        " WHERE (i.visibility = 'shared' OR i.owner_id = ?) GROUP BY t.kind",
-        (viewer["id"],))}
+        " WHERE (i.visibility = 'shared' OR i.owner_id = ?)"
+        + ("" if rips else " AND NOT " + RIP_COPY) +
+        " GROUP BY t.kind", (viewer["id"],))}
     modes = "".join(
         '<a class="%s" href="%s?kind=%s%s">%s<span class="n">%d</span></a>'
         % ("current" if value == kind else "", html.escape(base), value,
@@ -532,7 +551,9 @@ def render_index(con, viewer, base, error=None, query="",
         "SELECT i.owner_id AS owner_id, COUNT(*) AS n FROM items i"
         " JOIN titles t ON t.id = i.title_id"
         " WHERE (i.visibility = 'shared' OR i.owner_id = ?)%s"
-        " GROUP BY i.owner_id" % (" AND t.kind = ?" if kind else ""),
+        " GROUP BY i.owner_id"
+        % ((" AND t.kind = ?" if kind else "")
+           + ("" if rips else " AND NOT " + RIP_COPY)),
         [viewer["id"]] + ([kind] if kind else []))}
     owner_tabs = "".join(
         ['<a class="%s" href="%s?kind=%s%s">Everyone<span class="n">%d</span></a>'
@@ -956,7 +977,7 @@ class Handler(BaseHTTPRequestHandler):
             rips = bool(parse_qs(urlparse(self.path).query).get("rips"))
             if route.rstrip("/").endswith("/artists"):
                 want = (parse_qs(urlparse(self.path).query).get("view")
-                        or ["list"])[0]
+                        or ["grid"])[0]
                 return self.respond(200, ui_artists.render_list(
                     base, artists.all_artists(con, viewer["id"]),
                     "grid" if want == "grid" else "list"))

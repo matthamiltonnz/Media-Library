@@ -119,7 +119,12 @@ SHELL = """<!doctype html>
   .thumb.case-sleeve { aspect-ratio: 1 / 1; border-radius: 3px;
                        overflow: hidden; padding: 0; background: none; }
   .thumb.case-sleeve img { box-shadow: none; }
-  .thumb.case-digital { background: #8881; }
+  .thumb.case-digital { aspect-ratio: auto; border-radius: 5px; overflow: hidden;
+                        display: grid; grid-template-rows: auto auto;
+                        background: #8881; }
+  .thumb.case-digital img { width: 100%; height: auto; aspect-ratio: 2 / 3;
+                            object-fit: cover; }
+  .thumb .band.plain { background: #fff; color: #111; border-bottom-color: #ccc; }
   .card .cap { padding: .4rem .5rem; font-size: .82rem; display: grid; gap: .15rem; }
   .card .cap .muted { font-size: .74rem; }
 </style>

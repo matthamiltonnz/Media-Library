@@ -41,7 +41,7 @@ def album_name(title_name, artist_name):
     return title_name or ""
 
 
-def render_list(base, artists, view="list"):
+def render_list(base, artists, view="grid"):
     """Every act with albums held, as a table or as a wall of covers."""
     toggle = ('<p class="sub"><a href="%sartists?view=%s">%s</a></p>'
               % (_text(base), "list" if view == "grid" else "grid",
