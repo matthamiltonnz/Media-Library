@@ -138,10 +138,13 @@ def _play_block(base, row, items, digital, players, last_player,
                " (%s)" % _text(player["state"]) if player["state"] else "")
             for player in players)
         def _label(source):
+            kind = labels.get(source["copy_format"],
+                              source["copy_format"] or "copy")
+            owner = source["owner_name"] or "unowned"
+            if owner != FILES_OWNER:  # files belong to the shelf, not a person
+                kind = "%s \u00b7 %s" % (kind, owner)
             return "%s \u2014 %s \u00b7 %s" % (
-                _text("%s \u00b7 %s" % (labels.get(source["copy_format"],
-                                              source["copy_format"] or "copy"),
-                                   source["owner_name"] or "unowned")),
+                _text(kind),
                 _text(source["root_label"] or "media"),
                 _text(source["path"]))
 
