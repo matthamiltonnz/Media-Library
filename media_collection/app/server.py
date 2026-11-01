@@ -1167,7 +1167,7 @@ class Handler(BaseHTTPRequestHandler):
                 # a relative Location resolves against /admin/players and
                 # lands on /admin/admin: go absolute
                 where = (base or "/") + "admin?players=%d" % len(picked)
-                return self.respond(303, "", {"Location": where})
+                return self.respond(303, "", extra={"Location": where})
 
             if route.rstrip("/").endswith("/admin/scan"):
                 scan.start(DB_PATH, repair=True)
