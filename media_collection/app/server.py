@@ -21,6 +21,7 @@ import dedupe
 import jellyfin
 import metadata
 import playback
+import clean_job
 import refresh_job
 import scan
 import artists
@@ -993,6 +994,18 @@ class Handler(BaseHTTPRequestHandler):
                     jellyfin.status(con), scan.summary(),
                     players=playback.players(),
                     chosen=playback.chosen(con))
+                state = clean_job.status()
+                if state["running"] or state["finished"]:
+                    note = ('<p class="sub">Clean: %d of %d checked, '
+                            '%d forgotten, %d copies pruned%s</p>'
+                            % (state["checked"], state["total"], state["gone"],
+                               state["pruned"],
+                               "" if state["running"] else " \u2014 done"))
+                    if state["running"]:
+                        note += ('<script>setTimeout(function () {'
+                                 ' location.reload(); }, 2000);</script>')
+                    page = page.replace("<h2>Media roots (NAS folders)</h2>",
+                                        note + "<h2>Media roots (NAS folders)</h2>", 1)
                 page = page.replace(
                     "<h2>Media roots (NAS folders)</h2>",
                     '<form method="post" action="%sadmin/clean"' ' onsubmit="return confirm(\'Check every recorded file and forget '
@@ -1147,36 +1160,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self.respond(303, "", extra={"Location": base + "admin"})
 
             if route.rstrip("/").endswith("/admin/clean"):
-                # a file entry is only worth keeping while the file is there
-                roots = {row["id"]: row["path"] for row in con.execute(
-                    "SELECT id, path FROM media_roots")}
-                gone = []
-                # only file entries: a link row has no path to check
-                for row in con.execute(
-                        "SELECT id, root_id, path FROM digital_sources"
-                        " WHERE provider = 'rip'"):
-                    base_dir = roots.get(row["root_id"])
-                    where = row["path"]
-                    if not where:
-                        continue
-                    full = (os.path.join(base_dir, where)
-                            if base_dir else where)
-                    try:
-                        there = os.path.exists(full)
-                    except (OSError, TypeError, ValueError):
-                        there = False
-                    if not there:
-                        gone.append(row["id"])
-                for start in range(0, len(gone), 400):
-                    chunk = gone[start:start + 400]
-                    con.execute("DELETE FROM digital_sources WHERE id IN (%s)"
-                                % ",".join("?" * len(chunk)), chunk)
-                con.commit()
-                pruned = dedupe.orphans(con)
-                return self.respond(303, "",
-                                    extra={"Location": (base or "/")
-                                           + "admin?clean=%d&pruned=%d"
-                                           % (len(gone), pruned)})
+                # a long check belongs in the background so the page can
+                # show how far it has got
+                clean_job.start(DB_PATH)
+                return self.respond(303, "", extra={
+                    "Location": (base or "/") + "admin?clean=1"})
 
             match = re.search(r"/admin/roots/(\d+)/delete/?$", route)
             if match:
