@@ -406,6 +406,14 @@ def _run_sync(db_path):
         counts = {"error": str(exc)}
     finally:
         con.close()
+    try:  # linking is the last thing to touch copies, so tidy what it minted
+        import dedupe
+        streamed, dropped = dedupe.after_links(db_path)
+        if streamed or dropped:
+            print("jellyfin: %d stream-only copy(s), %d empty copy(s) dropped"
+                  % (streamed, dropped))
+    except Exception as exc:
+        print("jellyfin: tidy up skipped (%s)" % exc)
     with _LOCK:
         STATE.update({"running": False, "counts": counts,
                       "finished": time.strftime("%Y-%m-%d %H:%M:%S")})
