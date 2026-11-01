@@ -437,7 +437,6 @@ $library
 <dialog id="addcopy">
 <h2>Add a title</h2>
 <form class="add" method="post" action="${base}items">
-  <input type="hidden" name="kind" value="$kind">
   <input name="title" placeholder="Title" required>
   <input name="release_year" placeholder="Year" inputmode="numeric" pattern="[0-9]{0,4}">
   <select name="format">$format_options</select>
@@ -769,6 +768,9 @@ def add_item(con, viewer, form):
     year = int(year_raw) if year_raw.isdigit() else None
 
     fmt = field(form, "format") or "bluray"
+    if fmt in ("vinyl", "cd"):      # a record or a disc is music, whatever
+        kind = "music"             # the form claimed
+
     if fmt not in FORMATS:
         return "Unknown format.", None
 
