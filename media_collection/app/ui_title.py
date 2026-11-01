@@ -451,11 +451,9 @@ def render(base, row, items, digital, formats, labels, summary=None, error=None,
                  '<p><button type="submit">Refresh metadata</button></p>'
                  '</form>' % (_text(base), row["id"]))
 
-    copies_on = tab == "copies"
+    # the copies belong on the title page itself, not behind a tab
+    copies_on = True
     tabs = ""
-    if copies_on:                        # a way back from the copies tab
-        tabs = ('<nav class="tabs"><a href="%stitle/%d">About</a></nav>'
-                % (_text(base), row["id"]))
     parts.append(tabs)
 
     if copies_on:
