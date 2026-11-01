@@ -83,6 +83,8 @@ def normalize_provider(value):
     for needle, provider in PROVIDERS.items():
         if needle in key:
             return provider
+    if key in ("1", "y", "yes", "true"):   # a Blu-ray.com "Digital copy" flag
+        return "itunes"                    # the household's store is Apple TV
     return None
 
 

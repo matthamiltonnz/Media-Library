@@ -63,7 +63,7 @@ def _copy_title(item, labels, store=None, ripped=False):
         bits = [labels.get(item["format"], item["format"] or "copy")]
         if store:
             bits.append(store)
-        if ripped:
+        if ripped and "ripped" not in bits[0].lower():
             bits.append("ripped file")
     bits.append(item["owner_name"] or "unowned")
     return " · ".join(bits)
