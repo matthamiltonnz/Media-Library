@@ -272,23 +272,13 @@ If the container is crash-looping after an update, check the **Log** tab: the fi
 line prints the running version (`media collection 0.8.x starting`). If it shows the
 old number, the image was not rebuilt — use ⋮ → **Rebuild**, not Restart.
 
-## Importing a Blu-ray.com export
+## Importing a Blu-ray.com export is gone
 
-**Import a CSV** (link on the catalogue page):
+The add-on no longer ingests a Blu-ray.com CSV. Media is taken from the
+QNAP folders by the film, music and TV scans, and owned copies are added
+by hand from a title page or the add-on panel.
 
-1. **Upload** the CSV (or paste it) — it is stored verbatim, nothing is inserted yet.
-2. **Confirm the mapping** — every field (title, year, format, type, barcode,
-   region, Blu-ray.com ID, edition, location, condition, IMDb ID, digital provider)
-   gets a dropdown, pre-filled by matching your header names. Change any that are wrong.
-3. **Review** — every row is staged with a status:
-   - `ok` — ready to import (barcode may be empty; that is normal)
-   - `duplicate` — barcode already owned, or repeated inside the file
-   - `error` — missing title, year is not 4 digits, or barcode not 12/13 digits
-4. **Commit** — only `ok` rows are inserted; failed inserts are reported per row.
-   Imports are single-use: the page shows when it was committed.
-
-Duplicates are matched on barcode only, so a second copy of a barcodeless title
-imports as a new copy — remove it afterwards if it was accidental.
+---
 
 ## Title detail page
 

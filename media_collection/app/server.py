@@ -18,7 +18,6 @@ from string import Template
 from urllib.parse import parse_qs, quote, urlparse
 
 import dedupe
-import importer
 import jellyfin
 import metadata
 import playback
@@ -28,7 +27,6 @@ import artists
 import ui
 import ui_artists
 import ui_admin
-import ui_import
 import ui_title
 
 PORT = int(os.environ.get("PORT", "8099"))
@@ -973,25 +971,6 @@ class Handler(BaseHTTPRequestHandler):
                     "application/json",
                     {"Content-Disposition": 'attachment; filename="media-collection-%s.json"'
                      % datetime.now().strftime("%Y%m%d")})
-
-            if route.rstrip("/").endswith("/import"):
-                return self.respond(200, ui_import.upload_page(base))
-
-            match = re.search(r"/import/(\d+)/map/?$", route)
-            if match:
-                imp = con.execute("SELECT * FROM imports WHERE id = ?",
-                                  (int(match.group(1)),)).fetchone()
-                if imp is None:
-                    return self.respond(404, "No such import", "text/plain; charset=utf-8")
-                headers, _ = importer.parse_csv(imp["raw_csv"])
-                mapping = json.loads(imp["mapping_json"]) if imp["mapping_json"] else {}
-                rows = con.execute("SELECT * FROM import_rows WHERE import_id = ?"
-                                   " ORDER BY line_no", (imp["id"],)).fetchall()
-                counts = import_counts(con, imp["id"])
-                return self.respond(200, ui_import.mapping_page(
-                    base, imp, headers, mapping,
-                    rows=rows or None, counts=counts or None))
-
             query = (parse_qs(urlparse(self.path).query).get("q") or [""])[0].strip()
             view = (parse_qs(urlparse(self.path).query).get("view") or ["grid"])[0]
             kind = (parse_qs(urlparse(self.path).query).get("kind") or [""])[0]
@@ -1388,62 +1367,6 @@ class Handler(BaseHTTPRequestHandler):
                 con.execute("DELETE FROM items WHERE id = ?", (int(match.group(1)),))
                 con.commit()
                 return self.respond(303, "", extra={"Location": base})
-
-            if route.rstrip("/").endswith("/import"):
-                text = (field(form, "paste") or "").strip()
-                filename = None
-                upload = (form.get("csv") or [""])[0]
-                if not text and upload.strip():
-                    text = upload
-                    filename = "uploaded.csv"
-                if not text:
-                    return self.respond(200, ui_import.upload_page(
-                        base, error="No CSV supplied — choose a file or paste the text."))
-                cur = con.execute(
-                    "INSERT INTO imports (filename, raw_csv, created_by) VALUES (?, ?, ?)",
-                    (filename, text, viewer["id"]))
-                con.commit()
-                return self.respond(303, "", extra={
-                    "Location": base + "import/%d/map" % cur.lastrowid})
-
-            match = re.search(r"/import/(\d+)/map/?$", route)
-            if match:
-                imp = con.execute("SELECT * FROM imports WHERE id = ?",
-                                  (int(match.group(1)),)).fetchone()
-                if imp is None:
-                    return self.respond(404, "No such import", "text/plain; charset=utf-8")
-                mapping = {}
-                for field_name, _label in importer.FIELDS:
-                    header = (form.get("map_" + field_name) or [""])[0].strip()
-                    if header:
-                        mapping[field_name] = header
-                importer.stage(con, imp, mapping)
-                return self.respond(303, "", extra={
-                    "Location": base + "import/%d/map" % imp["id"]})
-
-            match = re.search(r"/import/(\d+)/commit/?$", route)
-            if match:
-                imp = con.execute("SELECT * FROM imports WHERE id = ?",
-                                  (int(match.group(1)),)).fetchone()
-                if imp is None:
-                    return self.respond(404, "No such import", "text/plain; charset=utf-8")
-                result = importer.commit(con, imp, viewer["id"], DEFAULT_VISIBILITY)
-                if result is None:
-                    summary = {"ok": False, "text": "This import was already committed."}
-                else:
-                    imported, failed = result
-                    text = "%d rows imported" % imported
-                    if failed:
-                        text += " · %d could not be imported" % failed
-                    summary = {"ok": imported > 0, "text": text}
-                imp = con.execute("SELECT * FROM imports WHERE id = ?", (imp["id"],)).fetchone()
-                headers, _ = importer.parse_csv(imp["raw_csv"])
-                mapping = json.loads(imp["mapping_json"]) if imp["mapping_json"] else {}
-                rows = con.execute("SELECT * FROM import_rows WHERE import_id = ?"
-                                   " ORDER BY line_no", (imp["id"],)).fetchall()
-                return self.respond(200, ui_import.mapping_page(
-                    base, imp, headers, mapping, rows=rows or None,
-                    counts=import_counts(con, imp["id"]) or None, summary=summary))
 
             if route.rstrip("/").endswith("/items"):
                 error, title_id = add_item(con, viewer, form)
