@@ -336,11 +336,19 @@ def after_links(path):
         "                WHERE l.item_id = items.id)").rowcount
     unown_rips(con)
     dropped = orphans(con)
+    stray_titles(con)
     con.commit()
     con.close()
     return streamed, dropped
 
 
+def stray_titles(con):
+    """A title with no copies left is not a title: it goes, art and all."""
+    gone = con.execute("DELETE FROM titles WHERE NOT EXISTS"
+                       " (SELECT 1 FROM items WHERE title_id = titles.id)"
+                       ).rowcount
+    con.commit()
+    return gone
 def main():
     path = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("DB_PATH", "/data/media.db")
     con = sqlite3.connect(path)
@@ -360,6 +368,8 @@ def main():
     print("dedupe: %d copy(s) split per file" % split_files(con))
     print("dedupe: %d copy(s) given their file" % sync_rips(con))
     print("dedupe: %d empty ripped copy(s) dropped" % orphans(con))
+    print("dedupe: %d title(s) with no copies left dropped"
+          % stray_titles(con))
     print("dedupe: %d duplicate user(s) folded" % users(con))
     print("dedupe: %d mixed copy(s) split" % split_mixed(con))
     print("dedupe: %d duplicate copy(s) folded" % copies(con))
