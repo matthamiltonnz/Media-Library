@@ -556,7 +556,7 @@ def render_index(con, viewer, base, error=None, query="",
         "SELECT t.kind AS kind, COUNT(DISTINCT t.id) AS n FROM items i"
         " JOIN titles t ON t.id = i.title_id"
         " WHERE (i.visibility = 'shared' OR i.owner_id = ?)"
-        + ("" if rips else " AND " + RIP_ONLY)        + " GROUP BY t.kind", (viewer["id"],))}
+        " GROUP BY t.kind", (viewer["id"],))}
     modes = "".join(
         '<a class="%s" href="%s?kind=%s%s">%s<span class="n">%d</span></a>'
         % ("current" if value == kind else "", html.escape(base), value,
