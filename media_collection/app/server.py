@@ -596,6 +596,7 @@ def render_index(con, viewer, base, error=None, query="",
     if view == "grid":
         clause, extra = visible_clause(query, kind, owner, format,
                                        rips, only)
+        fmt_wanted = [f for f in (format or "").split(",") if f]
         if not rips:  # unticked, a title that is nothing but files stays out
             clause += " AND NOT " + RIP_ONLY
 
@@ -639,7 +640,9 @@ def render_index(con, viewer, base, error=None, query="",
                 html.escape(" · ".join(filter(None, [
                     str(card["release_year"] or ""),
                     " · ".join(FORMAT_LABELS.get(f, f)
-                               for f in quality_sorted(",".join(f for f in (card["formats"] or "").split(",") if f != "ripped"))),
+                               for f in quality_sorted(",".join(f for f in (card["formats"] or "").split(",")
+                                   if f != "ripped"
+                                   and (not fmt_wanted or f in fmt_wanted)))),
                     ])))
                 , html.escape(here)
             )
