@@ -65,7 +65,9 @@ def _copy_title(item, labels, store=None, ripped=False):
             bits.append(store)
         if ripped and "ripped" not in bits[0].lower():
             bits.append("ripped file")
-    bits.append(item["owner_name"] or "unowned")
+    owner = item["owner_name"] or "unowned"
+    if owner != FILES_OWNER:  # files belong to the shelf, not to a person
+        bits.append(owner)
     return " · ".join(bits)
 
 
@@ -256,6 +258,9 @@ def _copy_fields(item, formats, labels, store):
              " selected" if item["visibility"] == "shared" else "",
              " selected" if item["visibility"] == "private" else "",
              _text(item["notes"]))
+
+
+FILES_OWNER = "Ripped files"
 
 
 def _copy_line(item, labels, store, ripped=False, path=None):

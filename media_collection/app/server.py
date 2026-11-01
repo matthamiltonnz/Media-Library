@@ -556,6 +556,9 @@ def render_index(con, viewer, base, error=None, query="",
         "SELECT t.kind AS kind, COUNT(DISTINCT t.id) AS n FROM items i"
         " JOIN titles t ON t.id = i.title_id"
         " WHERE (i.visibility = 'shared' OR i.owner_id = ?)"
+        " AND EXISTS (SELECT 1 FROM items oi"
+        "   JOIN users ou ON ou.id = oi.owner_id"
+        "   WHERE oi.title_id = t.id AND ou.username <> 'rips')"
         " GROUP BY t.kind", (viewer["id"],))}
     modes = "".join(
         '<a class="%s" href="%s?kind=%s%s">%s<span class="n">%d</span></a>'
@@ -692,7 +695,7 @@ def render_index(con, viewer, base, error=None, query="",
                        html.escape(kind),
                        "&amp;q=" + html.escape(query) if query else "",
                        "&amp;owner=%d" % owner if owner else "",
-                       "&amp;format=" + html.escape(format) if format else "",
+                       (("&amp;format=" + html.escape(format)) if format else "") + ("&amp;rips=1" if rips else ""),
                        "List view" if view == "grid" else "Thumbnails")
                     + (' · <a href="%sartists">By artist</a>'
                        % html.escape(base) if kind == "music" else "")),
