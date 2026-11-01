@@ -28,6 +28,34 @@ def sort_name(name):
     return name
 
 
+def link(con, title_id, name, mbid=""):
+    """Give one title its artist, creating the artist row when it is new.
+
+    The artist name comes from the form, so a new album can be filed under the
+    right act straight away instead of waiting for a later link_all pass. An
+    empty name leaves the title alone (link_all will guess from "Artist — Album").
+    """
+    name = (name or "").strip()
+    if not name:
+        return None
+    mbid = (mbid or "").strip() or None
+    found = con.execute("SELECT id FROM artists WHERE name = ?",
+                        (name,)).fetchone()
+    if found:
+        artist_id = found["id"]
+        if mbid:
+            con.execute("UPDATE artists SET musicbrainz_id = ?"
+                        " WHERE id = ? AND musicbrainz_id IS NULL",
+                        (mbid, artist_id))
+    else:
+        artist_id = con.execute(
+            "INSERT INTO artists (name, sort_name, musicbrainz_id)"
+            " VALUES (?, ?, ?)", (name, sort_name(name), mbid)).lastrowid
+    con.execute("UPDATE titles SET artist_id = ? WHERE id = ?",
+                (artist_id, title_id))
+    return artist_id
+
+
 def link_all(con):
     """Give every music title an artist, creating the artists as needed."""
     rows = con.execute(

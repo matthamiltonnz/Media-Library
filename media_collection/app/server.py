@@ -356,12 +356,23 @@ PAGE = Template("""<!doctype html>
   .banner { padding: .5rem .7rem; border-radius: 6px; background: #c33;
             color: #fff; margin-bottom: 1rem; }
   .empty { opacity: .6; }
+  dialog { border: 1px solid #8886; border-radius: 10px; padding: 1rem 1.2rem;
+           max-width: 32rem; width: calc(100% - 2rem); }
+  dialog::backdrop { background: #0008; }
+  dialog h2 { margin-top: 0; }
+  fieldset.music { border: 1px solid #8884; border-radius: 8px;
+                   padding: .5rem .7rem; margin: 0 0 .2rem;
+                   display: grid; gap: .5rem;
+                   grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); }
+  fieldset.music legend { font-size: .78rem; text-transform: uppercase;
+                          letter-spacing: .04em; opacity: .65; }
 </style>
 </head>
 <body>
 <h1>Media Collection<a class="admin" href="${base}admin">admin</a></h1>
 <p class="sub">Signed in as <strong>$viewer</strong> — you see everything shared
    plus your own private copies.</p>
+<p class="sub"><button type="button" onclick="addcopy.showModal()">+ Add a copy</button></p>
 $modes
 <nav class="modes owners">$owner_tabs</nav>
 <form class="search" method="get" action="$base">
@@ -380,6 +391,7 @@ $error
 $rips_toggle
 $library
 
+<dialog id="addcopy">
 <h2>Add a copy</h2>
 <form class="add" method="post" action="${base}items">
   <input type="hidden" name="kind" value="$kind">
@@ -396,8 +408,16 @@ $library
   </select>
   <label class="check"><input type="checkbox" name="fetch_metadata" value="1">
     Look up metadata</label>
+  <fieldset class="music">
+    <legend>Music</legend>
+    <input name="artist" placeholder="Artist (albums only)">
+    <input name="artist_mbid" placeholder="Artist MusicBrainz id (optional)">
+    <input name="musicbrainz_id" placeholder="Release MusicBrainz id (optional)">
+  </fieldset>
   <button type="submit">Add</button>
+  <button type="button" onclick="addcopy.close()">Cancel</button>
 </form>
+</dialog>
 
 </body>
 </html>
@@ -690,6 +710,15 @@ def add_item(con, viewer, form):
             "INSERT INTO titles (name, release_year, created_by, imdb_id, kind)"
             " VALUES (?, ?, ?, ?, ?)",
             (title, year, viewer["id"], imdb, kind)).lastrowid
+
+    if kind == "music":
+        # an album can be filed under its artist and MusicBrainz release here
+        release_mbid = (field(form, "musicbrainz_id") or "").strip()
+        if release_mbid:
+            con.execute("UPDATE titles SET musicbrainz_id = ? WHERE id = ?",
+                        (release_mbid, title_id))
+        artists.link(con, title_id, field(form, "artist"),
+                     field(form, "artist_mbid"))
 
     try:
             owner_id = (re.sub(r"\D", "", field(form, "owner_id"))

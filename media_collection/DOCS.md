@@ -238,8 +238,11 @@ Within a mode the page shows the title/copy counts with a per-format breakdown (
 "Blu-ray **or** 4K" at once, and the count beside each box is what that format holds.
 Tick boxes stack on top of the search and owner filters, and a poster keeps showing
 every format its title holds even while the shelf is narrowed to one of them.
-The search box, the list/poster toggle and the **Add a copy** form follow — which
-creates the new title in the mode you are in. The **admin** link sits beside the page title.
+The search box and the list/poster toggle sit under the counts, and **+ Add a copy** sits
+above them: it opens a form for a new title in the mode you are in. For music that form
+also takes the artist and, if you have them, the artist's and the release's MusicBrainz
+ids — enough to file an album without waiting for a later lookup. The **admin** link sits
+beside the page title.
 
 The poster view draws each title inside a **virtual case** picked from the best copy
 held — a clear CD jewel case with its left hinge, a vinyl sleeve (the cover edge to edge,
