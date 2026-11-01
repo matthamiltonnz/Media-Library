@@ -994,6 +994,35 @@ class Handler(BaseHTTPRequestHandler):
                     jellyfin.status(con), scan.summary(),
                     players=playback.players(),
                     chosen=playback.chosen(con))
+                asked = (params.get("confirm_root") or [""])[0]
+                if asked.isdigit():
+                    root = con.execute("SELECT id, label FROM media_roots"
+                                       " WHERE id = ?", (int(asked),)).fetchone()
+                    if root:
+                        files = con.execute(
+                            "SELECT COUNT(*) FROM digital_sources"
+                            " WHERE root_id = ? AND provider = 'rip'",
+                            (root["id"],)).fetchone()[0]
+                        copies = con.execute(
+                            "SELECT COUNT(DISTINCT item_id) FROM digital_sources"
+                            " WHERE root_id = ? AND provider = 'rip'",
+                            (root["id"],)).fetchone()[0]
+                        panel = ('<div class="confirm"><p>Remove <strong>%s</strong>?'
+                                 ' It accounts for %d file entr%s and %d cop%s.</p>'
+                                 '<form method="post" action="%sadmin/roots/%d/delete">'
+                                 '<button type="submit" name="choice" value="files">'
+                                 'Remove and forget its files</button> '
+                                 '<button type="submit" name="choice" value="keep">'
+                                 'Remove the source only</button> '
+                                 '<a href="%sadmin">Cancel</a></form></div>'
+                                 % (html.escape(root["label"]), files,
+                                    "y" if files == 1 else "ies", copies,
+                                    "y" if copies == 1 else "ies",
+                                    html.escape(base), root["id"],
+                                    html.escape(base)))
+                        page = page.replace(
+                            "<h2>Media roots (NAS folders)</h2>",
+                            panel + "<h2>Media roots (NAS folders)</h2>", 1)
                 state = clean_job.status()
                 if state["running"] or state["finished"]:
                     note = ('<p class="sub">Clean: %d of %d checked, '
@@ -1168,22 +1197,27 @@ class Handler(BaseHTTPRequestHandler):
 
             match = re.search(r"/admin/roots/(\d+)/delete/?$", route)
             if match:
-                # removing a root forgets the files it found, the way a
-                # Kodi source removal does, then prunes the copies left empty
                 root_id = int(match.group(1))
-                gone = con.execute(
-                    "DELETE FROM digital_sources WHERE root_id = ?",
-                    (root_id,)).rowcount
-                # items.rip_root_id still points here, so clear it first or
-                # the foreign key refuses the delete
-                con.execute("UPDATE items SET rip_path = NULL,"
-                            " rip_root_id = NULL WHERE rip_root_id = ?",
-                            (root_id,))
+                choice = field(form, "choice")
+                if choice not in ("files", "keep"):
+                    # ask first, the way a Kodi source removal does
+                    return self.respond(303, "", extra={
+                        "Location": (base or "/")
+                        + "admin?confirm_root=%d" % root_id})
+                if choice == "keep":
+                    con.execute("UPDATE digital_sources SET root_id = NULL"
+                                " WHERE root_id = ?", (root_id,))
+                else:
+                    con.execute("DELETE FROM digital_sources"
+                                " WHERE root_id = ?", (root_id,))
+                    con.execute("UPDATE items SET rip_path = NULL,"
+                                " rip_root_id = NULL WHERE rip_root_id = ?",
+                                (root_id,))
                 con.execute("DELETE FROM media_roots WHERE id = ?", (root_id,))
                 con.commit()
                 pruned = dedupe.orphans(con)
-                return self.respond(303, "", extra={"Location": base + "admin"})
-
+                return self.respond(303, "", extra={
+                    "Location": (base or "/") + "admin?pruned=%d" % pruned})
             if route.rstrip("/").endswith("/admin/dedupe"):
                 folded = dedupe.merge(con)
                 return self.respond(303, "", extra={
