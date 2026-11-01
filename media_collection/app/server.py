@@ -1145,6 +1145,11 @@ class Handler(BaseHTTPRequestHandler):
                 gone = con.execute(
                     "DELETE FROM digital_sources WHERE root_id = ?",
                     (root_id,)).rowcount
+                # items.rip_root_id still points here, so clear it first or
+                # the foreign key refuses the delete
+                con.execute("UPDATE items SET rip_path = NULL,"
+                            " rip_root_id = NULL WHERE rip_root_id = ?",
+                            (root_id,))
                 con.execute("DELETE FROM media_roots WHERE id = ?", (root_id,))
                 con.commit()
                 pruned = dedupe.orphans(con)
