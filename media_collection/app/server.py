@@ -35,7 +35,7 @@ PORT = int(os.environ.get("PORT", "8099"))
 DB_PATH = os.environ.get("DB_PATH", "/data/media.db")
 OPTIONS_PATH = "/data/options.json"
 
-FORMATS = ["bluray_3d", "bluray", "uhd_4k", "dvd", "digital", "cd", "vinyl", "sacd",
+FORMATS = ["bluray_3d", "bluray", "uhd_4k", "dvd", "digital", "ripped", "cd", "vinyl", "sacd",
            "cassette", "vhs", "other"]
 # A digital copy either came from one of these stores or is a ripped file.
 PURCHASE_STORES = ("itunes", "appletv", "other")
@@ -46,6 +46,7 @@ FORMAT_LABELS = {
     "uhd_4k": "4K Blu-ray",
     "dvd": "DVD",
     "digital": "Digital",
+    "ripped": "Ripped file",
     "cd": "CD",
     "vinyl": "Vinyl",
     "sacd": "SACD",
@@ -63,7 +64,7 @@ CASE_ORDER = {
 }
 CASE_CLASS = {"uhd_4k": "case-4k", "bluray_3d": "case-3d", "bluray": "case-blu",
               "dvd": "case-dvd", "cd": "case-jewel", "vinyl": "case-sleeve",
-              "digital": "case-digital"}
+              "digital": "case-digital", "ripped": "case-digital"}
 
 
 CASE_LABEL = {CASE_CLASS["uhd_4k"]: "4K Ultra HD",
@@ -255,6 +256,8 @@ PAGE = Template("""<!doctype html>
   body { font: 15px/1.45 -apple-system, "Segoe UI", Roboto, sans-serif;
          margin: 0; padding: 1.2rem; background: Canvas; color: CanvasText; }
   h1 { font-size: 1.3rem; margin: 0 0 .2rem; }
+  h1 .admin { font-size: .72rem; font-weight: 600; letter-spacing: .04em;
+              margin-left: .6rem; opacity: .6; text-transform: uppercase; }
   h2 { font-size: 1rem; margin: 1.6rem 0 .6rem; }
   .sub { opacity: .7; margin: 0 0 1rem; }
   table { border-collapse: collapse; width: 100%; }
@@ -338,7 +341,7 @@ PAGE = Template("""<!doctype html>
 </style>
 </head>
 <body>
-<h1>Media Collection</h1>
+<h1>Media Collection<a class="admin" href="${base}admin">admin</a></h1>
 <p class="sub">Signed in as <strong>$viewer</strong> — you see everything shared
    plus your own private copies.</p>
 $modes
@@ -377,7 +380,6 @@ $library
   <button type="submit">Add</button>
 </form>
 
-<p class="sub" style="margin-top:2rem"><a href="${base}admin">Library admin</a></p>
 </body>
 </html>
 """)

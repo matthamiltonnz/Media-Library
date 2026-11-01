@@ -24,7 +24,7 @@ without them counting as duplicates.
 
 ## Library admin
 
-The catalogue page only carries a small **Library admin** link. That page holds the
+The catalogue page carries a small **admin** link beside its title. That page holds the
 occasional jobs:
 
 - **Import a CSV** — staged review, as described above.
@@ -236,7 +236,7 @@ current mode; other people's private copies never appear, whichever filter is ac
 Within a mode the page shows the title/copy
 counts with a per-format breakdown (CD, 3D Blu-ray, Blu-ray, 4K Blu-ray, Digital, …),
 the search box, the list/poster toggle and the **Add a copy** form — which creates the
-new title in the mode you are in. The **Library admin** link sits at the foot of the page.
+new title in the mode you are in. The **admin** link sits beside the page title.
 
 The poster view draws each title inside a **virtual case** picked from the best copy
 held — a clear CD jewel case with its left hinge, a vinyl sleeve (the cover edge to edge,

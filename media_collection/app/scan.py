@@ -229,7 +229,7 @@ def rip_item(con, title_id):
     found = con.execute(
         "SELECT i.id FROM items i JOIN digital_sources d ON d.item_id = i.id"
         " WHERE i.title_id = ? AND d.provider = 'rip'"
-        " AND i.format = 'digital' LIMIT 1",
+        " AND i.format = 'ripped' LIMIT 1",
         (title_id,)).fetchone()
     if found:
         return found["id"]
@@ -245,7 +245,7 @@ def rip_item(con, title_id):
         owner_id = user["id"]
     return con.execute(
         "INSERT INTO items (title_id, owner_id, format, visibility, notes)"
-        " VALUES (?, ?, 'digital', 'shared', 'ripped file')",
+        " VALUES (?, ?, 'ripped', 'shared', 'ripped file')",
         (title_id, owner_id)).lastrowid
 
 

@@ -191,7 +191,7 @@ def main():
                 (title_name, year)).lastrowid
             item_id = con.execute(
                 "INSERT INTO items (title_id, owner_id, format, edition, location,"
-                " visibility) VALUES (?, ?, 'digital', ?, ?, 'shared')",
+                " visibility) VALUES (?, ?, 'ripped', ?, ?, 'shared')",
                 (title_id, owner_id, edition, None)).lastrowid
             con.execute("INSERT INTO digital_sources (item_id, provider, path, root_id)"
                         " VALUES (?, 'rip', ?, ?)", (item_id, rel, root_id))

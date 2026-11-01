@@ -61,9 +61,9 @@ def album_format(folder, depth=2):
     if flac:
         return "cd", ""
     if mp3:
-        return "digital", "Google Play \u00b7 MP3"
+        return "ripped", "Google Play \u00b7 MP3"
     if aac:
-        return "digital", "iTunes \u00b7 AAC"
+        return "ripped", "iTunes \u00b7 AAC"
     return ("bluray", "") if disc else (None, "")
 
 

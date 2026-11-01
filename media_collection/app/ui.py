@@ -116,7 +116,7 @@ SHELL = """<!doctype html>
 </style>
 </head>
 <body>
-<p class="sub"><a href="@@BACK@@">← Back to the catalogue</a></p>
+<p class="sub" style="display:flex;justify-content:space-between;gap:1rem"><a href="@@BACK@@">← Back to the catalogue</a><a href="@@ADMIN@@">admin</a></p>
 <h1>@@TITLE@@</h1>
 @@CONTENT@@
 </body>
@@ -127,5 +127,6 @@ SHELL = """<!doctype html>
 def page(base, title, content, back=""):
     return (SHELL.replace("@@BASE@@", html.escape(base))
                  .replace("@@BACK@@", html.escape(base + back))
+                 .replace("@@ADMIN@@", html.escape(base + "admin"))
                  .replace("@@TITLE@@", html.escape(title))
                  .replace("@@CONTENT@@", content))
