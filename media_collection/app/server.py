@@ -583,7 +583,7 @@ def render_index(con, viewer, base, error=None, query="",
         ['<a class="%s" href="%s?kind=%s%s">Everyone<span class="n">%d</span></a>'
          % ("" if owner else "current", html.escape(base), kind,
             "&amp;view=grid" if view == "grid" else "",
-            sum(owner_counts.values()))]
+            sum(owner_counts.get(row["id"], 0) for row in owner_rows))]
         + ['<a class="%s" href="%s?kind=%s&amp;owner=%d%s">%s<span class="n">%d</span></a>'
            % ("current" if owner == row["id"] else "", html.escape(base), kind,
               row["id"], "&amp;view=grid" if view == "grid" else "",
