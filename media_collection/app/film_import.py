@@ -260,6 +260,13 @@ def main():
                         (item_id, relative, root_id, why))
             copies += 1
 
+        # an item with no file behind it is noise the shelf cannot use, so if the
+        # source did not stick (a duplicate path, say) the copy goes with it
+        if not con.execute("SELECT 1 FROM digital_sources WHERE item_id = ? LIMIT 1",
+                           (item_id,)).fetchone():
+            con.execute("DELETE FROM items WHERE id = ?", (item_id,))
+            skipped += 1
+
     if not args.dry_run:
         con.commit()
     print("film: %d films, %d copies added, %d adopted from another owner,"
