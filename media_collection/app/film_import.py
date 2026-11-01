@@ -106,11 +106,11 @@ def resolve_root(con, given, dry_run, label):
         print("film: %s is outside every media root - would add %s as a root"
               % (films_dir, root_path))
         return None, root_path, films_dir
-    if con.execute("SELECT 1 FROM media_roots WHERE label = ?", (label,)).fetchone():
-        label = "%s (%s)" % (label, os.path.basename(root_path))
-    root_id = con.execute("INSERT INTO media_roots (label, path) VALUES (?, ?)",
-                          (label, root_path)).lastrowid
-    return root_id, root_path, films_dir
+    # a folder is the household's decision, so it is never invented here:
+    # a path outside every configured folder is simply not imported
+    print("film: %s is outside every media folder, skipped (%s)"
+          % (films_dir, root_path))
+    return None, root_path, films_dir
 def _fold(text):
     """Loose name key, so 'The Hobbit: An…' and 'The Hobbit - An…' are one film."""
     text = unicodedata.normalize("NFKD", text or "").encode("ascii", "ignore").decode()
