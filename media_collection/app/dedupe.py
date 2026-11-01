@@ -334,14 +334,11 @@ def after_links(path):
         "                    WHERE d.item_id = items.id AND d.provider = 'rip')"
         "   AND EXISTS (SELECT 1 FROM jellyfin_links l"
         "                WHERE l.item_id = items.id)").rowcount
-    # the scan finds files after the boot pass, so split any copy that
-    # picked up a second file since then: one copy per file
-    split = split_files(con)
     unown_rips(con)
     dropped = orphans(con)
     con.commit()
     con.close()
-    return streamed, dropped + split
+    return streamed, dropped
 
 
 def main():
