@@ -122,6 +122,7 @@ def _play_block(base, row, items, digital, players, last_player,
                 if source["provider"] == "rip" and source["path"]
                 and source["root_path"]]
     jellyfin_ready = bool(jellyfin_link and jellyfin_configured)
+    badges = ""  # the copies list below replaces these pills
     badges = _badges(items, digital, labels, base, row["id"])
     head = ('<div class="badges">%s</div>' % badges if badges
             else '<p class="muted">No copies recorded yet.</p>')
@@ -470,7 +471,9 @@ def render(base, row, items, digital, formats, labels, summary=None, error=None,
                                  last_player, jellyfin_link,
                                  jellyfin_configured, jellyfin_sessions,
                                  labels))
+        parts.append('<details class="copy"><summary>Edit metadata</summary>')
         parts.append(_title_form(base, row))
+        parts.append('</details>')
 
     if back is None:
         back = ("?kind=%s" % row["kind"]
