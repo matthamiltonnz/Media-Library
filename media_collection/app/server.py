@@ -263,12 +263,9 @@ def library_stats(con, viewer_id, query="", kind="", owner=None,
     counted = base if rips else base + " AND NOT " + RIP_COPY
     titles = con.execute("SELECT COUNT(DISTINCT t.id) " + base, params).fetchone()[0]
     copies = con.execute("SELECT COUNT(*) " + counted, params).fetchone()[0]
-    # a copy that is a file on the NAS counts as "ripped", not as the format of
-    # whatever disc it came from, so the tally matches what is on the shelf
+    # one entry per stored format: a file is "ripped" whatever disc it came from
     formats = con.execute(
-        "SELECT CASE WHEN EXISTS (SELECT 1 FROM digital_sources r"
-        "                    WHERE r.item_id = i.id AND r.provider = 'rip')"
-        " THEN 'rip' ELSE i.format END AS fmt, COUNT(*) AS n " + counted +
+        "SELECT i.format AS fmt, COUNT(*) AS n " + counted +
         " GROUP BY fmt ORDER BY n DESC", params).fetchall()
     return titles, copies, formats
 

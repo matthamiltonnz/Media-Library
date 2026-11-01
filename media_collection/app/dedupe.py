@@ -76,6 +76,24 @@ def reclassify_rips(con):
     return changed
 
 
+def orphans(con):
+    """Drop ripped copies that have no file and no barcode behind them.
+
+    The old film import adopted a source by creating a new copy and moving the
+    source onto it, leaving the previous row with nothing at all attached. Such a
+    row cannot be verified or played, so it goes.
+    """
+    dropped = con.execute(
+        "DELETE FROM items"
+        " WHERE format = 'ripped' AND upc_ean IS NULL"
+        "   AND NOT EXISTS (SELECT 1 FROM digital_sources d"
+        "                    WHERE d.item_id = items.id)"
+        "   AND NOT EXISTS (SELECT 1 FROM jellyfin_links l"
+        "                    WHERE l.item_id = items.id)").rowcount
+    con.commit()
+    return dropped
+
+
 def users(con):
     """Fold users that differ only in case into the oldest profile.
 
@@ -226,6 +244,7 @@ def main():
         return
     print("dedupe: %d duplicate title(s) folded" % merge(con))
     print("dedupe: %d copy(s) relabelled as ripped files" % reclassify_rips(con))
+    print("dedupe: %d empty ripped copy(s) dropped" % orphans(con))
     print("dedupe: %d duplicate user(s) folded" % users(con))
     print("dedupe: %d mixed copy(s) split" % split_mixed(con))
     print("dedupe: %d duplicate copy(s) folded" % copies(con))
