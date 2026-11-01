@@ -399,6 +399,11 @@ def _run_sync(db_path):
             counts = {}                     # no key yet: nothing to refresh
         else:
             counts = sync_links(con, log=lambda message: None)
+            # every link belongs to a server: one row today, more later
+            con.execute("UPDATE jellyfin_links SET server_id ="
+                        " (SELECT MIN(id) FROM jellyfin_servers)"
+                        " WHERE server_id IS NULL")
+            con.commit()
             print("jellyfin: linked %(copies)d copies, %(unmatched)d still unknown"
                   % counts)
     except Exception as exc:                      # never take the server down
