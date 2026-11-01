@@ -342,7 +342,7 @@ catalogue fills that gap itself:
   subtitle may be dropped). The title page then offers *Play in Jellyfin*, which sends
   the film or album straight to a connected client. The key is stored in the
   database, so it survives upgrades; `jellyfin_url` / `jellyfin_api_key` in the
-  add-on options still win when they are set.
+  the admin page is the only place to set them — the add-on options no longer carry these two keys.
 
 ## Updating a running install
 

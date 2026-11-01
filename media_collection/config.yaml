@@ -1,5 +1,5 @@
 name: Media Collection
-version: "0.14.1"
+version: "0.14.2"
 slug: media_collection
 description: >-
   Shared family media catalogue. Every disc has one owner, and every shared copy
@@ -28,12 +28,8 @@ options:
   log_level: info
   ripped_movies_path: "/media/QNAP/Movies"
   music_path: "/media/QNAP/Music"
-  jellyfin_url: "http://192.168.234.3:8096"
-  jellyfin_api_key: ""
 schema:
   default_visibility: list(shared|private)
   log_level: list(debug|info|warning|error)
   ripped_movies_path: str
   music_path: str
-  jellyfin_url: str
-  jellyfin_api_key: password
