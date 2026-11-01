@@ -1139,10 +1139,15 @@ class Handler(BaseHTTPRequestHandler):
 
             match = re.search(r"/admin/roots/(\d+)/delete/?$", route)
             if match:
-                con.execute("UPDATE digital_sources SET root_id = NULL WHERE root_id = ?",
-                            (int(match.group(1)),))
-                con.execute("DELETE FROM media_roots WHERE id = ?", (int(match.group(1)),))
+                # removing a root forgets the files it found, the way a
+                # Kodi source removal does, then prunes the copies left empty
+                root_id = int(match.group(1))
+                gone = con.execute(
+                    "DELETE FROM digital_sources WHERE root_id = ?",
+                    (root_id,)).rowcount
+                con.execute("DELETE FROM media_roots WHERE id = ?", (root_id,))
                 con.commit()
+                pruned = dedupe.orphans(con)
                 return self.respond(303, "", extra={"Location": base + "admin"})
 
             if route.rstrip("/").endswith("/admin/dedupe"):

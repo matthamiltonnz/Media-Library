@@ -93,7 +93,7 @@ def _roots_block(base, roots):
             '<td><form id="%s" method="post" action="%sadmin/roots/%d">'
             '<button type="submit">Save</button></form>'
             '<form method="post" action="%sadmin/roots/%d/delete">'
-            '<button type="submit">Remove</button></form></td></tr>'
+            '<button type="submit" onclick="return confirm(''Remove this source? Its files will be forgotten and any copy left with nothing behind it will be pruned.'')">Remove</button></form></td></tr>'
             % (form_id, html.escape(root["label"], quote=True),
                form_id, html.escape(root["path"], quote=True),
                form_id, html.escape(base), root["id"],
