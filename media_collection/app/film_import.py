@@ -179,6 +179,8 @@ def main():
 
     root_id, root_path, films_dir = resolve_root(con, args.root, args.dry_run,
                                                  args.root_label)
+    if root_id is None:   # no folder covers this path: nothing to attach to
+        return 0
     if films_dir is None:
         print("film: nothing to read - pass the folder that holds the films")
         return 0

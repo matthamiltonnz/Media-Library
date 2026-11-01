@@ -135,6 +135,8 @@ def main():
 
     root_id, root_path, music_dir = resolve_root(con, args.root, args.dry_run,
                                                  args.root_label)
+    if root_id is None:   # no folder covers this path: nothing to attach to
+        return 0
     if music_dir is None:
         print("music: no music folder under the media roots, nothing to do")
         return 0

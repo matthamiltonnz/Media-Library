@@ -140,6 +140,8 @@ def main():
 
     root_id, root_path, tv_dir = resolve_root(con, args.root, args.dry_run,
                                              args.root_label)
+    if root_id is None:   # no folder covers this path: nothing to attach to
+        return 0
     if tv_dir is None:
         print("tv: no TV folder under the media roots, nothing to do")
         return 0
