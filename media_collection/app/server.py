@@ -986,13 +986,22 @@ class Handler(BaseHTTPRequestHandler):
                     message = params["artists"][0]
                 elif params.get("scan") and scan.summary():
                     message = scan.summary()
-                return self.respond(200, ui_admin.render(
+                page = ui_admin.render(
                     base, viewer, stats(con), message,
                     refresh_job.status(), len(dedupe.groups(con)),
                     con.execute("SELECT * FROM media_roots ORDER BY medium, label").fetchall(),
                     jellyfin.status(con), scan.summary(),
                     players=playback.players(),
-                    chosen=playback.chosen(con)))
+                    chosen=playback.chosen(con))
+                page = page.replace(
+                    "<h2>Media roots (NAS folders)</h2>",
+                    '<form method="post" action="%sadmin/clean"' ' onsubmit="return confirm(\'Check every recorded file and forget '
+                    'the ones that are gone?\')">'
+                    '<p><button type="submit">Clean database</button> '
+                    '<span class="muted">forget file entries whose '
+                    'path no longer exists</span></p></form>' % base
+                    + "<h2>Media roots (NAS folders)</h2>", 1)
+                return self.respond(200, page)
 
             if route.rstrip("/").endswith("/export.csv"):
                 return self.respond(
@@ -1136,6 +1145,29 @@ class Handler(BaseHTTPRequestHandler):
                         400, "Another root already uses that label or path.",
                         "text/plain; charset=utf-8")
                 return self.respond(303, "", extra={"Location": base + "admin"})
+
+            if route.rstrip("/").endswith("/admin/clean"):
+                # a file entry is only worth keeping while the file is there
+                roots = {row["id"]: row["path"] for row in con.execute(
+                    "SELECT id, path FROM media_roots")}
+                gone = []
+                for row in con.execute(
+                        "SELECT id, root_id, path FROM digital_sources"):
+                    base_dir = roots.get(row["root_id"])
+                    full = (os.path.join(base_dir, row["path"])
+                            if base_dir else row["path"])
+                    if not os.path.exists(full):
+                        gone.append(row["id"])
+                for start in range(0, len(gone), 400):
+                    chunk = gone[start:start + 400]
+                    con.execute("DELETE FROM digital_sources WHERE id IN (%s)"
+                                % ",".join("?" * len(chunk)), chunk)
+                con.commit()
+                pruned = dedupe.orphans(con)
+                return self.respond(303, "",
+                                    extra={"Location": (base or "/")
+                                           + "admin?clean=%d&pruned=%d"
+                                           % (len(gone), pruned)})
 
             match = re.search(r"/admin/roots/(\d+)/delete/?$", route)
             if match:
