@@ -133,9 +133,12 @@ def orphans(con):
         "DELETE FROM items"
         " WHERE format = 'ripped' AND upc_ean IS NULL"
         "   AND NOT EXISTS (SELECT 1 FROM digital_sources d"
-        "                    WHERE d.item_id = items.id)"
-        "   AND NOT EXISTS (SELECT 1 FROM jellyfin_links l"
-        "                    WHERE l.item_id = items.id)").rowcount
+        "                    WHERE d.item_id = items.id AND d.provider = 'rip')").rowcount
+    # a stale pointer is worse than none: only a copy with a file keeps rip_path
+    con.execute("UPDATE items SET rip_path = NULL, rip_root_id = NULL"
+                " WHERE format = 'ripped' AND rip_path IS NOT NULL"
+                "   AND NOT EXISTS (SELECT 1 FROM digital_sources d"
+                "                    WHERE d.item_id = items.id AND d.provider = 'rip')")
     con.commit()
     return dropped
 
