@@ -416,7 +416,7 @@ PAGE = Template("""<!doctype html>
 <h1>Media Collection<a class="admin" href="${base}admin">admin</a></h1>
 <p class="sub">Signed in as <strong>$viewer</strong> — you see everything shared
    plus your own private copies.</p>
-<p class="sub"><button type="button" onclick="addcopy.showModal()">+ Add a copy</button></p>
+<p class="sub"><button type="button" onclick="addcopy.showModal()">+ Add a title</button></p>
 $modes
 <nav class="modes owners">$owner_tabs</nav>
 <form class="search" method="get" action="$base">
@@ -436,7 +436,7 @@ $rips_toggle
 $library
 
 <dialog id="addcopy">
-<h2>Add a copy</h2>
+<h2>Add a title</h2>
 <form class="add" method="post" action="${base}items">
   <input type="hidden" name="kind" value="$kind">
   <input name="title" placeholder="Title" required>
