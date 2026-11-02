@@ -1214,6 +1214,15 @@ class Handler(BaseHTTPRequestHandler):
         con = connect()
         try:
             viewer = viewer_for(self, con)
+            renamed = re.search(r"/artist/(\d+)/?$", route_path(self))
+            if renamed:
+                wanted = (field(form, "artist_name") or "").strip()
+                if wanted:
+                    artists.rename(con, int(renamed.group(1)),
+                                   wanted)
+                return self.respond(303, "", extra={
+                    "Location": base_path(self) + "artist/%d"
+                    % int(renamed.group(1))})
             base = base_path(self)
             route = route_path(self)
 
@@ -1529,6 +1538,12 @@ class Handler(BaseHTTPRequestHandler):
                         " WHERE id = ?",
                         (new_imdb, new_tmdb, title_id))
                 con.commit()
+                if kind == "music":
+                    # the form has an Artist box: honour it on an edit,
+                    # not only when a title is first created
+                    artists.link(con, title_id, field(form, "artist"),
+                                 field(form, "artist_mbid"))
+                    con.commit()
 
                 message = "Title updated."
                 changed = (new_imdb != before["imdb_id"]

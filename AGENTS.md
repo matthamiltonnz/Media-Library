@@ -6,7 +6,7 @@ Entry point `media_collection/app/server.py`; schema in
 `media_collection/migrations/*.sql` applied by `migrate.sh`.
 
 Version lives in `media_collection/config.yaml` and is displayed on the page
-header. Current: **0.23.35**.
+header. Current: **0.23.37**.
 
 ## Live deployment
 
@@ -273,9 +273,15 @@ twice and the form had no way to change it.
   music names (544 rows; each was verified to start with its artist's name).
 - `_facts()` appends `row["artist_name"]` when the title query provides it, and
   the title page now selects `t.*, a.name AS artist_name … LEFT JOIN artists`.
-- `_title_form` has an `Artist` input, which the save handler already fed to
-  `artists.link(con, title_id, field(form, "artist"))` — the field was simply
-  never rendered before.
+- `_title_form` has an `Artist` input. Until 0.23.36 it did nothing: the
+  `/title/<id>` POST updates name/year/kind/mbid directly and never called
+  `artists.link()` — that only happened in `add_item()`, the create path. The
+  edit branch now links the posted artist too, when `kind == "music"`.
+- The artist page carries a **Rename artist** form (`POST /artist/<id>`, handled
+  at the top of `do_POST` → `artists.rename()`), so a band that changed its name
+  (Shihad → Pacifier for a US tour) is renamed in one place instead of per
+  album. Typing a new name in a title's Artist box instead creates a *second*
+  artist row and relinks just that title.
 - `artists.link_all()` only touches titles with `artist_id IS NULL`, so the
   split names are not re-derived or lost.
 - Jellyfin album routes are matched by **directory path** (`jellyfin.py` ~182,

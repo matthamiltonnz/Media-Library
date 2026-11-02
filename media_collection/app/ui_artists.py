@@ -122,6 +122,10 @@ def render_artist(base, artist, titles, labels, view="grid"):
                if artist["overview"] else ""))
     count = ('<p class="sub">%d album%s</p>'
              % (len(titles), "" if len(titles) == 1 else "s"))
+    rename = ('<form method="post" action="%sartist/%d" class="sub">'
+              '<label>Name<input name="artist_name" value="%s"></label> '
+              '<button type="submit">Rename artist</button></form>'
+              % (_text(base), artist["id"], _text(artist["name"])))
 
     if view == "grid":
         cards = "".join(
@@ -145,7 +149,7 @@ def render_artist(base, artist, titles, labels, view="grid"):
             for row in titles)
         body = (head + count + toggle + '<table><tr><th>Album</th><th>Year</th>'
                 '<th>Owned as</th><th>Watched</th></tr>%s</table>' % rows)
-    return ui.page(base, artist["name"], body, back="artists")
+    return ui.page(base, artist["name"], rename + body, back="artists")
 
 
 def _formats(row, labels):
