@@ -6,7 +6,7 @@ Entry point `media_collection/app/server.py`; schema in
 `media_collection/migrations/*.sql` applied by `migrate.sh`.
 
 Version lives in `media_collection/config.yaml` and is displayed on the page
-header. Current: **0.23.28**.
+header. Current: **0.23.31**.
 
 ## Live deployment
 
@@ -315,3 +315,25 @@ agree — the artist name appears in the source path
   come after, so keep the three query params together when editing this.
 - Net effect: `/artists?q=sheeran` → one act; `/?q=sheeran&kind=music` → three
   albums; `/?q=zzzz&kind=music` → none.
+
+## Refreshing an album's metadata (0.23.31)
+
+`refresh_music()` used to search MusicBrainz by `artist + album` derived from
+`titles.name`. With the artist split out, the name is the album alone, so the
+search looked for `-` and reported "no MusicBrainz match".
+
+- It now looks the album up by its own `titles.musicbrainz_id` first, through
+  `musicbrainz_release(mbid)`. The stored id can be a **release** or a
+  **release-group**; the release-group endpoint 404s for a release id, so both
+  are tried and the cover comes from the release group's id.
+- Without an mbid it searches by name, taking the artist from `artist_id`
+  (`artists.name`) instead of from the `"Artist — Album"` name.
+- `musicbrainz_lookup()` asked the release-group index for
+  `release:"…" AND artist:"…"`, which matches **nothing** — the field is
+  `releasegroup:` and it has no usable `artist:` field. It now queries
+  `releasegroup:"…"` and gives `+30` to a result whose artist credit contains
+  the artist, on top of the existing year scoring.
+
+Worth knowing: with no year on the title the score can land on a reissue
+(`Too Legit To Quit` → a 2001 release group), so check `release_year` after a
+refresh on an album whose year is empty.

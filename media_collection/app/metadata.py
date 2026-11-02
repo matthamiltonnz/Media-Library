@@ -297,11 +297,9 @@ def musicbrainz_artist(name):
 def musicbrainz_lookup(artist, album, year=None):
     """Best release-group for one album: mbid, year, cover, title, credit, types."""
     album = ALBUM_YEAR.sub("", album or "").strip() or (album or "")
-    clauses = ['release:"%s"' % album.replace('"', "")]
-    if artist:
-        clauses.append('artist:"%s"' % artist.replace('"', ""))
+    clauses = ['releasegroup:"%s"' % album.replace('"', "")]
     params = urllib.parse.urlencode({"query": " AND ".join(clauses),
-                                     "fmt": "json", "limit": "8"})
+                                     "fmt": "json", "limit": "12"})
     time.sleep(MB_PAUSE)
     payload = _get(MB_ROOT + "/release-group?" + params)
 
@@ -318,6 +316,10 @@ def musicbrainz_lookup(artist, album, year=None):
             continue
         score = int(group.get("score") or 0)
         date = group.get("first-release-date") or ""
+        credit_here = "".join(
+            (part.get("name") or "") for part in group.get("artist-credit") or [])
+        if artist and artist.lower() in credit_here.lower():
+            score += 30
         if year and date[:4] == str(year):
             score += 40                     # the year breaks album/remaster ties
         elif year and date[:4]:
@@ -349,15 +351,78 @@ def musicbrainz_lookup(artist, album, year=None):
     }
 
 
+def musicbrainz_release(mbid):
+    """One album by its stored MusicBrainz id, in the shape lookup returns.
+
+    The id may be a release or a release group - both are tried, because the
+    catalogue has historically stored whichever the lookup found first.
+    """
+    group = None
+    try:
+        group = _get("%s/release-group/%s?inc=artist-credits&fmt=json"
+                     % (MB_ROOT, mbid))
+    except Exception:
+        group = None
+    if group and not group.get("error"):
+        date = group.get("first-release-date") or ""
+        title = group.get("title") or ""
+        types = [group.get("primary-type")] + list(
+            group.get("secondary-types") or [])
+        credit = "".join(
+            (part.get("name") or "") + (part.get("joinphrase") or "")
+            for part in group.get("artist-credit") or [])
+        art_id = group.get("id") or mbid
+    else:
+        release = _get(
+            "%s/release/%s?inc=artist-credits+release-groups&fmt=json"
+            % (MB_ROOT, mbid))
+        if not release or release.get("error"):
+            return None
+        group = release.get("release-group") or {}
+        date = release.get("date") or group.get("first-release-date") or ""
+        title = release.get("title") or group.get("title") or ""
+        types = [group.get("primary-type")] + list(
+            group.get("secondary-types") or [])
+        credit = "".join(
+            (part.get("name") or "") + (part.get("joinphrase") or "")
+            for part in release.get("artist-credit") or [])
+        art_id = group.get("id") or mbid
+    time.sleep(MB_PAUSE)
+    return {
+        "mbid": mbid,
+        "title": title,
+        "credit": credit.strip(),
+        "date": date,
+        "year": int(date[:4]) if date[:4].isdigit() else None,
+        "types": " \u00b7 ".join(part for part in types if part),
+        "cover": cover_art(art_id),
+    }
+
+
 def refresh_music(con, row):
     """MusicBrainz for one album - cover art, first release and the MB link."""
     artist, album = split_artist_album(row["name"])
-    try:
-        found = musicbrainz_lookup(artist, album, row["release_year"])
-    except Throttle:
-        return "rate-limited"
-    except Exception:
-        found = None
+    if not artist and row["artist_id"]:
+        looked = con.execute("SELECT name FROM artists WHERE id = ?",
+                             (row["artist_id"],)).fetchone()
+        artist = looked["name"] if looked else None
+    found = None
+    # an album that already carries a release-group id is looked up by that id:
+    # its name is the album alone now, which no search can match on
+    if row["musicbrainz_id"]:
+        try:
+            found = musicbrainz_release(row["musicbrainz_id"])
+        except Throttle:
+            return "rate-limited"
+        except Exception:
+            found = None
+    if found is None:
+        try:
+            found = musicbrainz_lookup(artist, album, row["release_year"])
+        except Throttle:
+            return "rate-limited"
+        except Exception:
+            found = None
     if not found:
         return "no MusicBrainz match for %s" % album
 
