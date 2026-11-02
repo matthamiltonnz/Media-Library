@@ -103,7 +103,16 @@ def _badges(items, digital, labels, base=None, title_id=None):
     stores = _stores(digital)
     ripped = _ripped(digital)
     badges = []
-    for item in items:
+    _ADD_HTML = ('<p><button type="button" onclick="addcopy.showModal()">'
+                 '+ Add a copy</button></p>')
+    _ADD = object()
+    _disc = [c for c in items if c["format"] != "ripped"]
+    _rips = [c for c in items if c["format"] == "ripped"]
+    _ordered = _disc + ([_ADD] + _rips if _rips else [])
+    for item in _ordered:
+        if item is _ADD:
+            parts.append(_ADD_HTML)
+            continue
         text = _text(_copy_title(item, labels, stores.get(item["id"]),
                                  item["id"] in ripped))
         if base and title_id:
@@ -361,7 +370,7 @@ def _copies_tab(base, row, items, digital, formats, labels, users,
              "acquired_on": None, "last_watched_on": None,
              "visibility": "shared", "notes": None}
     parts.append(
-        '<p><button type="button" onclick="addcopy.showModal()">+ Add a copy</button></p>'
+        ''
         '<dialog id="addcopy"><h2>Add a copy</h2>'
         '<form method="post" action="%sitems">'
         '<input type="hidden" name="title" value="%s">'
