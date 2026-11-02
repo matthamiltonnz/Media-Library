@@ -628,7 +628,7 @@ def render_index(con, viewer, base, error=None, query="",
             # a file behind this title, so the card can offer to play it
             " (SELECT 1 FROM items ri JOIN digital_sources rd"
             "   ON rd.item_id = ri.id"
-            "   WHERE ri.title_id = t.id AND rd.provider = 'rip'"
+            "   WHERE ri.title_id = t.id AND rd.provider IN ('rip', 'jellyfin')"
             "   LIMIT 1) AS has_rip,"
 
             # every format the title holds, not just the ones being filtered
@@ -653,7 +653,7 @@ def render_index(con, viewer, base, error=None, query="",
                     if (card["jf_id"] or card["poster_url"])
                     else '<span class="muted">no image</span>'),
                 html.escape(card["name"])
-                    + (' <span class="playmark" title="a file is ready to play">&#9654;</span>'
+                    + (' <span class="playmark" title="a copy is ready to play">&#9654;</span>'
                        if card["has_rip"] else ""),
                 html.escape(" · ".join(filter(None, [
                     str(card["release_year"] or ""),

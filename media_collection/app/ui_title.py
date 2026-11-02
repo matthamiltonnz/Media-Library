@@ -191,6 +191,7 @@ def _play_block(base, row, items, digital, players, last_player,
         shelf = ('<h3>From Media folder</h3><p class="muted">No ripped file for'
                  ' this title yet - rip the disc and the scan picks it up.</p>')
 
+    picker = _version_picker(digital, items)
     if not jellyfin_ready:
         jellyfin = ""
     elif sessions:
@@ -204,13 +205,13 @@ def _play_block(base, row, items, digital, players, last_player,
                     '<p class="sub">Starts it on a Jellyfin app that is open'
                     ' right now.</p>'
                     '<form method="post" action="%stitle/%d/jellyfin"'
-                    ' onsubmit="var f=document.getElementById(\'playfile\');'
-                    'this.source_id.value=f?f.value:\'\'">'
-                    '<input type="hidden" name="source_id" value="">'
+                    '>'
+                    '%s'
                     '<label>Jellyfin device<select name="session_id">%s'
                     '</select></label>'
                     '<p><button type="submit">Play in Jellyfin</button></p>'
-                    '</form>' % (_text(base), row["id"], session_options))
+                    '</form>' % (_text(base), row["id"],
+                                          session_options, picker))
     else:
         jellyfin = ('<h3>On the Jellyfin server</h3>'
                     '<p class="muted">No Jellyfin app is open at the moment -'
@@ -528,3 +529,20 @@ def render(base, row, items, digital, formats, labels, summary=None, error=None,
         back = ("?kind=%s" % row["kind"]
                 + ("&owner=%d" % owner if owner else ""))
     return ui.page(base, row["name"], "".join(parts), back=back)
+
+
+def _version_picker(digital, items):
+    """Which file of a multi-version Jellyfin item should start."""
+    copies = [source for source in digital
+              if source["provider"] == "jellyfin"]
+    editions = {item["id"]: (item["edition"] or "").strip() for item in items}
+    if not copies:
+        return '<input type="hidden" name="source_id" value="">'
+    if len(copies) == 1:
+        return ('<input type="hidden" name="source_id" value="%d">'
+                % copies[0]["id"])
+    return ('<label>Version<select name="source_id">%s</select></label>'
+            % "".join('<option value="%d">%s</option>'
+                      % (source["id"],
+                         _text(editions.get(source["item_id"]) or "default"))
+                      for source in copies))

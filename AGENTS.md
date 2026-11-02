@@ -6,7 +6,7 @@ Entry point `media_collection/app/server.py`; schema in
 `media_collection/migrations/*.sql` applied by `migrate.sh`.
 
 Version lives in `media_collection/config.yaml` and is displayed on the page
-header. Current: **0.23.13**.
+header. Current: **0.23.14**.
 
 ## Live deployment
 
@@ -189,9 +189,17 @@ two copies on disk.
   `MediaSourceIds`, and `POST /title/<id>/jellyfin` reads
   `digital_sources.media_source_id` for the posted `source_id`.
 
-Still open: the Play sheet has no version picker — it posts an empty
-`source_id`, so Jellyfin starts the default (first) source. Fix in
-`_play_block` once the shape of its `digital` argument is known.
+The Play sheet lists the versions: `_version_picker(digital, items)` in
+`ui_title.py` renders a `Version` select of the title's jellyfin routes,
+labelled with each copy's `items.edition`, and `_play_block` posts the chosen
+`digital_sources.id` beside the device select. With no jellyfin route it
+posts an empty `source_id`, and the handler falls back to `link_for_title`.
+
+The grid's play mark is `has_rip` in the main-page title query
+(`server.py`, the sub-select just above `counts`), which used to mean
+"provider = 'rip'" and therefore vanished for every Jellyfin title. It now
+matches `IN ('rip', 'jellyfin')` and reads "a copy is ready to play" — 431 of
+638 cards on the live home page, the rest being titles with no route at all.
 
 ### Gotchas found the hard way
 
