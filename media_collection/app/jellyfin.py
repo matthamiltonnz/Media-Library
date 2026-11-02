@@ -252,6 +252,15 @@ def _name_match(index, name, year, kind, artist=""):
         return by_name.get(("season", _norm(season.group(1)), _year(season.group(2))))
 
 
+PROGRESS = {"running": False, "phase": "", "done": 0, "total": 0,
+            "started": None, "finished": None}
+
+
+def progress():
+    """Live counters for the admin page while a sync runs."""
+    return dict(PROGRESS)
+
+
 def sync_links(con, log=print, server=None):
     """Rebuild jellyfin_links from every server, or from the one given."""
     if server is None:
@@ -292,6 +301,8 @@ def sync_links(con, log=print, server=None):
     base, key = server["url"], server.get("api_key") or ""
     if not key:
         raise JellyfinError("No Jellyfin API key yet - add one in the add-on options")
+    PROGRESS.update(running=True, phase="reading the library", done=0,
+                    total=0, started=time.time(), finished=None)
     log("jellyfin: reading the library from %s" % base)
     index = _index(base, key)
     log("jellyfin: saw %s" % index["counts"])
@@ -308,8 +319,11 @@ def sync_links(con, log=print, server=None):
 
     stats = {"copies": 0, "by_path": 0, "by_name": 0, "unmatched": 0}
     con.execute("DELETE FROM jellyfin_links")
+    PROGRESS.update(phase="matching copies", total=len(rows), done=0)
     for row in rows:
         stats["copies"] += 1
+        if stats["copies"] % 100 == 0:
+            PROGRESS["done"] = stats["copies"]
         found, matched_by = None, "path"
         if row["root_path"] and row["rel_path"]:
             absolute = _key(os.path.join(row["root_path"], row["rel_path"]))
@@ -332,6 +346,8 @@ def sync_links(con, log=print, server=None):
             (row["item_id"], jf_id, jf_kind, jf_name, jf_path,
              matched_by, server["id"]))
     con.commit()
+    PROGRESS.update(running=False, phase="done",
+                    done=stats["copies"], finished=time.time())
     log("jellyfin: %(copies)d copies, %(by_path)d by path, %(by_name)d by name,"
         " %(unmatched)d unmatched" % stats)
     return stats
