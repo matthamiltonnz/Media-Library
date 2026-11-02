@@ -106,8 +106,14 @@ def _badges(items, digital, labels, base=None, title_id=None):
     _ADD_HTML = ('<p><button type="button" onclick="addcopy.showModal()">'
                  '+ Add a copy</button></p>')
     _ADD = object()
-    _disc = [c for c in items if c["format"] != "ripped"]
-    _rips = [c for c in items if c["format"] == "ripped"]
+    # a copy held by a server is not a file on disk; file copies go last
+    try:
+        _remote = {r[0] for r in con.execute(
+            "SELECT DISTINCT item_id FROM digital_sources")}
+    except Exception:
+        _remote = set()
+    _rips = [c for c in items if c["id"] not in _remote]
+    _disc = [c for c in items if c["id"] in _remote]
     _ordered = _disc + ([_ADD] + _rips if _rips else [])
     for item in _ordered:
         if item is _ADD:
