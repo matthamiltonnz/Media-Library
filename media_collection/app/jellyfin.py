@@ -255,6 +255,14 @@ def sync_links(con, log=print, server=None):
         for one in found:
             part = sync_links(con, log=log, server=one)
             copies = materialise(con, one, log=log)
+            try:
+                more = editions(con, one, log=log)
+                if more:
+                    log("jellyfin[%s]: %d further editions"
+                        % (one["label"], more))
+            except Exception as exc:
+                log("jellyfin[%s]: editions skipped (%s)"
+                    % (one["label"], exc))
             if copies:
                 log("jellyfin[%s]: %d copies added" % (one["label"], copies))
             # whatever was just linked belongs to the server we just read
@@ -343,6 +351,62 @@ def materialise(con, server, log=print):
             " external_id, notes) VALUES (?, 'jellyfin', ?, ?, ?)",
             (new_id, server["id"], row["jf_id"], server["label"]))
         made += 1
+    con.commit()
+    return made
+
+
+def editions(con, server, log=print, dry_run=False):
+    """Attach the other editions of a title, not just the first one found.
+
+    The linking pass keeps one library item per name, so a film with a
+    theatrical and an extended cut arrives as a single copy. This walks the
+    library again and gives each further edition a copy of its own. Nothing
+    is created for a title that has no Jellyfin copy already, so the
+    catalogue still grows only from what the household owns.
+    """
+    base, key = server["url"], server.get("api_key") or ""
+    index = _index(base, key)
+    details = index["details"]
+    owner = con.execute("SELECT id FROM users WHERE username = 'rips'"
+                        ).fetchone()
+    if owner is None:
+        return 0
+    routed = {row["external_id"] for row in con.execute(
+        "SELECT external_id FROM digital_sources WHERE provider = 'jellyfin'"
+        "   AND server_id = ?", (server["id"],))}
+    titles = con.execute(
+        "SELECT DISTINCT t.id, t.name FROM titles t"
+        "  JOIN items i ON i.title_id = t.id"
+        "  JOIN digital_sources d ON d.item_id = i.id"
+        " WHERE d.provider = 'jellyfin' AND d.server_id = ?",
+        (server["id"],)).fetchall()
+    made = 0
+    for title in titles:
+        want = _norm(title["name"])
+        if not want:
+            continue
+        for jf_id, info in details.items():
+            have = _norm(info[0]) if info else ""
+            if not have or jf_id in routed:
+                continue
+            # the same film, or a named edition of it -- not a sequel
+            if not (have == want or have.startswith(want + " (")
+                    or have.startswith(want + " - ")):
+                continue
+            log("edition: %s <- %s" % (title["name"], info[0]))
+            if dry_run:
+                routed.add(jf_id)
+                continue
+            new_id = con.execute(
+                "INSERT INTO items (title_id, owner_id, format, visibility,"
+                " added_by) VALUES (?, ?, 'ripped', 'shared', ?)",
+                (title["id"], owner["id"], owner["id"])).lastrowid
+            con.execute(
+                "INSERT INTO digital_sources (item_id, provider, server_id,"
+                " external_id, notes) VALUES (?, 'jellyfin', ?, ?, ?)",
+                (new_id, server["id"], jf_id, server["label"]))
+            routed.add(jf_id)
+            made += 1
     con.commit()
     return made
 
