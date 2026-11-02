@@ -6,7 +6,7 @@ Entry point `media_collection/app/server.py`; schema in
 `media_collection/migrations/*.sql` applied by `migrate.sh`.
 
 Version lives in `media_collection/config.yaml` and is displayed on the page
-header. Current: **0.23.31**.
+header. Current: **0.23.32**.
 
 ## Live deployment
 
@@ -330,10 +330,14 @@ search looked for `-` and reported "no MusicBrainz match".
   (`artists.name`) instead of from the `"Artist — Album"` name.
 - `musicbrainz_lookup()` asked the release-group index for
   `release:"…" AND artist:"…"`, which matches **nothing** — the field is
-  `releasegroup:` and it has no usable `artist:` field. It now queries
-  `releasegroup:"…"` and gives `+30` to a result whose artist credit contains
-  the artist, on top of the existing year scoring.
+  `releasegroup:` and `artist:` does not work there either. It now sends
+  `releasegroup:"<album>" AND arid:<artist mbid>` (the artist's id from
+  `artists.musicbrainz_id`, 256 of 262 artists have one), falling back to
+  `artistname:"<artist>"` and then to the album alone, and still gives `+30` to
+  a result whose artist credit contains the artist.
 
-Worth knowing: with no year on the title the score can land on a reissue
-(`Too Legit To Quit` → a 2001 release group), so check `release_year` after a
-refresh on an album whose year is empty.
+Worth knowing: `arid:` turns a muddy search into an exact one — the album
+alone returned two release groups and the score picked a 2001 reissue of
+`Too Legit To Quit`, while `arid:<MC Hammer>` returns one hit, 1991-10-27.
+A refresh always prefers a stored `musicbrainz_id`, so clear that field first
+if it holds the wrong release.

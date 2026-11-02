@@ -294,10 +294,14 @@ def musicbrainz_artist(name):
 
 
 
-def musicbrainz_lookup(artist, album, year=None):
+def musicbrainz_lookup(artist, album, year=None, artist_mbid=None):
     """Best release-group for one album: mbid, year, cover, title, credit, types."""
     album = ALBUM_YEAR.sub("", album or "").strip() or (album or "")
     clauses = ['releasegroup:"%s"' % album.replace('"', "")]
+    if artist_mbid:
+        clauses.append("arid:%s" % artist_mbid)   # the artist, exactly
+    elif artist:
+        clauses.append('artistname:"%s"' % artist.replace('"', ""))
     params = urllib.parse.urlencode({"query": " AND ".join(clauses),
                                      "fmt": "json", "limit": "12"})
     time.sleep(MB_PAUSE)
@@ -402,10 +406,15 @@ def musicbrainz_release(mbid):
 def refresh_music(con, row):
     """MusicBrainz for one album - cover art, first release and the MB link."""
     artist, album = split_artist_album(row["name"])
-    if not artist and row["artist_id"]:
-        looked = con.execute("SELECT name FROM artists WHERE id = ?",
-                             (row["artist_id"],)).fetchone()
-        artist = looked["name"] if looked else None
+    artist_mbid = None
+    if row["artist_id"]:
+        looked = con.execute(
+            "SELECT name, musicbrainz_id FROM artists WHERE id = ?",
+            (row["artist_id"],)).fetchone()
+        if looked:
+            artist = artist or looked["name"]
+            artist_mbid = (looked["musicbrainz_id"] or "").strip()    \
+                or None
     found = None
     # an album that already carries a release-group id is looked up by that id:
     # its name is the album alone now, which no search can match on
@@ -418,7 +427,8 @@ def refresh_music(con, row):
             found = None
     if found is None:
         try:
-            found = musicbrainz_lookup(artist, album, row["release_year"])
+            found = musicbrainz_lookup(artist, album,
+                                       row["release_year"], artist_mbid)
         except Throttle:
             return "rate-limited"
         except Exception:
