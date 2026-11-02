@@ -264,8 +264,24 @@ def copies(con):
         for item_id in ids:
             if item_id == keeper:
                 continue
-            con.execute("UPDATE digital_sources SET item_id = ? WHERE item_id = ?",
-                        (keeper, item_id))
+            # move the sources one by one: digital_sources is UNIQUE on
+            # (item_id, provider, external_id), so a blanket UPDATE trips
+            # when the keeper already reaches the same item
+            for source in con.execute(
+                    "SELECT id, provider, external_id FROM digital_sources"
+                    " WHERE item_id = ?", (item_id,)).fetchall():
+                clash = con.execute(
+                    "SELECT 1 FROM digital_sources WHERE item_id = ?"
+                    "   AND provider = ? AND external_id IS ?",
+                    (keeper, source["provider"],
+                     source["external_id"])).fetchone()
+                if clash:
+                    con.execute("DELETE FROM digital_sources"
+                                " WHERE id = ?", (source["id"],))
+                else:
+                    con.execute(
+                        "UPDATE digital_sources SET item_id = ?"
+                        " WHERE id = ?", (keeper, source["id"]))
             if _drop_if_empty(con, item_id):
                 folded += 1
     con.commit()
@@ -324,7 +340,8 @@ def after_links(path):
           % unown_rips(con))
 
     """
-    con = sqlite3.connect(path)
+    con = sqlite3.connect(path, timeout=60)
+    con.execute("PRAGMA busy_timeout = 60000")
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA foreign_keys = ON")
     streamed = con.execute(
@@ -354,7 +371,8 @@ def stray_titles(con):
     return gone
 def main():
     path = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("DB_PATH", "/data/media.db")
-    con = sqlite3.connect(path)
+    con = sqlite3.connect(path, timeout=60)
+    con.execute("PRAGMA busy_timeout = 60000")
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA foreign_keys = ON")
     if "--split-only" in sys.argv:

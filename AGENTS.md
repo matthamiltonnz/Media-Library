@@ -6,7 +6,7 @@ Entry point `media_collection/app/server.py`; schema in
 `media_collection/migrations/*.sql` applied by `migrate.sh`.
 
 Version lives in `media_collection/config.yaml` and is displayed on the page
-header. Current: **0.23.47**.
+header. Current: **0.23.49**.
 
 ## Live deployment
 
@@ -453,3 +453,30 @@ failure surfaced as `sqlite3.OperationalError: database is locked` inside
 connection close with **no response at all** (curl status `000`). That is the
 same "empty reply" shape as a missing `self.respond(...)`, which is why it sent
 me looking in the wrong place twice. Both are now 60 s.
+
+## The startup dedupe was skipped every boot (0.23.49)
+
+`run.sh` ends with `python3 dedupe.py "$DB" || echo "dedupe step skipped"`, so a
+failure there is quiet. It was failing with
+`UNIQUE constraint failed: digital_sources.item_id, digital_sources.provider,
+digital_sources.external_id`.
+
+`digital_sources` is `UNIQUE (item_id, provider, external_id)`, and `copies()`
+folded duplicate copies with a blanket
+`UPDATE digital_sources SET item_id = ? WHERE item_id = ?`. Once two copies
+held routes to the same Jellyfin item — which the version expansion makes
+easy — that UPDATE collided. It now moves the sources one at a time and
+deletes the row when the keeper already reaches the same
+`(provider, external_id)`.
+
+It also connected with `sqlite3.connect(path)` and no timeout, so it died with
+`database is locked` whenever the app was writing; both connections now use
+60 s. Live run:
+
+```
+dedupe: 0 mixed copy(s) split
+dedupe: 6 duplicate copy(s) folded
+```
+
+A copy of the database from before the first real run is at
+`/data/media.before-dedupe.db` inside the container.
