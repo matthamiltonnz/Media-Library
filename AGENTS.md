@@ -564,3 +564,32 @@ The artist fill's counts live in `artists.summary()`, so they appear inside the
 Artists block: "Filling artist details - 11 of 48 acts, 1 filled." A separate
 line appended by `render()` was useless — it landed above the scan block, next
 to the wrong section, which is why the numbers never appeared where you looked.
+
+
+## One refresh area on the admin page (0.23.65)
+
+Both background lookups sit under the **Metadata** heading in
+`ui_admin._refresh_block` - *Refresh all metadata* (Wikipedia/Wikidata for
+films and TV, MusicBrainz for albums) and *Fill artist details*. The Artists
+block keeps its `id="artists"` and its `artists.summary()` line but has no
+button any more; pressing either job from one place is the point, and the
+status still reads where the act list is.
+
+The artists form posts to `action="admin/artists"` - **relative**, unlike the
+`%sadmin/refresh` beside it, so it resolves correctly whether the app is served
+at `/` or under a prefix. Removing that form also removed `_artists_block`'s
+only use of `base`, so its `% (state, html.escape(base))` had to lose the second
+argument; matching that tuple by text failed (assert count 0 - the indentation
+differs from what was guessed), so the patch locates `html.escape(base))` with
+`index()` after the `% (` and cuts there. A one-element `% (value,)` tuple is
+valid, so the trailing comma left behind is harmless.
+
+The metadata copy now says what music actually gets: an album gains a
+MusicBrainz release, year and cover, never a plot, because MusicBrainz has none.
+Nothing in `refresh_job.py` or `metadata.py` calls Jellyfin; a Jellyfin poster is
+only used on demand by `ui.pick_cover`. So this button cannot recover artwork
+that exists only on the server - that would be a separate feature.
+
+Verified live: `Fill artist details` appears once on `/admin`, the artists block
+is heading plus summary (102 chars, no form), and the forms are
+`['/admin/refresh', 'admin/artists', ...]`.

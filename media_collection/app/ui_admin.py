@@ -47,6 +47,10 @@ def _refresh_block(base, refresh):
     <label class="check"><input type="checkbox" name="force" value="1"> also overwrite
       titles that already have metadata</label>
   </form>
+  <form method="post" action="admin/artists">
+    <p><button type="submit">Fill artist details</button>
+       <span class="muted">Country, start year and kind (person or band) for every act, one a second.</span></p>
+  </form>
 </div>
 <script>
 (function () {
@@ -207,12 +211,8 @@ def _artists_block(base):
     state = artists.summary()
     return """<h2 id="artists">Artists</h2>
 <p class="sub">%s</p>
-<form method="post" action="%sadmin/artists">
-  <p><button type="submit">Fill artist details</button>
-     <span class="muted">Looks up every act without a MusicBrainz id, one a
-     second. A few are done automatically each time the add-on starts.</span></p>
-</form>""" % (state or "Artist details come from MusicBrainz: the id, the country"
-               " and the year the act started.", html.escape(base))
+""" % (state or "Artist details come from MusicBrainz: the id, the country"
+               " and the year the act started.", )
 
 
 def _players_block(base, players, chosen):
