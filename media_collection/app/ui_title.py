@@ -119,8 +119,9 @@ def _play_block(base, row, items, digital, players, last_player,
                 jellyfin_link, jellyfin_configured, sessions, labels):
     """Badges plus one Play button; the button opens every way to play."""
     playable = [source for source in digital
-                if source["provider"] == "rip" and source["path"]
-                and source["root_path"]]
+                if (source["provider"] == "rip" and source["path"]
+                    and source["root_path"])
+                or source["provider"] == "jellyfin"]
     jellyfin_ready = bool(jellyfin_link and jellyfin_configured)
     head = "" if items else '<p class="muted">No copies recorded yet.</p>'
     if not playable and not jellyfin_ready:
@@ -141,6 +142,13 @@ def _play_block(base, row, items, digital, players, last_player,
             owner = source["owner_name"] or "unowned"
             if owner != FILES_OWNER:  # files belong to the shelf, not a person
                 kind = "%s \u00b7 %s" % (kind, owner)
+            if source["provider"] == "jellyfin":
+                parts_ = [x for x in ((source["notes"] or ""),
+                                     (source["external_id"] or "")) if x]
+                return "%s \u2014 Jellyfin%s" % (
+                    _text(kind),
+                    (" \u00b7 " + _text(" \u00b7 ".join(parts_)))
+                    if parts_ else "")
             return "%s \u2014 %s \u00b7 %s" % (
                 _text(kind),
                 _text(source["root_label"] or "media"),
@@ -293,6 +301,17 @@ def _copies_tab(base, row, items, digital, formats, labels, users,
         if item["format"] == "ripped":
             # a file is the importer's business: where it is, nothing to edit
             where = item["rip_path"] or files.get(item["id"]) or ""
+            if not where:   # a Jellyfin copy has a route, not a path
+                for source in digital:
+                    if source["item_id"] != item["id"]:
+                        continue
+                    if source["provider"] != "jellyfin":
+                        continue
+                    label = source["notes"] or ""
+                    ext = source["external_id"] or ""
+                    detail = " \u00b7 ".join(x for x in (label, ext) if x)
+                    where = "Jellyfin" + (" \u00b7 " + detail if detail else "")
+                    break
             jf = ""
             for source in digital:
                 if source["item_id"] == item["id"] and "jf_id" in source.keys():

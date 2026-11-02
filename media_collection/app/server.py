@@ -1378,6 +1378,19 @@ class Handler(BaseHTTPRequestHandler):
                     "SELECT d.id, d.provider, d.path, i.title_id FROM digital_sources d"
                     " JOIN items i ON i.id = d.item_id WHERE d.id = ?",
                     (int(match.group(1)),)).fetchone()
+                # a copy backed by Jellyfin plays there, straight from its route
+                jf = con.execute(
+                    "SELECT d.external_id FROM digital_sources d"
+                    " WHERE d.id = ? AND d.provider = 'jellyfin'",
+                    (source_id,)).fetchone()
+                if jf is not None:
+                    try:
+                        jellyfin.play(con, entity_id, jf["external_id"])
+                    except jellyfin.JellyfinError as exc:
+                        return self.title_page(con, viewer, base, title_id,
+                                               error=str(exc))
+                    return self.respond(303, "", extra={"Location":
+                                        (base or "/") + "title/%d" % title_id})
                 if source is None:
                     return self.respond(404, "No such source", "text/plain; charset=utf-8")
                 con.execute("DELETE FROM digital_sources WHERE id = ?", (source["id"],))
