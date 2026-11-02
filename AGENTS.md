@@ -6,7 +6,7 @@ Entry point `media_collection/app/server.py`; schema in
 `media_collection/migrations/*.sql` applied by `migrate.sh`.
 
 Version lives in `media_collection/config.yaml` and is displayed on the page
-header. Current: **0.23.51**.
+header. Current: **0.23.52**.
 
 ## Live deployment
 
@@ -511,8 +511,11 @@ Live: 20 rows out of 976, and every one is a spelling variant of the same act
 `The Prodigy` / "Prodigy", curly vs straight apostrophe in `Guns N’ Roses`) —
 or a genuine collaboration (King Gizzard with Mild High Club).
 
-The copies panel no longer repeats the route twice: the copy line reads
-`Ripped file Jellyfin` (plus the edition when there is one), and the
-**Jellyfin matches** list carries name, kind, path and id. Its details are
-looked up by `jf_id` (a subquery), not by `item_id`: a dedupe fold can move a
-route onto another copy, so the link row need not hang off the same item.
+The copies panel shows a Jellyfin copy **once**. `_row_html()` returns an empty
+string for it and the **Jellyfin matches** list is the presentation — name,
+kind, path and id, with Unlink. "Link a Jellyfin item by hand" sits *below*
+that list. A second line on the copy row saying the same thing was noise.
+
+Match details are looked up by `jf_id` (a subquery), not by `item_id`: a dedupe
+fold can move a route onto another copy, so the link row need not hang off the
+same item.

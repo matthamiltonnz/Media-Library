@@ -329,6 +329,10 @@ def _copies_tab(base, row, items, digital, formats, labels, users,
                     if item["edition"]:
                         where += " \u00b7 " + item["edition"]
                     break
+            if where.startswith("Jellyfin"):
+                # the Jellyfin matches list below is what presents this
+                # copy: a second line saying so is just noise
+                return ""
             jf = ""
             for source in digital:
                 if source["item_id"] == item["id"] and "jf_id" in source.keys():
@@ -404,8 +408,6 @@ def _copies_tab(base, row, items, digital, formats, labels, users,
            _copy_fields(blank, formats, labels, "")))
     parts.append('<script>var target = document.querySelector("details.copy:target");'
                  'if (target) { target.open = true; }</script>')
-    parts.append('<p class="sub"><a href="%stitle/%d/link">Link a Jellyfin item by hand</a></p>'
-                 % (_text(base), row["id"]))
     routes = [s for s in digital if s["provider"] == "jellyfin"]
     if routes:
         parts.append(
@@ -422,6 +424,8 @@ def _copies_tab(base, row, items, digital, formats, labels, users,
                                                 s["external_id"]) if x)),
                    _text(base), row["id"], s["id"])
                 for s in routes))
+    parts.append('<p class="sub"><a href="%stitle/%d/link">Link a Jellyfin item by hand</a></p>'
+                 % (_text(base), row["id"]))
     return "".join(parts)
 
 
