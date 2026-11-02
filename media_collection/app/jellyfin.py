@@ -256,7 +256,6 @@ def sync_links(con, log=print, server=None):
             part = sync_links(con, log=log, server=one)
             copies = materialise(con, one, log=log)
             expand_versions(con, one, log=log)
-            dedupe_versions(con, one, log=log)
             try:
                 more = editions(con, one, log=log)
                 if more:
@@ -270,6 +269,9 @@ def sync_links(con, log=print, server=None):
             # whatever was just linked belongs to the server we just read
             con.execute("UPDATE jellyfin_links SET server_id = ?"
                         " WHERE server_id IS NULL", (one["id"],))
+            # editions() above can attach a second library's item again,
+            # so the dedupe has to be the last word
+            dedupe_versions(con, one, log=log)
             con.commit()
             log("jellyfin[%s]: linked %d copies, %d still unknown"
                 % (one["label"], part.get("copies", 0),

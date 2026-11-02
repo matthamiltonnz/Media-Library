@@ -6,7 +6,7 @@ Entry point `media_collection/app/server.py`; schema in
 `media_collection/migrations/*.sql` applied by `migrate.sh`.
 
 Version lives in `media_collection/config.yaml` and is displayed on the page
-header. Current: **0.23.22**.
+header. Current: **0.23.23**.
 
 ## Live deployment
 
@@ -244,22 +244,16 @@ Two items that report the **same** year collapse even when the title has no
 year at all — that is one release held in two libraries (it cleared five music
 titles: Pink Floyd 1975/1975, George Ezra 2014/2014, …).
 
-Live result: 15 doubled titles → 7. The 7 left are films where the two items
-are *different films* and the title year cannot referee:
+Live result: with the title years filled in, the catalogue settles at **one**
+doubled title (`Ed Sheeran — …`, four items spanning 2014/2021/2023 — music
+whose releases legitimately differ and whose title has no year) and 980
+jellyfin routes, stable across repeated syncs.
 
-| title | title year | items |
-|---|---|---|
-| Conan the Barbarian | 1906 | 2011 / 1982 |
-| Godzilla | NULL | 1954 / 2014 |
-| How to Train Your Dragon | NULL | 2025 / 2010 |
-| Mortal Kombat | NULL | 1995 / 2021 |
-| Point Break | NULL | 2015 / 1991 |
-| Ted | NULL | 2012 / 2024 |
-| Ed Sheeran — … (music) | NULL | 2021 / 2023 / … |
-
-Set `titles.release_year` on those and the next sync dedupes them with no
-further work; `Conan` needs its 1906 corrected first, since that value matches
-neither item.
+Order matters: `dedupe_versions()` must run **after** `editions()`, which
+re-attaches the other library's item by name and puts back ~29 routes every
+sync. Placed before it, the dedupe is undone immediately and the doubling
+returns; placed after, each sync ends clean at the same 980 routes even though
+the 29 routes are created and dropped again on the way.
 
 Trap: do **not** dedupe on path equality alone. `_media_sources()` returns
 `[]` for ids the API key cannot read, and two empty sets compare equal, so
