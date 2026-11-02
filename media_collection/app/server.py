@@ -1448,20 +1448,24 @@ class Handler(BaseHTTPRequestHandler):
                 try:
                     chosen = field(form, "source_id")
                     jf_id = None
+                    ms_id = None
                     if chosen.isdigit():
                         # source_id is a digital_sources row, not an item: hop
                         # through it, or we hand Jellyfin an unrelated id
                         owner_item = con.execute(
-                            "SELECT item_id FROM digital_sources WHERE id = ?",
+                            "SELECT item_id, media_source_id",
+                            " FROM digital_sources WHERE id = ?",
                             (int(chosen),)).fetchone()
                         if owner_item:
+                            ms_id = owner_item["media_source_id"]
                             jf_id = con.execute(
                                 "SELECT jf_id FROM jellyfin_links WHERE item_id = ?"
                                 " ORDER BY jf_id LIMIT 1",
                                 (owner_item["item_id"],)).fetchone()
                     summary = jellyfin.play(con, field(form, "session_id"),
                                             (jf_id["jf_id"] if jf_id else None)
-                                            or (link["jf_id"] if link else ""))
+                                            or (link["jf_id"] if link else ""),
+                                            ms_id)
                     return self.title_page(con, viewer, base, title_id, summary=summary)
                 except jellyfin.JellyfinError as exc:
                     return self.title_page(con, viewer, base, title_id,

@@ -255,6 +255,7 @@ def sync_links(con, log=print, server=None):
         for one in found:
             part = sync_links(con, log=log, server=one)
             copies = materialise(con, one, log=log)
+            expand_versions(con, one, log=log)
             try:
                 more = editions(con, one, log=log)
                 if more:
@@ -452,7 +453,7 @@ def sessions(con=None):
     return found
 
 
-def play(con, session_id, jf_id):
+def play(con, session_id, jf_id, media_source_id=None):
     """Start `jf_id` on a Jellyfin client. Returns the banner message."""
     base, key = config(con)
     if not session_id:
@@ -460,8 +461,11 @@ def play(con, session_id, jf_id):
     if not jf_id:
         raise JellyfinError("That copy is not linked to Jellyfin yet - "
                             "press Sync with Jellyfin in Admin.")
+    params = {"PlayCommand": "PlayNow", "ItemIds": jf_id}
+    if media_source_id:
+        params["MediaSourceIds"] = [media_source_id]
     _call(base, key, "/Sessions/%s/Playing" % urllib.parse.quote(session_id),
-          params={"PlayCommand": "PlayNow", "ItemIds": jf_id}, method="POST", timeout=20)
+          params=params, method="POST", timeout=20)
     return "Sent to Jellyfin"
 
 
@@ -572,3 +576,109 @@ def _run_sync(db_path):
     with _LOCK:
         STATE.update({"running": False, "counts": counts,
                       "finished": time.strftime("%Y-%m-%d %H:%M:%S")})
+
+
+
+def _media_sources(base, key, jf_id):
+    """Every file held by one Jellyfin item."""
+    import json
+    import urllib.request
+    # Jellyfin 10.9 dropped GET /Items/<id>; ask through the list route.
+    url = ("%s/Items?Ids=%s&Fields=MediaSources&Limit=1&apiKey=%s"
+           % (base, jf_id, key))
+    with urllib.request.urlopen(url, timeout=30) as response:
+        data = json.load(response)
+    found = data.get("Items") or []
+    if not found:
+        return []
+    return [one for one in (found[0].get("MediaSources") or [])
+            if one.get("Id")]
+
+
+def _version_of(name):
+    """'Extended Edition (2000) - 2160p Dolby Vision'
+    -> ('Extended Edition', '2160p Dolby Vision')."""
+    import re
+    head, _, tail = (name or "").partition(" - ")
+    head = re.sub(r"\s*\(\d{4}\)\s*$", "", head.strip()).strip()
+    return head, (tail.split(",")[0].strip() or tail.strip())
+
+
+def expand_versions(con, server, log=print):
+    """A Jellyfin item can hold several files: give each one its own copy."""
+    try:
+        base, key = server["url"].rstrip("/"), server["api_key"]
+    except (KeyError, TypeError):
+        base, key = config(con)
+    rows = con.execute(
+        "SELECT ds.id, ds.item_id, ds.external_id, ds.media_source_id"
+        "  FROM digital_sources ds JOIN items i ON i.id = ds.item_id"
+        " WHERE ds.provider = 'jellyfin' AND ds.server_id = ?"
+        "   AND ds.external_id IS NOT NULL AND ds.external_id != ''",
+        (server["id"],)).fetchall()
+    mine = {}
+    for row in rows:
+        mine.setdefault(row["external_id"], []).append(row)
+    made = 0
+    for jf_id, have in mine.items():
+        try:
+            sources = _media_sources(base, key, jf_id)
+        except Exception as exc:            # one bad id must not stop us
+            log("jellyfin: versions for %s skipped (%s)"
+                % (jf_id[:6], exc))
+            continue
+        if len(sources) < 2:
+            continue
+        loose = [row for row in have if not row["media_source_id"]]
+        for source in sources:
+            source_id = source.get("Id")
+            name = (source.get("Name") or "").strip()
+            edition, quality = _version_of(name)
+            known = con.execute(
+                "SELECT 1 FROM digital_sources WHERE provider = 'jellyfin'"
+                "   AND external_id = ? AND media_source_id = ?",
+                (jf_id, source_id)).fetchone()
+            if known:
+                continue
+            if loose:
+                row = loose.pop(0)
+                con.execute(
+                    "UPDATE digital_sources SET media_source_id = ?,"
+                    "       media_source_name = ? WHERE id = ?",
+                    (source_id, name, row["id"]))
+                if edition:
+                    con.execute(
+                        "UPDATE items SET edition = ? WHERE id = ?"
+                        "   AND (edition IS NULL OR edition = '')",
+                        (edition, row["item_id"]))
+                continue
+            made += _copy_of(con, have[0], jf_id, source_id, name,
+                             edition or quality)
+    if made:
+        log("jellyfin[%s]: %d further versions" % (server["id"], made))
+    return made
+
+
+def _copy_of(con, route, jf_id, source_id, name, edition):
+    """Insert one more copy of the same title, tied to one media source."""
+    item = dict(con.execute("SELECT * FROM items WHERE id = ?",
+                            (route["item_id"],)).fetchone())
+    item.pop("id", None)
+    item["format"] = "ripped"
+    if "rip_path" in item:
+        item["rip_path"] = None
+    if "edition" in item:
+        item["edition"] = edition or None
+    made = con.execute("INSERT INTO items (%s) VALUES (%s)"
+                       % (", ".join(item), ", ".join("?" * len(item))),
+                       list(item.values()))
+    source = dict(con.execute("SELECT * FROM digital_sources WHERE id = ?",
+                             (route["id"],)).fetchone())
+    source.pop("id", None)
+    source["item_id"] = made.lastrowid
+    source["media_source_id"] = source_id
+    source["media_source_name"] = name
+    con.execute("INSERT INTO digital_sources (%s) VALUES (%s)"
+                % (", ".join(source), ", ".join("?" * len(source))),
+                list(source.values()))
+    return 1

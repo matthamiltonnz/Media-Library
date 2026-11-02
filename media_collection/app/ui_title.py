@@ -323,7 +323,8 @@ def _copies_tab(base, row, items, digital, formats, labels, users,
                         continue
                     label = source["notes"] or ""
                     ext = source["external_id"] or ""
-                    detail = " \u00b7 ".join(x for x in (label, ext) if x)
+                    detail = " \u00b7 ".join(
+                        x for x in (label, item["edition"], ext) if x)
                     where = "Jellyfin" + (" \u00b7 " + detail if detail else "")
                     break
             jf = ""

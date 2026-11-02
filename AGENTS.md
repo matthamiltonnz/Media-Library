@@ -6,7 +6,7 @@ Entry point `media_collection/app/server.py`; schema in
 `media_collection/migrations/*.sql` applied by `migrate.sh`.
 
 Version lives in `media_collection/config.yaml` and is displayed on the page
-header. Current: **0.23.9**.
+header. Current: **0.23.13**.
 
 ## Live deployment
 
@@ -161,3 +161,45 @@ is how "no copies yet", the copies order, and the play gating were verified.
    regression dropped it and broke every route.
 7. Never block a re-create: `clean_job.py` and friends must not refuse a copy
    because a route already exists.
+
+## Jellyfin versions (0.23.13)
+
+One Jellyfin item can hold several files. Almost Famous (`6d88204a…`) holds
+three: `Extended Edition (2000) - 2160p Dolby Vision, HDR10 DTSHD-MA`,
+`(2000) - 2160p Dolby Vision, …` and `(2000) - 1080p TrueHD`. Library-wide 20
+of 658 movies are multi-source, and *two* Jellyfin items exist for Almost
+Famous (`6d88204a…` from 2026-06-09 and `e35b59…` from 2025-03-30) pointing at
+the same three files in a different order — a Jellyfin-side duplicate, not
+two copies on disk.
+
+- `migrations/0019_jellyfin_versions.sql` adds `digital_sources.media_source_id`
+  and `media_source_name`.
+- `expand_versions(con, server, log)` at the end of `app/jellyfin.py` runs
+  after `materialise()` in the sync loop. For every jellyfin route it lists
+  the item's `MediaSources`, stamps the existing route with the first source,
+  and inserts one further `ripped` copy (item + route, cloned from the first)
+  per extra source. Idempotent: a route already carrying that
+  `media_source_id` is skipped, so re-running creates nothing (`made: 0`).
+- `items.edition` is set from the source name — "Extended Edition", or the
+  quality when the source is unnamed ("2160p Dolby Vision", "1080p TrueHD").
+  This is trustworthy data (Jellyfin states it), unlike the name-only harvest.
+- `_row_html` in `_copies_tab` shows the version in the copy's detail line:
+  `Jellyfin · Goodwood · 2160p Dolby Vision · 6d88204a…`.
+- `jellyfin.play(con, session_id, jf_id, media_source_id=None)` now sends
+  `MediaSourceIds`, and `POST /title/<id>/jellyfin` reads
+  `digital_sources.media_source_id` for the posted `source_id`.
+
+Still open: the Play sheet has no version picker — it posts an empty
+`source_id`, so Jellyfin starts the default (first) source. Fix in
+`_play_block` once the shape of its `digital` argument is known.
+
+### Gotchas found the hard way
+
+- Jellyfin 10.9 removed `GET /Items/<id>` (HTTP 400 "Error processing
+  request"); use `GET /Items?Ids=<id>&Fields=MediaSources&Limit=1`.
+- `ha apps update` only rebuilds when `config.yaml`'s version changed. A
+  deploy with the same number silently leaves the old `/app` running, so
+  bump **every** time and check `version_latest`.
+- A side-process write to `/data/media.db` fails with "database is locked";
+  pass `timeout=60` and `PRAGMA busy_timeout = 60000`.
+- `docker exec` wipes `/tmp` on every restart — re-upload helper scripts.
