@@ -627,6 +627,8 @@ def render_index(con, viewer, base, error=None, query="",
             " (SELECT l.jf_id FROM jellyfin_links l"
             "   JOIN items li ON li.id = l.item_id"
             "   WHERE li.title_id = t.id ORDER BY l.jf_kind LIMIT 1) AS jf_id,"
+            " (SELECT a.name FROM artists a WHERE a.id = t.artist_id)"
+            "   AS artist_name,"
             " COUNT(i.id) AS copies,"
             # a file behind this title, so the card can offer to play it
             " (SELECT 1 FROM items ri JOIN digital_sources rd"
@@ -660,6 +662,7 @@ def render_index(con, viewer, base, error=None, query="",
                        if card["has_rip"] else ""),
                 html.escape(" · ".join(filter(None, [
                     str(card["release_year"] or ""),
+                    card["artist_name"] or "",
                     " · ".join(FORMAT_LABELS.get(f, f)
                                for f in quality_sorted(",".join(f for f in (card["formats"] or "").split(",")
                                    if f != "ripped"

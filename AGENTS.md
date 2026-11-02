@@ -6,7 +6,7 @@ Entry point `media_collection/app/server.py`; schema in
 `media_collection/migrations/*.sql` applied by `migrate.sh`.
 
 Version lives in `media_collection/config.yaml` and is displayed on the page
-header. Current: **0.23.34**.
+header. Current: **0.23.35**.
 
 ## Live deployment
 
@@ -313,6 +313,9 @@ agree — the artist name appears in the source path
   LIKE ?)` and a third `%query%` parameter. `visible_clause` params are
   positional and appended in statement order — the extras that callers add
   come after, so keep the three query params together when editing this.
+- The grid card's caption under a poster reads `year · artist · formats`
+  (`card["artist_name"]`, from a correlated subquery on `t.artist_id` added to
+  the card query). `filter(None, …)` drops it for films, which have no artist.
 - Net effect: `/artists?q=sheeran` → one act; `/?q=sheeran&kind=music` → three
   albums; `/?q=zzzz&kind=music` → none.
 
