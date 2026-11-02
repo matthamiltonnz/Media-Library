@@ -6,7 +6,7 @@ Entry point `media_collection/app/server.py`; schema in
 `media_collection/migrations/*.sql` applied by `migrate.sh`.
 
 Version lives in `media_collection/config.yaml` and is displayed on the page
-header. Current: **0.23.46**.
+header. Current: **0.23.47**.
 
 ## Live deployment
 
@@ -443,3 +443,13 @@ A quick way to exercise the whole play path without a real client: post
 `session_id=no-such-session`. Success looks like a 200 page carrying
 `Jellyfin: POST /Sessions/no-such-session/Playing - …`, i.e. Jellyfin's own
 rejection surfaced as a banner; a dropped connection means our side raised.
+
+## `database is locked` was a dropped page (0.23.47)
+
+`connect()` opened sqlite with `timeout=10` and no `busy_timeout`. With WAL and
+a background sync writing, ten seconds was occasionally not enough, and the
+failure surfaced as `sqlite3.OperationalError: database is locked` inside
+`ensure_user` — which kills the request thread, so the browser saw the
+connection close with **no response at all** (curl status `000`). That is the
+same "empty reply" shape as a missing `self.respond(...)`, which is why it sent
+me looking in the wrong place twice. Both are now 60 s.

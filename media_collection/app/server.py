@@ -137,8 +137,11 @@ def log(msg):
 
 
 def connect():
-    con = sqlite3.connect(DB_PATH, timeout=10)
+    # WAL plus a background sync: ten seconds was not always enough, and a
+    # lost lock surfaces as a dropped request, not as an error page
+    con = sqlite3.connect(DB_PATH, timeout=60)
     con.row_factory = sqlite3.Row
+    con.execute("PRAGMA busy_timeout = 60000")
     con.execute("PRAGMA foreign_keys = ON")
     return con
 
