@@ -678,3 +678,35 @@ Each link is independent, so all three can be done from the same link page.
 Still unexplained: *why* an item that no `digital_sources` row mentions was
 refused. The swallowed exception was hiding it; the new message will show the
 real text on the next attempt.
+
+## Deleting the last real copy takes its shadows with it (0.23.71)
+
+Deleting an incorrect CD left the title behind, holding nothing but the
+Jellyfin copy that had been linked to it. `POST /items/<id>/delete` removed the
+copy and its `digital_sources` rows, then deleted the **title** only when *no*
+items remained - and the `ripped` Jellyfin copy counted as an item, so the title
+survived as a phantom with one unplayable route on it.
+
+The route now also deletes the item's `jellyfin_links` row (that was dangling
+before), then asks whether any **real** copy is left on the title:
+
+```
+SELECT COUNT(*) FROM items WHERE title_id = ?
+   AND (format IS NULL OR format <> 'ripped'
+        OR (rip_path IS NOT NULL AND TRIM(rip_path) <> ''))
+```
+
+When that is 0, every remaining copy on the title is dropped (sources, links,
+item) and the existing "a title with no copies left is not a title" statement
+then removes the title row. `format <> 'ripped'` alone would be wrong - a real
+ripped *file* has `rip_path` set and must count as real (invariant 1).
+
+Verified on a copy of the live database (`/tmp/deltest.db` in the container,
+never the real one): a title with one CD + one shadow went from `(1 item, 1
+route)` to nothing at all, while a title with two real copies kept its shadow
+after one was deleted (`(3,2) -> (2,2)`, swept 0).
+
+Deliberately **not** done: a bulk sweep of existing phantom titles. Many titles
+legitimately hold only Jellyfin routes (`itunes` 167, `jellyfin` 973 routes, no
+file-backed copies at all), so "no real copy" does not mean "should not exist".
+The orphan the user was left with has to be Unlinked by hand.

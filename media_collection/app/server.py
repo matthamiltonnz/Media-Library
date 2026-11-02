@@ -1771,6 +1771,26 @@ class Handler(BaseHTTPRequestHandler):
                 con.execute("DELETE FROM digital_sources WHERE item_id = ?",
                             (int(match.group(1)),))
                 con.execute("DELETE FROM items WHERE id = ?", (int(match.group(1)),))
+                con.execute("DELETE FROM jellyfin_links WHERE item_id = ?",
+                            (int(match.group(1)),))
+                # a Jellyfin copy is a shadow of a real one: once no real copy
+                # is left on the title, the shadows go too, and then the title
+                real = con.execute(
+                    "SELECT COUNT(*) FROM items WHERE title_id = ?"
+                    "   AND (format IS NULL OR format <> 'ripped'"
+                    "        OR (rip_path IS NOT NULL"
+                    "            AND TRIM(rip_path) <> ''))",
+                    (title_id,)).fetchone()[0]
+                if real == 0:
+                    strays = [row[0] for row in con.execute(
+                        "SELECT id FROM items WHERE title_id = ?",
+                        (title_id,)).fetchall()]
+                    for stray in strays:
+                        con.execute("DELETE FROM digital_sources"
+                                    " WHERE item_id = ?", (stray,))
+                        con.execute("DELETE FROM jellyfin_links"
+                                    " WHERE item_id = ?", (stray,))
+                        con.execute("DELETE FROM items WHERE id = ?", (stray,))
                 # a title with no copies left is not a title: it goes, with its file rows
                 con.execute("DELETE FROM titles WHERE id = ? AND NOT EXISTS"
                             " (SELECT 1 FROM items WHERE title_id = ?)",
