@@ -6,7 +6,7 @@ Entry point `media_collection/app/server.py`; schema in
 `media_collection/migrations/*.sql` applied by `migrate.sh`.
 
 Version lives in `media_collection/config.yaml` and is displayed on the page
-header. Current: **0.23.21**.
+header. Current: **0.23.22**.
 
 ## Live deployment
 
@@ -240,11 +240,26 @@ or wrong must not lose copies. `_drop_copy()` always removes the route (a sync
 rebuilds a correct one) and only removes the copy itself when it is synthetic
 (`format='ripped'`, no `rip_path`) and holds nothing else.
 
-Live result: 15 doubled titles → 11 (4 routes dropped, then idempotent at
-0). The 11 left have an unusable title year — `Point Break` (NULL vs
-2015/1991), `Conan the Barbarian` (1906 vs 2011/1982) — so they keep both
-copies until those title rows are corrected; the next sync will then dedupe
-them with no further work.
+Two items that report the **same** year collapse even when the title has no
+year at all — that is one release held in two libraries (it cleared five music
+titles: Pink Floyd 1975/1975, George Ezra 2014/2014, …).
+
+Live result: 15 doubled titles → 7. The 7 left are films where the two items
+are *different films* and the title year cannot referee:
+
+| title | title year | items |
+|---|---|---|
+| Conan the Barbarian | 1906 | 2011 / 1982 |
+| Godzilla | NULL | 1954 / 2014 |
+| How to Train Your Dragon | NULL | 2025 / 2010 |
+| Mortal Kombat | NULL | 1995 / 2021 |
+| Point Break | NULL | 2015 / 1991 |
+| Ted | NULL | 2012 / 2024 |
+| Ed Sheeran — … (music) | NULL | 2021 / 2023 / … |
+
+Set `titles.release_year` on those and the next sync dedupes them with no
+further work; `Conan` needs its 1906 corrected first, since that value matches
+neither item.
 
 Trap: do **not** dedupe on path equality alone. `_media_sources()` returns
 `[]` for ids the API key cannot read, and two empty sets compare equal, so

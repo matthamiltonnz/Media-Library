@@ -734,6 +734,12 @@ def dedupe_versions(con, server, log=print):
                     wanted.append(jf_id)
             except (TypeError, ValueError):
                 continue
+        if not wanted and row["release_year"] is None:
+            # no title year to go by, but both items report the same year:
+            # that is one release held in two libraries
+            years = set(info[jf_id] for jf_id in routes if info[jf_id])
+            if len(years) == 1 and len(routes) > 1:
+                wanted = list(routes)
         if not wanted:
             continue                        # nothing trustworthy to compare
         keep = wanted[0]
