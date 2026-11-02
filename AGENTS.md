@@ -19,35 +19,44 @@ header. Current: **0.23.9**.
 Bump → package → deploy:
 
 ```
-# 1. version
+# 1. bump the version and confirm it landed in the tarball
 python3 -c "import io,re;c='media_collection/config.yaml';t=io.open(c).read();
 t=re.sub(r'(?m)^version:.*$','version: \"0.23.N\"',t,count=1);io.open(c,'w').write(t)"
-# 2. tarball, served from the Mac to the host
-tar czf /tmp/serve/mc.tgz --exclude '__pycache__' --exclude '.git' media_collection
-tar xzOf /tmp/serve/mc.tgz media_collection/config.yaml | grep ^version   # verify!
-# 3. host: fetch, apply, update the add-on
-/tmp/h.exp 'curl -fsS -o /tmp/mc.tgz http://192.168.234.117:8099/mc.tgz &&
-  sh <(curl -fsS http://192.168.234.117:8099/apply.sh) >/dev/null 2>&1;
-  export SUPERVISOR_TOKEN=$(cat /run/s6/container_environment/HASSIO_TOKEN);
-  ha store reload >/dev/null 2>&1; ha apps update local_media_collection;
-  ha apps info local_media_collection | grep ^version_latest'
+# 2. tar, upload, extract, update, verify - all of it
+tools/deploy.sh
 ```
 
-`/tmp/serve` is served with `python3 -m http.server 8099 --bind 192.168.234.117`.
-Always confirm `version_latest` matches the new number — three deploys were
-silently skipped because the tarball was built before the version bump.
+`tools/deploy.sh` (added after macOS wiped `/tmp` and took the old
+`h.exp`/`apply.sh` helpers with it) tars `media_collection`, streams it to
+`/tmp/mc.tgz` on the host, untars into `/addons`, runs `ha store reload` and
+`ha apps update local_media_collection`, and exits non-zero unless
+`version_latest` equals the packaged version.
+
+- SSH key auth to `hassio@192.168.234.3` works directly; no expect script,
+  no password on stdin.
+- `scp`/sftp is refused by the SSH add-on ("Connection closed") - stream with
+  `ssh host 'cat > /tmp/x' < file` instead.
+- `sudo` needs no password on that shell. `ha` needs
+  `export SUPERVISOR_TOKEN=$(cat /run/s6/container_environment/HASSIO_TOKEN)`.
+- The version bump is still manual and must happen **before** packaging; three
+  deploys were silently skipped because the tarball predated the bump. The
+  script now fails loudly instead.
 
 ## Reading the code
 
-Tool output for multi-line reads is collapsed in long sessions. What still
-works: `grep -n`, `grep -c`, single-line `sed -n 'Np' file | cut -c1-58`.
-To hand a region to the user, put it on their clipboard:
+Tool results come back as `[Content collapsed]` once they exceed roughly
+300-400 characters. A 5-line `read_files` works, a 20-line one does not, and
+commands batched into one call collapse together. Reliable tactics:
 
-```
-sed -n '308,404p' media_collection/app/ui_title.py | pbcopy
-```
-
-and ask them to paste it. This ended a run of six failed blind edits.
+- `read_files` with **one** range of at most ~8 lines, one call at a time;
+  or `sed -n 'Np' file | cut -c1-56` for a single line.
+- `grep -c PATTERN file` to count, `grep -n PATTERN file | cut -c1-46 | head -2`
+  to locate. Both fit.
+- To hand a region to the user: `sed -n '308,404p' app/ui_title.py | pbcopy`
+  then ask them to paste it. This ended a run of six failed blind edits.
+- Anything that cannot be read back is patched by a script that asserts on the
+  exact text it replaces (`assert s.count(old) == 1`) and prints one short
+  line. That is how 0.23.8 and 0.23.9 landed safely.
 
 ## Data model essentials
 
