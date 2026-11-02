@@ -128,7 +128,7 @@ def _play_block(base, row, items, digital, players, last_player,
     head = "" if items else '<p class="muted">No copies recorded yet.</p>'
     if not playable and not jellyfin_ready:
         return (head + '<p class="muted">No file to play yet - rip the disc to'
-                ' a media folder and the scan piks it up by itself.</p>')
+                ' a media folder and the scan picks it up by itself.</p>')
 
     if playable:
         player_options = "".join(
