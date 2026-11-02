@@ -6,7 +6,7 @@ Entry point `media_collection/app/server.py`; schema in
 `media_collection/migrations/*.sql` applied by `migrate.sh`.
 
 Version lives in `media_collection/config.yaml` and is displayed on the page
-header. Current: **0.23.26**.
+header. Current: **0.23.28**.
 
 ## Live deployment
 
@@ -299,3 +299,19 @@ agree — the artist name appears in the source path
   reporting the new `version_latest`; the container has to be started again
   (`ha apps start local_media_collection` with `SUPERVISOR_TOKEN`) once the
   migration is fixed.
+
+## Searching by artist (0.23.28)
+
+- `/artists` takes `?q=` and filters the act list by name in the route
+  (`server.py`, the artist-list branch: `all_artists()` then a case-insensitive
+  Python filter), so the count/`view` toggle need no SQL change.
+  `render_list(base, artists, view, query)` renders the search box above the
+  list and carries `q` in the view-toggle link; its **empty** early-return
+  branch also renders `search`, otherwise a search with no hits lost the box.
+- The catalogue's `q` now matches the artist too: `visible_clause()` adds
+  `OR EXISTS (SELECT 1 FROM artists ar WHERE ar.id = t.artist_id AND ar.name
+  LIKE ?)` and a third `%query%` parameter. `visible_clause` params are
+  positional and appended in statement order — the extras that callers add
+  come after, so keep the three query params together when editing this.
+- Net effect: `/artists?q=sheeran` → one act; `/?q=sheeran&kind=music` → three
+  albums; `/?q=zzzz&kind=music` → none.

@@ -41,18 +41,33 @@ def album_name(title_name, artist_name):
     return title_name or ""
 
 
-def render_list(base, artists, view="grid"):
+def render_list(base, artists, view="grid", query=""):
     """Every act with albums held, as a table or as a wall of covers."""
-    toggle = ('<p class="sub"><a href="%sartists?view=%s">%s</a></p>'
+    from urllib.parse import quote
+    search = ('<form method="get" action="%sartists" class="sub">'
+              '<input name="q" value="%s" placeholder="Search artists">'
+              '<input type="hidden" name="view" value="%s"> '
+              '<button type="submit">Search</button>%s</form>'
+              % (_text(base), _text(query),
+                 "grid" if view == "grid" else "list",
+                 (' <a href="%sartists?view=%s">clear</a>'
+                  % (_text(base), "grid" if view == "grid"
+                     else "list")) if query else ""))
+    if query and not artists:
+        search += ('<p class="muted">No artist matches "%s".</p>'
+                   % _text(query))
+    toggle = ('<p class="sub"><a href="%sartists?view=%s%s">%s</a></p>'
               % (_text(base), "list" if view == "grid" else "grid",
+                 ("&q=" + quote(query)) if query else "",
                  "List view" if view == "grid" else "Thumbnails"))
     head = ('<p class="sub"><a href="%s?kind=music&amp;view=grid">Back to the albums</a> · '
             '%d artist%s</p>' % (_text(base), len(artists),
                                  "" if len(artists) == 1 else "s"))
     if not artists:
-        return ui.page(base, "Artists",
-                       '<p class="muted">No artists yet - music titles pick one'
-                       ' up from their "Artist — Album" name.</p>',
+        note = ('' if query else
+                '<p class="muted">No artists yet - albums pick one up'
+                ' from their artist field.</p>')
+        return ui.page(base, "Artists", search + note,
                        back="?kind=music&view=grid")
     if view == "grid":
         cards = "".join(
@@ -76,7 +91,8 @@ def render_list(base, artists, view="grid"):
         body = head + toggle + ('<table class="artists"><tr><th>Artist</th>'
                                 '<th>Albums</th><th>Years</th></tr>%s</table>'
                                 % rows)
-    return ui.page(base, "Artists", body, back="?kind=music&view=grid")
+    return ui.page(base, "Artists", search + body,
+                   back="?kind=music&view=grid")
 
 
 def render_artist(base, artist, titles, labels, view="grid"):

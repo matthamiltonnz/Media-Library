@@ -227,8 +227,11 @@ def visible_clause(query="", kind="", owner=None, format="",
     where = ["(i.visibility = 'shared' OR i.owner_id = ?)"]
     params = []                              # viewer id is supplied by the caller
     if query:
-        where.append("(t.name LIKE ? OR COALESCE(i.upc_ean, '') = ?)")
-        params += ["%" + query + "%", query]
+        where.append("(t.name LIKE ? OR COALESCE(i.upc_ean, '') = ?"
+                     " OR EXISTS (SELECT 1 FROM artists ar"
+                     "             WHERE ar.id = t.artist_id"
+                     "               AND ar.name LIKE ?))")
+        params += ["%" + query + "%", query, "%" + query + "%"]
     if kind:
         where.append("t.kind = ?")
         params.append(kind)
@@ -1099,11 +1102,17 @@ class Handler(BaseHTTPRequestHandler):
             rips = bool(parse_qs(urlparse(self.path).query).get("rips"))
             only = bool(parse_qs(urlparse(self.path).query).get("only"))
             if route.rstrip("/").endswith("/artists"):
-                want = (parse_qs(urlparse(self.path).query).get("view")
-                        or ["grid"])[0]
+                asked = parse_qs(urlparse(self.path).query)
+                want = (asked.get("view") or ["grid"])[0]
+                search = (asked.get("q") or [""])[0].strip()
+                rows = artists.all_artists(con, viewer["id"])
+                if search:
+                    needle = search.lower()
+                    rows = [row for row in rows
+                            if needle in (row["name"] or "").lower()]
                 return self.respond(200, ui_artists.render_list(
-                    base, artists.all_artists(con, viewer["id"]),
-                    "grid" if want == "grid" else "list"))
+                    base, rows,
+                    "grid" if want == "grid" else "list", search))
 
             match = re.search(r"/artist/(\d+)/?$", route)
             if match:
