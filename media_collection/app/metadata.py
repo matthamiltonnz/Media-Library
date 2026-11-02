@@ -564,4 +564,5 @@ def musicbrainz_artist_by_id(mbid):
         "name": found.get("name") or "",
         "country": found.get("country"),
         "year": int(begin) if begin.isdigit() else None,
+        "kind": (found.get("type") or "").lower(),
     }

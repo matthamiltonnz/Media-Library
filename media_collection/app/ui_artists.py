@@ -110,7 +110,10 @@ def render_artist(base, artist, titles, labels, view="grid"):
     if artist["country"]:
         info.append(_text(artist["country"]))
     if artist["formed_year"]:
-        info.append("formed %d" % artist["formed_year"])
+        # a band is formed, a person is born
+        word = "born" if (("kind" in artist.keys())
+                          and artist["kind"] == "person") else "formed"
+        info.append("%s %d" % (word, artist["formed_year"]))
 
     toggle = ('<p class="sub"><a href="%sartist/%d?view=%s">%s</a></p>'
               % (_text(base), artist["id"],

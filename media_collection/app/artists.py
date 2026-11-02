@@ -153,9 +153,9 @@ def enrich(con, limit=None):
     import metadata
 
     rows = con.execute(
-        "SELECT id, name, musicbrainz_id, country, formed_year FROM artists"
+        "SELECT id, name, musicbrainz_id, country, formed_year, kind FROM artists"
         " WHERE musicbrainz_id IS NULL OR country IS NULL"
-        "    OR formed_year IS NULL"
+        "    OR formed_year IS NULL OR kind IS NULL"
         " ORDER BY name").fetchall()
     filled = 0
     for row in rows:
@@ -183,6 +183,9 @@ def enrich(con, limit=None):
         if not row["formed_year"] and details.get("year"):
             updates.append("formed_year = ?")
             values.append(details["year"])
+        if not row["kind"] and details.get("kind"):
+            updates.append("kind = ?")
+            values.append(details["kind"])
         if updates:
             con.execute("UPDATE artists SET %s WHERE id = ?"
                         % ", ".join(updates), values + [row["id"]])
