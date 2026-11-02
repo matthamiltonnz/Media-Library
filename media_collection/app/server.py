@@ -1175,10 +1175,6 @@ class Handler(BaseHTTPRequestHandler):
             "SELECT i.id, i.format, u.display_name AS owner"
             "  FROM items i JOIN users u ON u.id = i.owner_id"
             " WHERE i.title_id = ? ORDER BY i.id", (title_id,)).fetchall()
-        options = "".join('<option value="%d">%s \u00b7 %s</option>'
-                          % (one["id"], html.escape(one["format"]),
-                             html.escape(one["owner"]))
-                          for one in copies)
         results, note = [], ""
         if term:
             try:
@@ -1191,12 +1187,12 @@ class Handler(BaseHTTPRequestHandler):
             '<li><strong>%s</strong> <span class="muted">%s%s &#183; %s'
             '</span> <form method="post" action="%stitle/%d/link"'
             ' style="display:inline"><input type="hidden" name="jf_id"'
-            ' value="%s"><select name="item_id">%s</select>'
+            ' value="%s">'
             '<button type="submit">Link</button></form></li>'
             % (html.escape(item["name"]), html.escape(item["kind"]),
                " (%s)" % item["year"] if item["year"] else "",
                html.escape((item["path"] or "")[-70:]), html.escape(base),
-               title_id, item["id"], options)
+               title_id, item["id"])
             for item in results)
         body = ('<h2>Link %s to Jellyfin</h2>'
                 '<form method="get" action="%stitle/%d/link">'
@@ -1311,30 +1307,14 @@ class Handler(BaseHTTPRequestHandler):
             linked = re.search(r"/title/(\d+)/link/?$", route_path(self))
             if linked:
                 wanted = (field(form, "jf_id") or "").strip()
-                chosen = (field(form, "item_id") or "").strip()
-                if wanted and chosen.isdigit():
-                    server = con.execute(
-                        "SELECT id, label FROM jellyfin_servers"
-                        " ORDER BY id LIMIT 1").fetchone()
-                    if server:
-                        name, kind, path = jellyfin.describe(con, wanted)
-                        con.execute(
-                            "INSERT INTO digital_sources (item_id,"
-                            " provider, external_id, notes, created_at,"
-                            " server_id) VALUES (?, 'jellyfin', ?, ?,"
-                            "datetime('now'), ?)",
-                            (int(chosen), wanted, server["label"],
-                             server["id"]))
-                        con.execute(
-                            "INSERT OR REPLACE INTO jellyfin_links"
-                            " (item_id, jf_id, jf_kind, jf_name,"
-                            "  jf_path, matched_by, server_id,"
-                            "  synced_at)"
-                            " VALUES (?, ?, ?, ?, ?, 'manual', ?,"
-                            " datetime('now'))",
-                            (int(chosen), wanted, kind, name, path,
-                             server["id"]))
-                        con.commit()
+                if wanted:
+                    # a Jellyfin copy is a copy of its own: add one
+                    # rather than bolting the route onto a disc copy
+                    try:
+                        jellyfin.link_item(con, int(linked.group(1)),
+                                           wanted)
+                    except Exception as exc:
+                        print("jellyfin link failed: %s" % exc)
                 return self.respond(303, "", extra={
                     "Location": base_path(self) + "title/%d"
                     % int(linked.group(1))})

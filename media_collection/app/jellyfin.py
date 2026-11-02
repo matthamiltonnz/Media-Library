@@ -832,3 +832,45 @@ def describe(con, jf_id):
     item = items[0]
     return (item.get("Name") or "", (item.get("Type") or "").lower(),
             item.get("Path") or "")
+
+
+
+def link_item(con, title_id, jf_id, server=None):
+    """Give one Jellyfin item a copy of its own, picked by hand.
+
+    A Jellyfin route hangs off a *copy*, and a Jellyfin copy is a copy of its
+    own (format 'ripped', owned by the 'rips' user), exactly as materialise()
+    makes them. Returns the new copy id, or None when that item is already
+    linked somewhere.
+    """
+    server = server or (servers(con) or [None])[0]
+    if server is None:
+        raise JellyfinError("No Jellyfin server configured")
+    owner = con.execute("SELECT id FROM users WHERE username = 'rips'"
+                        ).fetchone()
+    if owner is None:
+        raise JellyfinError("No 'rips' user to own the copy")
+    already = con.execute(
+        "SELECT 1 FROM digital_sources WHERE provider = 'jellyfin'"
+        "   AND server_id = ? AND external_id = ?",
+        (server["id"], jf_id)).fetchone()
+    if already:
+        return None
+    name, kind, path = describe(con, jf_id)
+    copy_id = con.execute(
+        "INSERT INTO items (title_id, owner_id, format, visibility, added_by)"
+        " VALUES (?, ?, 'ripped', 'shared', ?)",
+        (title_id, owner["id"], owner["id"])).lastrowid
+    con.execute(
+        "INSERT INTO digital_sources (item_id, provider, server_id,"
+        " external_id, notes) VALUES (?, 'jellyfin', ?, ?, ?)",
+        (copy_id, server["id"], jf_id, server["label"]))
+    con.execute(
+        "INSERT OR REPLACE INTO jellyfin_links (item_id, jf_id, jf_kind,"
+        " jf_name, jf_path, matched_by, server_id, synced_at)"
+        # matched_by is CHECKed to ('path', 'name'); a hand-picked link is
+        # recorded as 'name', the closest of the two
+        " VALUES (?, ?, ?, ?, ?, 'name', ?, datetime('now'))",
+        (copy_id, jf_id, kind, name, path, server["id"]))
+    con.commit()
+    return copy_id

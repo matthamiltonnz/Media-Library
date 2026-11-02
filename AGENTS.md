@@ -6,7 +6,7 @@ Entry point `media_collection/app/server.py`; schema in
 `media_collection/migrations/*.sql` applied by `migrate.sh`.
 
 Version lives in `media_collection/config.yaml` and is displayed on the page
-header. Current: **0.23.52**.
+header. Current: **0.23.54**.
 
 ## Live deployment
 
@@ -400,9 +400,18 @@ the shelf, so the automatic match is not always right.
   d.external_id` added to the title page's `digital` query.
 - `/title/<id>/link` is a search page: `jellyfin.search_items()` wraps
   `/Items?searchTerm=…`, `jellyfin.describe()` gives name/kind/path for one id,
-  and a **Link** button posts `POST /title/<id>/link` with `jf_id` + `item_id`,
-  inserting the route (`notes` = the server label) and a `matched_by='manual'`
-  link row.
+  and a **Link** button posts `POST /title/<id>/link` with `jf_id` alone.
+
+A Jellyfin route hangs off a **copy**, not a title (`digital_sources.item_id`,
+`jellyfin_links.item_id`), and a Jellyfin copy is a copy of its own —
+`jellyfin.link_item()` builds one exactly as `materialise()` does (format
+`ripped`, owner `rips`, visibility shared) and refuses an item that is already
+linked. The first version of the page offered a list of the title's existing
+copies instead, which would have bolted a Jellyfin route onto a disc copy and
+said "this disc is also on Jellyfin" — two different ideas in one row.
+
+`jellyfin_links.matched_by` is `CHECK (matched_by IN (' path', 'name'))` — no
+'manual' value exists, so hand-picked links are recorded as `'name'`.
 - Both handlers sit at the top of `do_POST`, next to the artist rename, so they
   run before the generic routing.
 
