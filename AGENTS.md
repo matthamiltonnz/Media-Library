@@ -6,7 +6,7 @@ Entry point `media_collection/app/server.py`; schema in
 `media_collection/migrations/*.sql` applied by `migrate.sh`.
 
 Version lives in `media_collection/config.yaml` and is displayed on the page
-header. Current: **0.23.49**.
+header. Current: **0.23.51**.
 
 ## Live deployment
 
@@ -480,3 +480,39 @@ dedupe: 6 duplicate copy(s) folded
 
 A copy of the database from before the first real run is at
 `/data/media.before-dedupe.db` inside the container.
+
+## "Greatest Hits" all pointed at one album (0.23.51)
+
+`_index()` registered two keys per album: `("album", artist, name)` and a bare
+`("album", "", name)`. The bare key let *every* title called "Greatest Hits"
+fall onto whichever album was registered first — Creed's — because
+`setdefault()` keeps the first claim. Fixed two ways:
+
+- the bare key is recorded as **ambiguous** (`None`) as soon as a second album
+  claims it, so nothing matches on it;
+- `_name_match(index, name, year, kind, artist="")` now takes the title's
+  artist (`titles.artist_id` → `artists.name`, selected in `sync_links`' query)
+  and tries `("album", artist, album)` before any fallback.
+
+Check for leftover bad matches with:
+
+```sql
+select count(*) from digital_sources ds
+  join items i on i.id = ds.item_id join titles t on t.id = i.title_id
+  left join artists a on a.id = t.artist_id
+  left join jellyfin_links l on l.jf_id = ds.external_id
+ where ds.provider = 'jellyfin' and t.kind = 'music'
+   and l.jf_name is not null and a.name is not null
+   and lower(l.jf_name) not like lower(a.name) || '%';
+```
+
+Live: 20 rows out of 976, and every one is a spelling variant of the same act
+(`Apollo 440` / "Apollo Four Forty", `St Germain` / "St. Germain",
+`The Prodigy` / "Prodigy", curly vs straight apostrophe in `Guns N’ Roses`) —
+or a genuine collaboration (King Gizzard with Mild High Club).
+
+The copies panel no longer repeats the route twice: the copy line reads
+`Ripped file Jellyfin` (plus the edition when there is one), and the
+**Jellyfin matches** list carries name, kind, path and id. Its details are
+looked up by `jf_id` (a subquery), not by `item_id`: a dedupe fold can move a
+route onto another copy, so the link row need not hang off the same item.

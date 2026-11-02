@@ -190,7 +190,12 @@ def _index(base, key):
         label = "%s — %s" % (artist, item.get("Name")) if artist else (item.get("Name") or "")
         details.setdefault(jf_id, (label, _key(item.get("Path"))))
         by_name.setdefault(("album", _norm(artist), _norm(item.get("Name"))), (jf_id, "album"))
-        by_name.setdefault(("album", "", _norm(item.get("Name"))), (jf_id, "album"))
+        bare = ("album", "", _norm(item.get("Name")))
+        claimed = by_name.get(bare)
+        if claimed is None:
+            by_name[bare] = (jf_id, "album")
+        elif claimed[0] != jf_id:
+            by_name[bare] = None        # ambiguous: do not match on it
 
     for item in _walk(base, key, "Season", "SeriesName,IndexNumber", user_id):
         jf_id = item.get("Id")
@@ -222,7 +227,7 @@ def _name_keys(name):
     return keys
 
 
-def _name_match(index, name, year, kind):
+def _name_match(index, name, year, kind, artist=""):
     """A Jellyfin item for a title we could not match by folder."""
     by_name = index["by_name"]
     if kind == "movie":
@@ -233,9 +238,12 @@ def _name_match(index, name, year, kind):
                 return found
         return None
     if kind == "music":
-        artist, _, album = (name or "").partition(" — ")
-        if album:
-            found = by_name.get(("album", _norm(artist), _norm(album)))
+        split_artist, _, album = (name or "").partition(" — ")
+        wanted = album or name or ""
+        for who in (artist, split_artist):
+            if not who:
+                continue
+            found = by_name.get(("album", _norm(who), _norm(wanted)))
             if found:
                 return found
         return by_name.get(("album", "", _norm(name)))
@@ -290,6 +298,8 @@ def sync_links(con, log=print, server=None):
 
     rows = con.execute(
         "SELECT i.id AS item_id, t.name, t.release_year, t.kind,"
+        "       (SELECT a.name FROM artists a"
+        "         WHERE a.id = t.artist_id) AS artist,"
         "       r.path AS root_path, d.path AS rel_path"
         "  FROM items i"
         "  JOIN titles t ON t.id = i.title_id"
@@ -306,7 +316,8 @@ def sync_links(con, log=print, server=None):
             found = index["by_path"].get(absolute) or index["by_dir"].get(absolute)
         if not found:
             matched_by = "name"
-            found = _name_match(index, row["name"], row["release_year"], row["kind"])
+            found = _name_match(index, row["name"], row["release_year"],
+                                row["kind"], row["artist"] or "")
         if not found:
             stats["unmatched"] += 1
             continue

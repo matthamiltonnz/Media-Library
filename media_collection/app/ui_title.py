@@ -323,11 +323,11 @@ def _copies_tab(base, row, items, digital, formats, labels, users,
                         continue
                     if source["provider"] != "jellyfin":
                         continue
-                    label = source["notes"] or ""
-                    ext = source["external_id"] or ""
-                    detail = " \u00b7 ".join(
-                        x for x in (label, item["edition"], ext) if x)
-                    where = "Jellyfin" + (" \u00b7 " + detail if detail else "")
+                    # the match list below names the server and the id;
+                    # here only the version is worth repeating
+                    where = "Jellyfin"
+                    if item["edition"]:
+                        where += " \u00b7 " + item["edition"]
                     break
             jf = ""
             for source in digital:
