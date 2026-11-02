@@ -176,9 +176,7 @@ def _play_block(base, row, items, digital, players, last_player,
                                 % (source["id"], _label(source))
                                 for source in playable))
         if not playable:
-            shelf = ('<h3>From Media folder</h3>'
-                     '<p class="muted">No file to play for this title yet -'
-                     ' rip the disc and the scan picks it up.</p>')
+            shelf = ""
         else:
             shelf = ('<h3>From Media folder</h3>'
                      '<p class="sub">Home Assistant opens the file on a player'
@@ -188,8 +186,7 @@ def _play_block(base, row, items, digital, players, last_player,
                      '</label>%s</form>'
                      % (_text(base), row["id"], player_options, copies))
     else:
-        shelf = ('<h3>From Media folder</h3><p class="muted">No ripped file for'
-                 ' this title yet - rip the disc and the scan picks it up.</p>')
+        shelf = ""
 
     picker = _version_picker(digital, items)
     if not jellyfin_ready:
@@ -206,9 +203,9 @@ def _play_block(base, row, items, digital, players, last_player,
                     ' right now.</p>'
                     '<form method="post" action="%stitle/%d/jellyfin"'
                     '>'
-                    '%s'
                     '<label>Jellyfin device<select name="session_id">%s'
                     '</select></label>'
+                    '%s'
                     '<p><button type="submit">Play in Jellyfin</button></p>'
                     '</form>' % (_text(base), row["id"],
                                           session_options, picker))
@@ -217,6 +214,8 @@ def _play_block(base, row, items, digital, players, last_player,
                     '<p class="muted">No Jellyfin app is open at the moment -'
                     ' start it on the device you want and press Play again.</p>')
 
+    if not shelf and not jellyfin:
+        return head                 # nothing to play: no button, no sheet
     return """%s
 <p><button type="button" class="primary" data-open="play">Play</button></p>
 <dialog id="play" class="sheet">

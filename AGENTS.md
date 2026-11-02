@@ -6,7 +6,7 @@ Entry point `media_collection/app/server.py`; schema in
 `media_collection/migrations/*.sql` applied by `migrate.sh`.
 
 Version lives in `media_collection/config.yaml` and is displayed on the page
-header. Current: **0.23.19**.
+header. Current: **0.23.21**.
 
 ## Live deployment
 
@@ -195,6 +195,14 @@ labelled with each copy's `items.edition`, and `_play_block` posts the chosen
 `digital_sources.id` beside the device select. With no jellyfin route it
 posts an empty `source_id`, and the handler falls back to `link_for_title`.
 
+The sheet carries no empty sections: *From media folder* renders only when a
+playable file exists (`shelf = ""` otherwise), and a title with nothing at all
+returns before the `Play` button, so neither the button nor the dialog is
+emitted. The `%s` placeholders in the Jellyfin form are positional and the
+picker sits *after* `</select></label>` of the device select — swapping the
+arguments nests one `<select>` inside the other and the browser then renders
+every `<option>` as plain text.
+
 The grid's play mark is `has_rip` in the main-page title query
 (`server.py`, the sub-select just above `counts`), which used to mean
 "provider = 'rip'" and therefore vanished for every Jellyfin title. It now
@@ -241,3 +249,6 @@ them with no further work.
 Trap: do **not** dedupe on path equality alone. `_media_sources()` returns
 `[]` for ids the API key cannot read, and two empty sets compare equal, so
 four titles looked like duplicates when they were simply unreadable.
+- Swapping two `%s` arguments in the Play form put the version `<select>`
+  inside the device `<select>`; the page then showed the versions as bare
+  text with no control. Positional `%` formatting bites here repeatedly.
