@@ -170,14 +170,14 @@ def _play_block(base, row, items, digital, players, last_player,
                       % "".join('<option value="%d">%s</option>'
                                 % (source["id"], _label(source))
                                 for source in playable))
-        shelf = ('<h3>From the shelf</h3>'
+        shelf = ('<h3>From Media folder</h3>'
                  '<p class="sub">Home Assistant opens the file on a player you'
                  ' choose.</p>'
                  '<form method="post" action="%stitle/%d/play">'
                  '<label>Player<select name="entity_id">%s</select></label>%s'
                  '</form>' % (_text(base), row["id"], player_options, copies))
     else:
-        shelf = ('<h3>From the shelf</h3><p class="muted">No ripped file for'
+        shelf = ('<h3>From Media folder</h3><p class="muted">No ripped file for'
                  ' this title yet - rip the disc and the scan picks it up.</p>')
 
     if not jellyfin_ready:
