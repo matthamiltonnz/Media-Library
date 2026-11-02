@@ -6,7 +6,7 @@ Entry point `media_collection/app/server.py`; schema in
 `media_collection/migrations/*.sql` applied by `migrate.sh`.
 
 Version lives in `media_collection/config.yaml` and is displayed on the page
-header. Current: **0.23.61**.
+header. Current: **0.23.62**.
 
 ## Live deployment
 
@@ -559,3 +559,8 @@ clicking it no longer throws you to the top of the page (a plain 303 to
 
 Still to do: `scan.py`'s `STATE` has no `files` counter, so its line reads
 "Scanning the media folders…" with no number.
+
+The artist fill's counts live in `artists.summary()`, so they appear inside the
+Artists block: "Filling artist details - 11 of 48 acts, 1 filled." A separate
+line appended by `render()` was useless — it landed above the scan block, next
+to the wrong section, which is why the numbers never appeared where you looked.

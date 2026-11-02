@@ -161,12 +161,6 @@ def render(base, viewer, stats, message=None, refresh=None, duplicates=0,
     scanned = jobs.get("scan") or {}
     if scanned.get("running"):
         parts.append('<p class="sub">Scanning the media folders...</p>')
-    filed = jobs.get("artists") or {}
-    if filed.get("running"):
-        parts.append('<p class="sub">Filling artist details - %d of %d acts, %d filled.</p>'
-                         % (filed.get("done") or 0,
-                            filed.get("total") or 0,
-                            filed.get("filled") or 0))
     if jellyfin is not None:
         parts.append(_jellyfin_block(base, jellyfin))
         sync = jobs.get("jellyfin") or {}

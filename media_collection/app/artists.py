@@ -209,6 +209,10 @@ def summary():
     """One line for the admin page: what the last fill managed to do."""
     state = status()
     if state["running"]:
+        if state.get("total"):
+            return ("Filling artist details - %d of %d acts, %d filled."
+                    % (state.get("done") or 0, state["total"],
+                       state.get("filled") or 0))
         return "Filling artist details from MusicBrainz..."
     if state["at"]:
         return ("Filled %d artist(s) from MusicBrainz on %s."
