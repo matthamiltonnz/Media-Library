@@ -103,22 +103,7 @@ def _badges(items, digital, labels, base=None, title_id=None):
     stores = _stores(digital)
     ripped = _ripped(digital)
     badges = []
-    _ADD_HTML = ('<p><button type="button" onclick="addcopy.showModal()">'
-                 '+ Add a copy</button></p>')
-    _ADD = object()
-    # a copy held by a server is not a file on disk; file copies go last
-    try:
-        _remote = {r[0] for r in con.execute(
-            "SELECT DISTINCT item_id FROM digital_sources")}
-    except Exception:
-        _remote = set()
-    _rips = [c for c in items if c["id"] not in _remote]
-    _disc = [c for c in items if c["id"] in _remote]
-    _ordered = _disc + ([_ADD] + _rips if _rips else [])
-    for item in _ordered:
-        if item is _ADD:
-            parts.append(_ADD_HTML)
-            continue
+    for item in items:
         text = _text(_copy_title(item, labels, stores.get(item["id"]),
                                  item["id"] in ripped))
         if base and title_id:
@@ -169,6 +154,11 @@ def _play_block(base, row, items, digital, players, last_player,
                 _text(source["root_label"] or "media"),
                 _text(source["path"]))
 
+        # a Jellyfin copy has no file to hand a player: it is played
+        # through the server, in the section below
+        playable = [src for src in playable
+                    if src["provider"] != "jellyfin"
+                    and (src["path"] or "").strip()]
         if not playable:
             copies = ""
         elif len(playable) == 1:
@@ -185,12 +175,18 @@ def _play_block(base, row, items, digital, players, last_player,
                       % "".join('<option value="%d">%s</option>'
                                 % (source["id"], _label(source))
                                 for source in playable))
-        shelf = ('<h3>From Media folder</h3>'
-                 '<p class="sub">Home Assistant opens the file on a player you'
-                 ' choose.</p>'
-                 '<form method="post" action="%stitle/%d/play">'
-                 '<label>Player<select name="entity_id">%s</select></label>%s'
-                 '</form>' % (_text(base), row["id"], player_options, copies))
+        if not playable:
+            shelf = ('<h3>From Media folder</h3>'
+                     '<p class="muted">No file to play for this title yet -'
+                     ' rip the disc and the scan picks it up.</p>')
+        else:
+            shelf = ('<h3>From Media folder</h3>'
+                     '<p class="sub">Home Assistant opens the file on a player'
+                     ' you choose.</p>'
+                     '<form method="post" action="%stitle/%d/play">'
+                     '<label>Player<select name="entity_id">%s</select>'
+                     '</label>%s</form>'
+                     % (_text(base), row["id"], player_options, copies))
     else:
         shelf = ('<h3>From Media folder</h3><p class="muted">No ripped file for'
                  ' this title yet - rip the disc and the scan picks it up.</p>')
@@ -310,9 +306,12 @@ def _copies_tab(base, row, items, digital, formats, labels, users,
     parts = []
     stores = _stores(digital)
     files = _files(digital)
-    if not items:
-        parts.append('<p class="muted">No copies yet.</p>')
-    for item in items:
+
+    def _is_file(item):
+        # the ripped line is the copy a player uses: it goes under the button
+        return item["format"] == "ripped"
+
+    def _row_html(item):
         if item["format"] == "ripped":
             # a file is the importer's business: where it is, nothing to edit
             where = item["rip_path"] or files.get(item["id"]) or ""
@@ -333,24 +332,19 @@ def _copies_tab(base, row, items, digital, formats, labels, users,
                     jf = source["jf_id"] or ""
                     if jf:
                         break
-            parts.append('<p class="copy-line"><strong>Ripped file</strong>'
-                         ' <span class="muted">%s%s</span></p>'
-                         % (_text(where),
-                            " \u00b7 Jellyfin " + _text(jf) if jf else ""))
-            continue
+            return ('<p class="copy-line"><strong>Ripped file</strong>'
+                    ' <span class="muted">%s%s</span></p>'
+                    % (_text(where),
+                       " \u00b7 Jellyfin " + _text(jf) if jf else ""))
         store = stores.get(item["id"])
-        if True:      # any household member may remove a copy, not just its owner
-            remove = ('<form method="post" action="%sitems/%d/delete"'
-                      " onsubmit=\"return confirm('Remove this copy?')\">"
-                      '<p><button type="submit" class="danger">Delete copy'
-                      '</button> <span class="muted">Removes this copy from the'
-                      " catalogue: files and Jellyfin stay put; only the last"
-                      " copy takes the title with it.</span></p></form>"
-                      % (_text(base), item["id"]))
-        else:
-            remove = ('<p class="muted">Shared copy - only %s can delete'
-                      ' it.</p>' % _text(item["owner_name"] or "its owner"))
-        parts.append(
+        remove = ('<form method="post" action="%sitems/%d/delete"'
+                  " onsubmit=\"return confirm('Remove this copy?')\">"
+                  '<p><button type="submit" class="danger">Delete copy'
+                  '</button> <span class="muted">Removes this copy from the'
+                  " catalogue: files and Jellyfin stay put; only the last"
+                  " copy takes the title with it.</span></p></form>"
+                  % (_text(base), item["id"]))
+        return (
             '<details class="copy" id="copy-%d"><summary>%s</summary>'
             '<form method="post" action="%sitems/%d">%s'
             '<p><button type="submit">Save copy</button></p></form>%s'
@@ -364,6 +358,15 @@ def _copies_tab(base, row, items, digital, formats, labels, users,
                item["id"], _copy_fields(item, formats, labels, store),
                remove))
 
+    if not items:
+        parts.append('<p class="muted">No copies yet.</p>')
+    for item in [c for c in items if not _is_file(c)]:
+        parts.append(_row_html(item))
+    parts.append('<p><button type="button" onclick="addcopy.showModal()">'
+                 '+ Add a copy</button></p>')
+    for item in [c for c in items if _is_file(c)]:
+        parts.append(_row_html(item))
+
     owner_options = "".join('<option value="%d"%s>%s</option>'
                             % (user["id"],
                                " selected" if items and
@@ -376,7 +379,6 @@ def _copies_tab(base, row, items, digital, formats, labels, users,
              "acquired_on": None, "last_watched_on": None,
              "visibility": "shared", "notes": None}
     parts.append(
-        ''
         '<dialog id="addcopy"><h2>Add a copy</h2>'
         '<form method="post" action="%sitems">'
         '<input type="hidden" name="title" value="%s">'
