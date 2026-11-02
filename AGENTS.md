@@ -6,7 +6,7 @@ Entry point `media_collection/app/server.py`; schema in
 `media_collection/migrations/*.sql` applied by `migrate.sh`.
 
 Version lives in `media_collection/config.yaml` and is displayed on the page
-header. Current: **0.23.14**.
+header. Current: **0.23.19**.
 
 ## Live deployment
 
@@ -211,3 +211,33 @@ matches `IN ('rip', 'jellyfin')` and reads "a copy is ready to play" — 431 of
 - A side-process write to `/data/media.db` fails with "database is locked";
   pass `timeout=60` and `PRAGMA busy_timeout = 60000`.
 - `docker exec` wipes `/tmp` on every restart — re-upload helper scripts.
+
+## Jellyfin duplicates across two libraries (0.23.19)
+
+The household has two Jellyfin libraries (`Movies`, `Mitchell's Movies`) and
+Jellyfin reports **one item per library** for a film it finds in both. The
+catalogue therefore meets the same film twice, and also meets *different*
+films that share a name — 15 titles were linked to two Jellyfin items:
+
+- 6: the same film twice (either the same `MediaSources` paths, as with
+  Almost Famous, or two files of the same year).
+- 9: two different films on one title row — *Beauty and the Beast* 1991 with
+  a 2017 route, *Conan the Barbarian* 1906 with 2011/1982 routes.
+
+`dedupe_versions(con, server, log)` runs after `expand_versions()` in the sync
+loop and decides by **film year**: keep the item whose `ProductionYear` is
+within a year of `titles.release_year`, delete the other items' routes. If no
+item matches the title's year, nothing is touched — a title whose year is NULL
+or wrong must not lose copies. `_drop_copy()` always removes the route (a sync
+rebuilds a correct one) and only removes the copy itself when it is synthetic
+(`format='ripped'`, no `rip_path`) and holds nothing else.
+
+Live result: 15 doubled titles → 11 (4 routes dropped, then idempotent at
+0). The 11 left have an unusable title year — `Point Break` (NULL vs
+2015/1991), `Conan the Barbarian` (1906 vs 2011/1982) — so they keep both
+copies until those title rows are corrected; the next sync will then dedupe
+them with no further work.
+
+Trap: do **not** dedupe on path equality alone. `_media_sources()` returns
+`[]` for ids the API key cannot read, and two empty sets compare equal, so
+four titles looked like duplicates when they were simply unreadable.

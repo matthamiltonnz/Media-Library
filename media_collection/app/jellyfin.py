@@ -256,6 +256,7 @@ def sync_links(con, log=print, server=None):
             part = sync_links(con, log=log, server=one)
             copies = materialise(con, one, log=log)
             expand_versions(con, one, log=log)
+            dedupe_versions(con, one, log=log)
             try:
                 more = editions(con, one, log=log)
                 if more:
@@ -681,4 +682,99 @@ def _copy_of(con, route, jf_id, source_id, name, edition):
     con.execute("INSERT INTO digital_sources (%s) VALUES (%s)"
                 % (", ".join(source), ", ".join("?" * len(source))),
                 list(source.values()))
+    return 1
+
+
+
+def dedupe_versions(con, server, log=print):
+    """One film, one copy.
+
+    A film can sit in two Jellyfin libraries, so Jellyfin reports two items for
+    it and the sync would materialise both. Keep the item whose year matches
+    the title - same film, or the right remake - and drop the other copies.
+    Items that cannot be judged (no year, no match) are left alone.
+    """
+    try:
+        base, key = server["url"].rstrip("/"), server["api_key"]
+    except (KeyError, TypeError):
+        base, key = config(con)
+    titles = con.execute(
+        "SELECT i.title_id, t.release_year FROM digital_sources ds"
+        "  JOIN items i ON i.id = ds.item_id"
+        "  JOIN titles t ON t.id = i.title_id"
+        " WHERE ds.provider = 'jellyfin' AND ds.server_id = ?"
+        " GROUP BY i.title_id HAVING count(DISTINCT ds.external_id) > 1",
+        (server["id"],)).fetchall()
+    info = {}
+    dropped = 0
+    for row in titles:
+        routes = {}
+        for route in con.execute(
+                "SELECT ds.id, ds.item_id, ds.external_id"
+                "  FROM digital_sources ds JOIN items i ON i.id = ds.item_id"
+                " WHERE i.title_id = ? AND ds.provider = 'jellyfin'"
+                "   AND ds.server_id = ? ORDER BY ds.id",
+                (row["title_id"], server["id"])):
+            routes.setdefault(route["external_id"], []).append(route)
+        for jf_id in routes:
+            if jf_id in info:
+                continue
+            try:
+                info[jf_id] = _item_year(base, key, jf_id)
+            except Exception as exc:        # a stale id must not stop the run
+                log("jellyfin: %s unreadable (%s)" % (jf_id[:6], exc))
+                info[jf_id] = None
+        wanted = []
+        for jf_id in routes:
+            year = info[jf_id]
+            if not year or not row["release_year"]:
+                continue
+            try:
+                if abs(int(year) - int(row["release_year"])) <= 1:
+                    wanted.append(jf_id)
+            except (TypeError, ValueError):
+                continue
+        if not wanted:
+            continue                        # nothing trustworthy to compare
+        keep = wanted[0]
+        for jf_id in routes:
+            if jf_id == keep:
+                continue
+            for route in routes[jf_id]:
+                if _drop_copy(con, route["item_id"], route["id"]):
+                    dropped += 1
+    if dropped:
+        log("jellyfin[%s]: %d duplicate copies dropped"
+            % (server["id"], dropped))
+    return dropped
+
+
+def _item_year(base, key, jf_id):
+    """The production year of one Jellyfin item, or None."""
+    import json
+    import urllib.request
+    url = ("%s/Items?Ids=%s&Fields=ProductionYear&Limit=1&apiKey=%s"
+           % (base, jf_id, key))
+    with urllib.request.urlopen(url, timeout=30) as response:
+        data = json.load(response)
+    found = data.get("Items") or []
+    return found[0].get("ProductionYear") if found else None
+
+
+def _drop_copy(con, item_id, source_id):
+    """Delete one stray route and report it.
+
+    The route is always removed - it points at a film that is not this title,
+    and a sync rebuilds a correct one. The copy itself only goes when it is a
+    synthetic Jellyfin copy with nothing else left on it.
+    """
+    con.execute("DELETE FROM digital_sources WHERE id = ?", (source_id,))
+    left = con.execute("SELECT count(*) FROM digital_sources WHERE item_id = ?",
+                       (item_id,)).fetchone()[0]
+    item = con.execute("SELECT format, rip_path FROM items WHERE id = ?",
+                       (item_id,)).fetchone()
+    synthetic = (item and item["format"] == "ripped" and not item["rip_path"])
+    if not left and synthetic:
+        con.execute("DELETE FROM jellyfin_links WHERE item_id = ?", (item_id,))
+        con.execute("DELETE FROM items WHERE id = ?", (item_id,))
     return 1
