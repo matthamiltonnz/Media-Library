@@ -873,6 +873,17 @@ def link_item(con, title_id, jf_id, server=None):
     if already:
         return None
     name, kind, path = describe(con, jf_id)
+    # jellyfin_links.jf_kind only speaks these words. describe() hands
+    # back Jellyfin's own Type ("musicalbum"), which fails the CHECK,
+    # so a hand-picked album link could never be saved.
+    row = con.execute("SELECT kind FROM titles WHERE id = ?",
+                      (title_id,)).fetchone()
+    music = bool(row and row[0] == "music")
+    kind = {"musicalbum": "album", "audio": "album",
+            "musicvideo": "album", "movie": "movie",
+            "boxset": "movie", "series": "series",
+            "season": "season", "episode": "episode"}.get(
+                (kind or "").lower(), "album" if music else "movie")
     copy_id = con.execute(
         "INSERT INTO items (title_id, owner_id, format, visibility, added_by)"
         " VALUES (?, ?, 'ripped', 'shared', ?)",

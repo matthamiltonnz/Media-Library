@@ -710,3 +710,34 @@ Deliberately **not** done: a bulk sweep of existing phantom titles. Many titles
 legitimately hold only Jellyfin routes (`itunes` 167, `jellyfin` 973 routes, no
 file-backed copies at all), so "no real copy" does not mean "should not exist".
 The orphan the user was left with has to be Unlinked by hand.
+
+## Why a hand-picked album link always failed (0.23.72)
+
+The link page said `CHECK constraint failed: jf_kind IN ('movie', 'album',
+'season', 'series', 'episode')`. `jellyfin.describe()` returns Jellyfin's own
+`Type` lowercased - `musicalbum` - and `link_item()` wrote that straight into
+`jellyfin_links.jf_kind`, so **every** manual album link died on the CHECK. The
+sync never hit it because `_index()` labels albums `"album"` itself. The old
+`except: print(...)` in the route swallowed the IntegrityError, which is why the
+first report looked like "nothing happens".
+
+`link_item()` now maps the type to the words the table knows (`musicalbum`,
+`audio`, `musicvideo` -> `album`; `boxset` -> `movie`; series/season/episode as
+themselves) and falls back to the title's own kind, so an unknown type cannot
+break the insert. Verified end to end on a copy of the database: search finds
+`mini mix vol. 1` as `MusicAlbum`, and `link_item` stored `album` and created
+the copy.
+
+Note the vocabulary in the data: `jellyfin_links.jf_kind` holds only `album`
+(1028) and `movie` (1019) - there is no `audio` value despite `_index()` having
+a counter for it.
+
+## Delete a title outright (0.23.72)
+
+`POST /title/<id>/delete` removes every copy on the title (sources, links, item)
+and then the title itself, and the title page carries a **Delete this title**
+button with a confirm. This is the way out of a title left behind by a bad copy
+without Unlinking each Jellyfin match by hand.
+
+Verified on the live box with a throwaway title: the button rendered, the POST
+answered 303, and `titles`/`items` came back 0 and 0.

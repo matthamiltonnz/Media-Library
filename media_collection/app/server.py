@@ -1759,6 +1759,21 @@ class Handler(BaseHTTPRequestHandler):
                 return self.title_page(con, viewer, base, item["title_id"],
                                        summary="Copy updated.")
 
+            match = re.search(r"/title/(\d+)/delete/?$", route)
+            if match:
+                doomed = int(match.group(1))
+                copies = con.execute("SELECT id FROM items WHERE title_id = ?",
+                                     (doomed,)).fetchall()
+                for copy in copies:
+                    con.execute("DELETE FROM digital_sources WHERE item_id = ?",
+                                (copy[0],))
+                    con.execute("DELETE FROM jellyfin_links WHERE item_id = ?",
+                                (copy[0],))
+                    con.execute("DELETE FROM items WHERE id = ?", (copy[0],))
+                con.execute("DELETE FROM titles WHERE id = ?", (doomed,))
+                con.commit()
+                return self.respond(303, "", extra={
+                    "Location": base_path(self)})
             match = re.search(r"/items/(\d+)/delete/?$", route)
             if match:
                 row = con.execute(

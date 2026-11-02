@@ -303,6 +303,17 @@ def _copy_line(item, labels, store, ripped=False, path=None):
     return '<strong>%s</strong> <span class="muted">%s</span>' % (head, detail)
 
 
+def _delete_block(base, row):
+    """The way out of a title that should never have existed: one button that
+    takes the title and every copy on it, file-backed or Jellyfin."""
+    return ('<form method="post" action="%stitle/%d/delete" class="sub"'
+            ' onsubmit="return confirm(\'Delete this title and every copy on'
+            ' it?\')">'
+            '<button type="submit">Delete this title</button>'
+            ' <span class="muted">with every copy on it, file or Jellyfin.'
+            '</span></form>' % (html.escape(base), row["id"]))
+
+
 def _copies_tab(base, row, items, digital, formats, labels, users,
                  viewer_id=None):
     parts = []
@@ -545,6 +556,7 @@ def render(base, row, items, digital, formats, labels, summary=None, error=None,
         parts.append('<h2>Copies</h2>')
         parts.append(_copies_tab(base, row, items, digital, formats, labels,
                                  users, viewer_id))
+        parts.append(_delete_block(base, row))
     if True:   # play sheet and the about block belong on every view
         parts.append(_play_block(base, row, items, digital, players,
                                  last_player, jellyfin_link,
