@@ -43,11 +43,20 @@ def _targets(db_path, force):
         if not force:
             # also revisit titles where an id exists but the stored match came from
             # somewhere else - that is how a wrong film gets corrected
-            sql += (" WHERE overview IS NULL OR poster_url IS NULL"
-                    " OR (imdb_id IS NOT NULL"
-                    "     AND COALESCE(metadata_source, '') NOT LIKE '%imdb%')"
-                    " OR (tmdb_id IS NOT NULL"
-                    "     AND COALESCE(metadata_source, '') NOT LIKE '%tmdb%')")
+            # an album has no overview to fill - MusicBrainz carries no prose
+            # for a release - so testing overview IS NULL queued every album on
+            # every run. Music is judged on its id and cover instead.
+            sql += (" WHERE (kind = 'music'"
+                    "        AND (musicbrainz_id IS NULL"
+                    "             OR poster_url IS NULL))"
+                    "    OR ((kind IS NULL OR kind <> 'music') AND ("
+                    "         overview IS NULL OR poster_url IS NULL"
+                    "         OR (imdb_id IS NOT NULL"
+                    "             AND COALESCE(metadata_source, '')"
+                    "                 NOT LIKE '%imdb%')"
+                    "         OR (tmdb_id IS NOT NULL"
+                    "             AND COALESCE(metadata_source, '')"
+                    "                 NOT LIKE '%tmdb%')))")
         return [row[0] for row in con.execute(sql + " ORDER BY name")]
     finally:
         con.close()
