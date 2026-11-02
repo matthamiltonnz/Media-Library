@@ -6,7 +6,7 @@ Entry point `media_collection/app/server.py`; schema in
 `media_collection/migrations/*.sql` applied by `migrate.sh`.
 
 Version lives in `media_collection/config.yaml` and is displayed on the page
-header. Current: **0.23.45**.
+header. Current: **0.23.46**.
 
 ## Live deployment
 
@@ -416,3 +416,30 @@ what pointed at the missing `respond`.
 Still open: browsing *media folders* (only Jellyfin search is offered), and the
 report that the catalogue's media filter is reset (to music) when coming back
 from a title.
+
+## Playing a Jellyfin copy crashed (0.23.46)
+
+Symptom: pressing **Play** on a Jellyfin copy killed the request thread with
+`TypeError: execute expected at most 2 arguments, got 3` at the
+`owner_item = con.execute(...)` line of the play handler, and the client saw a
+dropped connection.
+
+Cause: a patch had inserted a line into the handler's SQL and left a **comma**
+after the first fragment, so Python passed it as a separate argument:
+
+```python
+con.execute(
+    "SELECT item_id, media_source_id",          # <- stray comma
+    " FROM digital_sources WHERE id = ?",
+    (int(chosen),))
+```
+
+Implicit string concatenation only happens while the literals are adjacent —
+one comma and the statement becomes three arguments. When editing SQL split
+over several lines, always check the **trailing character** of each line.
+
+A quick way to exercise the whole play path without a real client: post
+`/title/<id>/jellyfin` with `source_id=<a route id>` and
+`session_id=no-such-session`. Success looks like a 200 page carrying
+`Jellyfin: POST /Sessions/no-such-session/Playing - …`, i.e. Jellyfin's own
+rejection surfaced as a banner; a dropped connection means our side raised.

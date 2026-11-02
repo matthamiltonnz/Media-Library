@@ -1603,7 +1603,7 @@ class Handler(BaseHTTPRequestHandler):
                         # source_id is a digital_sources row, not an item: hop
                         # through it, or we hand Jellyfin an unrelated id
                         owner_item = con.execute(
-                            "SELECT item_id, media_source_id",
+                            "SELECT item_id, media_source_id"
                             " FROM digital_sources WHERE id = ?",
                             (int(chosen),)).fetchone()
                         if owner_item:
