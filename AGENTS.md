@@ -6,7 +6,7 @@ Entry point `media_collection/app/server.py`; schema in
 `media_collection/migrations/*.sql` applied by `migrate.sh`.
 
 Version lives in `media_collection/config.yaml` and is displayed on the page
-header. Current: **0.23.32**.
+header. Current: **0.23.34**.
 
 ## Live deployment
 
@@ -341,3 +341,20 @@ alone returned two release groups and the score picked a 2001 reissue of
 `Too Legit To Quit`, while `arid:<MC Hammer>` returns one hit, 1991-10-27.
 A refresh always prefers a stored `musicbrainz_id`, so clear that field first
 if it holds the wrong release.
+
+## Filters survive the trip into a title (0.23.34)
+
+The title page's *Back to the catalogue* link resolves its `?query` in three
+steps, in `title_page()`:
+
+1. `?from=<query>` on the title URL, if present;
+2. otherwise the browser's `Referer`, unless it points at another `/title`;
+3. otherwise the **`mc_back` cookie** the catalogue response now sets
+   (`Set-Cookie: mc_back=<url-encoded query>; Path=<base>; SameSite=Lax`,
+   via the `extra=` argument of `respond()`).
+
+The cookie is what makes the filters survive a **POST**: saving the title form
+redirects to `/title/<id>` with no query and no useful referer, and the browser
+sends the cookie with that redirect, so the Back link still carries the view
+the viewer came from. `title_page()` takes no `back` argument — it computes it;
+passing one raises `TypeError` and the connection simply drops.

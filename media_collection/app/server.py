@@ -15,7 +15,7 @@ import sqlite3
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from string import Template
-from urllib.parse import parse_qs, quote, urlparse
+from urllib.parse import parse_qs, quote, unquote, urlparse
 
 import dedupe
 import jellyfin
@@ -929,6 +929,17 @@ def stats(con):
     }
 
 
+def _catalogue_back(handler):
+    """The catalogue query the viewer last used, as a `?…` back link."""
+    for part in (handler.headers.get("Cookie") or "").split(";"):
+        name, _, value = part.strip().partition("=")
+        if name == "mc_back" and value:
+            query = unquote(value)
+            if query:
+                return "?" + query
+    return ""
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "MediaCollection/0.1"
 
@@ -1137,7 +1148,10 @@ class Handler(BaseHTTPRequestHandler):
                 view="grid" if view == "grid" else "list",
                 owner=owner,
                 kind=kind if kind in ("movie", "tv", "music", "other") else "movie",
-                format=fmt, rips=rips, only=only))
+                format=fmt, rips=rips, only=only),
+                extra={"Set-Cookie": "mc_back=%s; Path=%s; SameSite=Lax"
+                       % (quote(urlparse(self.path).query, safe=""),
+                          base or "/")})
         finally:
             con.close()
 
@@ -1180,6 +1194,8 @@ class Handler(BaseHTTPRequestHandler):
             seen = urlparse(self.headers.get("Referer") or "")
             if seen.query and not seen.path.startswith("/title"):
                 back = "?" + seen.query
+        if back is None:    # no referer (a fresh tab, a bookmark): use the cookie
+            back = _catalogue_back(self) or None
         return self.respond(200, ui_title.render(
             base, row, items, digital, FORMATS, FORMAT_LABELS, summary=summary,
             error=error, ripped_root=RIPPED_ROOT, roots=roots, owner=owner,
