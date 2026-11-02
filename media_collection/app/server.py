@@ -1142,6 +1142,12 @@ class Handler(BaseHTTPRequestHandler):
                     FORMAT_LABELS, "grid" if want == "grid" else "list"))
 
             # detail page, always last so /title/<id>/metadata is handled in POST
+            linking = re.search(r"/title/(\d+)/link/?$", route)
+            if linking:
+                term = (parse_qs(urlparse(self.path).query)
+                        .get("jfq") or [""])[0].strip()
+                return self.respond(200, self.link_page(
+                    con, viewer, base, int(linking.group(1)), term))
             detail = re.search(r"/title/(\d+)/?$", route)
             if detail:
                 return self.title_page(con, viewer, base, int(detail.group(1)),
@@ -1157,6 +1163,47 @@ class Handler(BaseHTTPRequestHandler):
                           base or "/")})
         finally:
             con.close()
+
+    def link_page(self, con, viewer, base, title_id, term=""):
+        """Pick a Jellyfin item by hand when the automatic match missed."""
+        row = con.execute("SELECT name FROM titles WHERE id = ?",
+                          (title_id,)).fetchone()
+        copies = con.execute(
+            "SELECT i.id, i.format, u.display_name AS owner"
+            "  FROM items i JOIN users u ON u.id = i.owner_id"
+            " WHERE i.title_id = ? ORDER BY i.id", (title_id,)).fetchall()
+        options = "".join('<option value="%d">%s \u00b7 %s</option>'
+                          % (one["id"], html.escape(one["format"]),
+                             html.escape(one["owner"]))
+                          for one in copies)
+        results, note = [], ""
+        if term:
+            try:
+                results = jellyfin.search_items(con, term)
+                note = "%d match%s" % (len(results),
+                                       "" if len(results) == 1 else "es")
+            except Exception as exc:
+                note = "Jellyfin said: %s" % exc
+        rows = "".join(
+            '<li><strong>%s</strong> <span class="muted">%s%s &#183; %s'
+            '</span> <form method="post" action="%stitle/%d/link"'
+            ' style="display:inline"><input type="hidden" name="jf_id"'
+            ' value="%s"><select name="item_id">%s</select>'
+            '<button type="submit">Link</button></form></li>'
+            % (html.escape(item["name"]), html.escape(item["kind"]),
+               " (%s)" % item["year"] if item["year"] else "",
+               html.escape((item["path"] or "")[-70:]), html.escape(base),
+               title_id, item["id"], options)
+            for item in results)
+        body = ('<h2>Link %s to Jellyfin</h2>'
+                '<form method="get" action="%stitle/%d/link">'
+                '<label>Search Jellyfin<input name="jfq" value="%s"></label> '
+                '<button type="submit">Search</button></form>'
+                '<p class="sub">%s</p><ul class="routes">%s</ul>'
+                % (html.escape(row["name"] if row else ""), html.escape(base),
+                   title_id, html.escape(term), html.escape(note), rows))
+        return ui.page(base, "Link to Jellyfin", body,
+                       back="title/%d" % title_id)
 
     def title_page(self, con, viewer, base, title_id, summary=None, error=None,
                    owner=None):
@@ -1175,10 +1222,14 @@ class Handler(BaseHTTPRequestHandler):
         digital = con.execute(
             "SELECT d.*, i.format AS copy_format,"
             " u.display_name AS owner_name,"
-            " r.label AS root_label, r.path AS root_path"
+            " r.label AS root_label, r.path AS root_path,"
+            " l.jf_name AS jf_name, l.jf_path AS jf_path,"
+            " l.jf_kind AS jf_kind"
             " FROM digital_sources d JOIN items i ON i.id = d.item_id"
             " JOIN users u ON u.id = i.owner_id"
             " LEFT JOIN media_roots r ON r.id = d.root_id"
+            " LEFT JOIN jellyfin_links l"
+            "   ON l.item_id = d.item_id AND l.jf_id = d.external_id"
             " WHERE i.title_id = ? ORDER BY d.provider", (title_id,)).fetchall()
         roots = con.execute("SELECT id, label, path, medium FROM media_roots"
                             " ORDER BY medium, label").fetchall()
@@ -1223,6 +1274,65 @@ class Handler(BaseHTTPRequestHandler):
                 return self.respond(303, "", extra={
                     "Location": base_path(self) + "artist/%d"
                     % int(renamed.group(1))})
+            gone = re.search(r"/title/(\d+)/unlink/?$", route_path(self))
+            if gone:
+                source = (field(form, "source_id") or "").strip()
+                if source.isdigit():
+                    found = con.execute(
+                        "SELECT item_id FROM digital_sources WHERE id = ?",
+                        (int(source),)).fetchone()
+                    if found:
+                        con.execute("DELETE FROM digital_sources"
+                                    " WHERE id = ?", (int(source),))
+                        con.execute("DELETE FROM jellyfin_links"
+                                    " WHERE item_id = ?",
+                                    (found["item_id"],))
+                        left = con.execute(
+                            "SELECT count(*) FROM digital_sources"
+                            " WHERE item_id = ?",
+                            (found["item_id"],)).fetchone()[0]
+                        item = con.execute(
+                            "SELECT format, rip_path FROM items"
+                            " WHERE id = ?",
+                            (found["item_id"],)).fetchone()
+                        if (not left and item and item["format"] == "ripped"
+                                and not item["rip_path"]):
+                            con.execute("DELETE FROM items WHERE id = ?",
+                                        (found["item_id"],))
+                        con.commit()
+                return self.respond(303, "", extra={
+                    "Location": base_path(self) + "title/%d"
+                    % int(gone.group(1))})
+            linked = re.search(r"/title/(\d+)/link/?$", route_path(self))
+            if linked:
+                wanted = (field(form, "jf_id") or "").strip()
+                chosen = (field(form, "item_id") or "").strip()
+                if wanted and chosen.isdigit():
+                    server = con.execute(
+                        "SELECT id, label FROM jellyfin_servers"
+                        " ORDER BY id LIMIT 1").fetchone()
+                    if server:
+                        name, kind, path = jellyfin.describe(con, wanted)
+                        con.execute(
+                            "INSERT INTO digital_sources (item_id,"
+                            " provider, external_id, notes, created_at,"
+                            " server_id) VALUES (?, 'jellyfin', ?, ?,"
+                            "datetime('now'), ?)",
+                            (int(chosen), wanted, server["label"],
+                             server["id"]))
+                        con.execute(
+                            "INSERT OR REPLACE INTO jellyfin_links"
+                            " (item_id, jf_id, jf_kind, jf_name,"
+                            "  jf_path, matched_by, server_id,"
+                            "  synced_at)"
+                            " VALUES (?, ?, ?, ?, ?, 'manual', ?,"
+                            " datetime('now'))",
+                            (int(chosen), wanted, kind, name, path,
+                             server["id"]))
+                        con.commit()
+                return self.respond(303, "", extra={
+                    "Location": base_path(self) + "title/%d"
+                    % int(linked.group(1))})
             base = base_path(self)
             route = route_path(self)
 

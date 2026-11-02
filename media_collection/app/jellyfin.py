@@ -788,3 +788,36 @@ def _drop_copy(con, item_id, source_id):
         con.execute("DELETE FROM jellyfin_links WHERE item_id = ?", (item_id,))
         con.execute("DELETE FROM items WHERE id = ?", (item_id,))
     return 1
+
+
+
+def search_items(con, term, limit=20):
+    """Jellyfin items matching a term, for picking a match by hand."""
+    base, key = config(con)
+    found = _call(base, key, "/Items", method="GET", params={
+        "searchTerm": term, "recursive": "true", "limit": str(limit),
+        "IncludeItemTypes": "Movie,MusicAlbum,Series,Episode",
+        "Fields": "Path,ProductionYear"})
+    rows = []
+    for item in (found or {}).get("Items") or []:
+        rows.append({
+            "id": item.get("Id") or "",
+            "name": item.get("Name") or "",
+            "kind": item.get("Type") or "",
+            "year": item.get("ProductionYear"),
+            "path": item.get("Path") or "",
+        })
+    return rows
+
+
+def describe(con, jf_id):
+    """(name, kind, path) for one Jellyfin id."""
+    base, key = config(con)
+    found = _call(base, key, "/Items", method="GET", params={
+        "ids": jf_id, "limit": "1", "Fields": "Path"})
+    items = (found or {}).get("Items") or []
+    if not items:
+        return "", "", ""
+    item = items[0]
+    return (item.get("Name") or "", (item.get("Type") or "").lower(),
+            item.get("Path") or "")

@@ -404,6 +404,24 @@ def _copies_tab(base, row, items, digital, formats, labels, users,
            _copy_fields(blank, formats, labels, "")))
     parts.append('<script>var target = document.querySelector("details.copy:target");'
                  'if (target) { target.open = true; }</script>')
+    parts.append('<p class="sub"><a href="%stitle/%d/link">Link a Jellyfin item by hand</a></p>'
+                 % (_text(base), row["id"]))
+    routes = [s for s in digital if s["provider"] == "jellyfin"]
+    if routes:
+        parts.append(
+            '<h3>Jellyfin matches</h3><ul class="routes">%s</ul>'
+            % "".join(
+                '<li><strong>%s</strong> <span class="muted">%s</span>'
+                ' <form method="post" action="%stitle/%d/unlink"'
+                ' style="display:inline">'
+                '<input type="hidden" name="source_id" value="%d">'
+                '<button type="submit">Unlink</button></form></li>'
+                % (_text(s["jf_name"] or s["notes"] or "Jellyfin"),
+                   _text(" · ".join(x for x in (s["jf_kind"],
+                                                s["jf_path"],
+                                                s["external_id"]) if x)),
+                   _text(base), row["id"], s["id"])
+                for s in routes))
     return "".join(parts)
 
 

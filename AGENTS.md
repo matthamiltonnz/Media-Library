@@ -6,7 +6,7 @@ Entry point `media_collection/app/server.py`; schema in
 `media_collection/migrations/*.sql` applied by `migrate.sh`.
 
 Version lives in `media_collection/config.yaml` and is displayed on the page
-header. Current: **0.23.38**.
+header. Current: **0.23.45**.
 
 ## Live deployment
 
@@ -385,3 +385,34 @@ Second, distinct cause, same symptom: `_name_match()` splits an album title on
 neither key, because Jellyfin credits the album to **Shihad** while the shelf
 said Pacifier. With the name reduced to the album alone (`"Pacifier"`), the
 name-only key hits and the route appears on the next sync.
+
+## Fixing a Jellyfin match by hand (0.23.45)
+
+Not every shelf title exists in Jellyfin, and not every Jellyfin item is on
+the shelf, so the automatic match is not always right.
+
+- The copies panel ends with a **Jellyfin matches** list built from the
+  `digital` rows: matched item name, `jf_kind`, `jf_path` and the external id,
+  each with an **Unlink** button (`POST /title/<id>/unlink`). Unlink deletes the
+  `digital_sources` row, its `jellyfin_links` row, and the copy itself when it
+  was a synthetic Jellyfin copy with nothing else on it. The route details come
+  from `LEFT JOIN jellyfin_links l ON l.item_id = d.item_id AND l.jf_id =
+  d.external_id` added to the title page's `digital` query.
+- `/title/<id>/link` is a search page: `jellyfin.search_items()` wraps
+  `/Items?searchTerm=…`, `jellyfin.describe()` gives name/kind/path for one id,
+  and a **Link** button posts `POST /title/<id>/link` with `jf_id` + `item_id`,
+  inserting the route (`notes` = the server label) and a `matched_by='manual'`
+  link row.
+- Both handlers sit at the top of `do_POST`, next to the artist rename, so they
+  run before the generic routing.
+
+Gotcha that cost several cycles: a `do_GET` branch must call
+`self.respond(code, page)` itself. Returning the HTML string instead sends
+**nothing** — curl reports "Empty reply from server" (status `000`) and the
+container log shows no traceback, because no exception was raised. Debugging
+prints inside the builder proved it was reached and returned ~10 KB, which is
+what pointed at the missing `respond`.
+
+Still open: browsing *media folders* (only Jellyfin search is offered), and the
+report that the catalogue's media filter is reset (to music) when coming back
+from a title.
