@@ -333,7 +333,10 @@ def after_links(path):
         "   AND NOT EXISTS (SELECT 1 FROM digital_sources d"
         "                    WHERE d.item_id = items.id AND d.provider = 'rip')"
         "   AND EXISTS (SELECT 1 FROM jellyfin_links l"
-        "                WHERE l.item_id = items.id)").rowcount
+        "                WHERE l.item_id = items.id)"
+        "   AND NOT EXISTS (SELECT 1 FROM digital_sources j"
+        "                    WHERE j.item_id = items.id"
+        "                      AND j.provider = 'jellyfin')").rowcount
     unown_rips(con)
     dropped = orphans(con)
     stray_titles(con)
