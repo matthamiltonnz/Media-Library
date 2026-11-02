@@ -57,6 +57,11 @@ def render_list(base, artists, view="grid", query="", owners=None,
     if query and not artists:
         search += ('<p class="muted">No artist matches "%s".</p>'
                    % _text(query))
+    if chosen is not None:
+        # a search from a filtered list should stay inside that owner
+        search = search.replace(
+            "</form>",
+            '<input type="hidden" name="owner" value="%d"></form>' % chosen, 1)
     if owners:
         keep = "&amp;q=" + quote(query) if query else ""
         parts = ['<a class="%s" href="%sartists?view=%s%s">Everyone</a>'
@@ -70,7 +75,9 @@ def render_list(base, artists, view="grid", query="", owners=None,
         search += '<nav class="modes owners">%s</nav>' % "".join(parts)
     toggle = ('<p class="sub"><a href="%sartists?view=%s%s">%s</a></p>'
               % (_text(base), "list" if view == "grid" else "grid",
-                 ("&q=" + quote(query)) if query else "",
+                 (("&q=" + quote(query)) if query else "")
+                 + (("&amp;owner=%d" % chosen)
+                    if chosen is not None else ""),
                  "List view" if view == "grid" else "Thumbnails"))
     head = ('<p class="sub"><a href="%s?kind=music&amp;view=grid">Back to the albums</a> · '
             '%d artist%s</p>' % (_text(base), len(artists),

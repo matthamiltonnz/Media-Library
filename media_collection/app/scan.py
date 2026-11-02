@@ -72,6 +72,9 @@ def _keys(text):
     return keys
 
 
+counted = set()
+
+
 def _listdir(path, cache):
     """One listing per folder per run, so a slow share is read once."""
     if path not in cache:
@@ -80,6 +83,10 @@ def _listdir(path, cache):
                                  if name.lower() not in SKIP_FOLDERS)
         except OSError:
             cache[path] = []
+    if path not in counted:
+        counted.add(path)
+        STATE["files"] += sum(1 for name in cache.get(path) or ()
+                              if "." in name)
     return cache[path]
 
 
@@ -383,7 +390,8 @@ def suggest(con, title_id):
 
 
 _LOCK = threading.Lock()
-STATE = {"running": False, "started": None, "finished": None, "counts": {}}
+STATE = {"running": False, "started": None, "finished": None,
+         "counts": {}, "files": 0, "folders": 0}
 
 
 def status():
@@ -394,7 +402,9 @@ def summary():
     """One line for the admin page: what the last scan found."""
     state = status()
     if state["running"]:
-        return "Scanning the media folders..."
+        return ("Scanning the media folders - %s files in %s folders"
+                " so far." % (format(state.get("files", 0), ","),
+                               format(state.get("folders", 0), ",")))
     counts = state.get("counts") or {}
     if not counts:
         return ""
@@ -412,7 +422,9 @@ def start(db_path, repair=False):
     with _LOCK:
         if STATE["running"]:
             return False
-        STATE.update({"running": True, "counts": {}, "repair": repair,
+        counted.clear()
+        STATE.update({"running": True, "counts": {},
+                      "files": 0, "repair": repair,
                       "started": time.strftime("%Y-%m-%d %H:%M:%S"),
                       "finished": None})
     threading.Thread(target=_run, args=(db_path, repair), daemon=True).start()
