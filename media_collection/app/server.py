@@ -1174,8 +1174,11 @@ class Handler(BaseHTTPRequestHandler):
             if linking:
                 term = (parse_qs(urlparse(self.path).query)
                         .get("jfq") or [""])[0].strip()
+                notice = (parse_qs(urlparse(self.path).query)
+                          .get("error") or [""])[0].strip()
                 return self.respond(200, self.link_page(
-                    con, viewer, base, int(linking.group(1)), term))
+                    con, viewer, base, int(linking.group(1)), term,
+                    notice))
             detail = re.search(r"/title/(\d+)/?$", route)
             if detail:
                 return self.title_page(con, viewer, base, int(detail.group(1)),
@@ -1192,7 +1195,7 @@ class Handler(BaseHTTPRequestHandler):
         finally:
             con.close()
 
-    def link_page(self, con, viewer, base, title_id, term=""):
+    def link_page(self, con, viewer, base, title_id, term="", notice=""):
         """Pick a Jellyfin item by hand when the automatic match missed."""
         row = con.execute("SELECT name FROM titles WHERE id = ?",
                           (title_id,)).fetchone()
@@ -1208,6 +1211,8 @@ class Handler(BaseHTTPRequestHandler):
                                        "" if len(results) == 1 else "es")
             except Exception as exc:
                 note = "Jellyfin said: %s" % exc
+        if notice:
+            note = "%s %s" % (notice, note) if note else notice
         rows = "".join(
             '<li><strong>%s</strong> <span class="muted">%s%s &#183; %s'
             '</span> <form method="post" action="%stitle/%d/link"'
@@ -1335,11 +1340,32 @@ class Handler(BaseHTTPRequestHandler):
                 if wanted:
                     # a Jellyfin copy is a copy of its own: add one
                     # rather than bolting the route onto a disc copy
+                    made, problem = None, ""
                     try:
-                        jellyfin.link_item(con, int(linked.group(1)),
-                                           wanted)
+                        made = jellyfin.link_item(con, int(linked.group(1)),
+                                                  wanted)
                     except Exception as exc:
                         print("jellyfin link failed: %s" % exc)
+                        problem = str(exc)
+                    if made is None and not problem:
+                        held = con.execute(
+                            "SELECT t.id, t.name FROM digital_sources d"
+                            " JOIN items i ON i.id = d.item_id"
+                            " JOIN titles t ON t.id = i.title_id"
+                            " WHERE d.provider = 'jellyfin'"
+                            "   AND d.external_id = ? LIMIT 1",
+                            (wanted,)).fetchone()
+                        problem = ("Not linked: %s is already linked to \"%s\""
+                                   " (#%s). Unlink it there first."
+                                   % (wanted, held["name"], held["id"])
+                                   if held else
+                                   "Not linked: %s is already linked somewhere."
+                                   % wanted)
+                    if problem:
+                        from urllib.parse import quote as _q
+                        return self.respond(303, "", extra={"Location":
+                            base_path(self) + "title/%s/link?error=%s"
+                            % (linked.group(1), _q(problem))})
                 return self.respond(303, "", extra={
                     "Location": base_path(self) + "title/%d"
                     % int(linked.group(1))})

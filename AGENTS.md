@@ -647,3 +647,34 @@ Two loose ends from 0.23.68.
 Still open: artist `image_url` is empty for every act (needs Fanart.tv or
 Wikipedia portraits), and "Link a Jellyfin item by hand" offers search only -
 there is no way to browse the server's media folders from the page.
+
+## A refused link now says why (0.23.70)
+
+Linking a Jellyfin item by hand that was already linked appeared to do nothing:
+`jellyfin.link_item()` returns **None** when a `digital_sources` row already
+holds that `(server_id, external_id)`, and `POST /title/<id>/link` ignored the
+return value. Its `except` handler was worse - it printed to the container log
+and redirected as though the link had worked. So the page reloaded unchanged,
+with no copy and no explanation.
+
+- `link_item` still returns None rather than raising (it is a query-shaped
+  outcome, not a failure), but the route now checks: on None it looks up the
+  title holding the route (`digital_sources` -> `items` -> `titles` by
+  `external_id`) and redirects to `/title/<id>/link?error=...` with
+  `Not linked: <jf_id> is already linked to "<title>" (#<id>). Unlink it there
+  first.` Any exception is surfaced the same way, with its own text.
+- `link_page()` gained `notice=""`, merged into the `note` paragraph the page
+  already used for search counts, and the GET side reads `?error=`.
+
+Verified live: posting an already-linked `external_id` returns `303` to
+`/title/1/link?error=Not linked: 0045bff2... is already linked to "The Lion
+King" (#222)...`, and that page renders the sentence.
+
+Worth knowing about the model: linking three Jellyfin items to one vinyl title
+(Minis Mixes vol. 1-3 on a 3-sided record) creates three separate `ripped`
+copies, one per item - there is no "side" concept tying them to the vinyl.
+Each link is independent, so all three can be done from the same link page.
+
+Still unexplained: *why* an item that no `digital_sources` row mentions was
+refused. The swallowed exception was hiding it; the new message will show the
+real text on the next attempt.
