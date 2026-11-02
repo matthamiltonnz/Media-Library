@@ -6,7 +6,7 @@ Entry point `media_collection/app/server.py`; schema in
 `media_collection/migrations/*.sql` applied by `migrate.sh`.
 
 Version lives in `media_collection/config.yaml` and is displayed on the page
-header. Current: **0.23.54**.
+header. Current: **0.23.55**.
 
 ## Live deployment
 
@@ -528,3 +528,11 @@ that list. A second line on the copy row saying the same thing was noise.
 Match details are looked up by `jf_id` (a subquery), not by `item_id`: a dedupe
 fold can move a route onto another copy, so the link row need not hang off the
 same item.
+
+## The scan button without media folders (0.23.55)
+
+Admin offered **Scan the media folders** even when `media_roots` was empty,
+where the job can only fail. `_scan_block(base, message, roots)` now replaces
+the button with "No media folders are set up yet …" when `render()` passes
+`len(roots) == 0`, and `POST /admin/scan` bounces back to `/admin` instead of
+starting a job that has nothing to walk.

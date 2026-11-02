@@ -156,7 +156,7 @@ def render(base, viewer, stats, message=None, refresh=None, duplicates=0,
 
     parts.append(_refresh_block(base, refresh))
     parts.append(_roots_block(base, roots))
-    parts.append(_scan_block(base, scan_message))
+    parts.append(_scan_block(base, scan_message, len(roots)))
     if jellyfin is not None:
         parts.append(_jellyfin_block(base, jellyfin))
     parts.append(_artists_block(base))
@@ -166,8 +166,15 @@ def render(base, viewer, stats, message=None, refresh=None, duplicates=0,
     return ui.page(base, "Library admin", "".join(parts))
 
 
-def _scan_block(base, message):
+def _scan_block(base, message, roots=0):
     """Re-walk the media folders so new rips pick up their titles by themselves."""
+    if not roots:
+        # nothing to walk: offering the button only produces an error
+        note = ('<p class="sub">%s</p>' % html.escape(message)
+                if message else "")
+        return ('<h2>Media folders</h2>%s'
+                '<p class="muted">No media folders are set up yet - add one below and the scan can look for rips.</p>'
+                % note)
     return """
 <h2>Media folders</h2>
 %s

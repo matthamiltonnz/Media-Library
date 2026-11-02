@@ -1408,6 +1408,13 @@ class Handler(BaseHTTPRequestHandler):
                 return self.respond(303, "", extra={"Location": where})
 
             if route.rstrip("/").endswith("/admin/scan"):
+                has_roots = con.execute(
+                    "SELECT 1 FROM media_roots LIMIT 1").fetchone()
+                if has_roots is None:
+                    # nothing to walk: bounce back rather than start a
+                    # job that can only fail
+                    return self.respond(303, "", extra={
+                        "Location": base + "admin"})
                 scan.start(DB_PATH, repair=True)
                 return self.respond(303, "", extra={"Location": base + "admin?scan=1"})
 
