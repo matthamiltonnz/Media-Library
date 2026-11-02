@@ -1015,7 +1015,10 @@ class Handler(BaseHTTPRequestHandler):
                     con.execute("SELECT * FROM media_roots ORDER BY medium, label").fetchall(),
                     jellyfin.status(con), scan.summary(),
                     players=playback.players(),
-                    chosen=playback.chosen(con))
+                    chosen=playback.chosen(con),
+                    jobs={"scan": scan.status(),
+                          "artists": artists.status(),
+                          "jellyfin": jellyfin.progress()})
                 asked = (params.get("confirm_root") or [""])[0]
                 if asked.isdigit():
                     root = con.execute("SELECT id, label FROM media_roots"

@@ -119,8 +119,9 @@ def _roots_block(base, roots):
 
 
 def render(base, viewer, stats, message=None, refresh=None, duplicates=0,
-           roots=(), jellyfin=None, scan_message="", players=(), chosen=None):
+           roots=(), jellyfin=None, scan_message="", players=(), chosen=None, jobs=None):
     parts = []
+    jobs = jobs or {}
     if message:
         parts.append('<p class="banner good">%s</p>' % html.escape(message))
 
@@ -157,12 +158,27 @@ def render(base, viewer, stats, message=None, refresh=None, duplicates=0,
     parts.append(_refresh_block(base, refresh))
     parts.append(_roots_block(base, roots))
     parts.append(_scan_block(base, scan_message, len(roots)))
+    scanned = jobs.get("scan") or {}
+    if scanned.get("running"):
+        parts.append('<p class="sub">Scanning the media folders...</p>')
+    filed = jobs.get("artists") or {}
+    if filed.get("running"):
+        parts.append('<p class="sub">Filling artist details...</p>')
     if jellyfin is not None:
         parts.append(_jellyfin_block(base, jellyfin))
+        sync = jobs.get("jellyfin") or {}
+        if sync.get("running"):
+            parts.append('<p class="sub">Syncing: %s - %d of %d copies.</p>'
+                         % (html.escape(sync.get("phase") or "working"),
+                            sync.get("done") or 0,
+                            sync.get("total") or 0))
     parts.append(_artists_block(base))
     if players:
         parts.append(_players_block(base, players, chosen))
 
+    if any((job or {}).get("running") for job in jobs.values()):
+        parts.append('<p class="sub" id="progress">Working - this page keeps itself up to date.</p>')
+        parts.append('<script>setTimeout(function () { location.reload(); }, 4000);</script>')
     return ui.page(base, "Library admin", "".join(parts))
 
 

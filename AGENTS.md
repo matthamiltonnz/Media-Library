@@ -6,7 +6,7 @@ Entry point `media_collection/app/server.py`; schema in
 `media_collection/migrations/*.sql` applied by `migrate.sh`.
 
 Version lives in `media_collection/config.yaml` and is displayed on the page
-header. Current: **0.23.55**.
+header. Current: **0.23.57**.
 
 ## Live deployment
 
@@ -536,3 +536,20 @@ where the job can only fail. `_scan_block(base, message, roots)` now replaces
 the button with "No media folders are set up yet …" when `render()` passes
 `len(roots) == 0`, and `POST /admin/scan` bounces back to `/admin` instead of
 starting a job that has nothing to walk.
+
+## Progress on the admin page (0.23.57)
+
+The three background jobs used to bounce you to a banner at the top of the page.
+`ui_admin.render(..., jobs=...)` now receives their state — the admin route
+passes `{"scan": scan.status(), "artists": artists.status(), "jellyfin":
+jellyfin.progress()}` — and shows a live line under each block, plus a
+`setTimeout(location.reload, 4000)` that only arms while something is *running*.
+
+`jellyfin.PROGRESS` is a module dict updated inside `sync_links()` (phase
+"reading the library" → "matching copies" → "done", with `done`/`total` every
+100 copies). `start_sync()` works on a **thread in the same process**, so those
+counters are visible to the web handler; a subprocess would not be.
+
+Still to do: `scan.py` and `artists.py` keep a `STATE` without `files` / `albums`
+counters, so their lines read "Scanning the media folders…" and "Filling artist
+details…" with no number.
