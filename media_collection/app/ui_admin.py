@@ -38,7 +38,7 @@ def _refresh_block(base, refresh):
     return """
 <h2>Metadata</h2>
 <p>Walks every title in the background (one at a time — Wikipedia throttles bursts)
-   and fills plot, poster, year and IMDb id. This page updates itself while it runs.</p>
+   and fills what each source has. Films and TV get plot, poster, year and IMDb id from Wikipedia/Wikidata; albums get their MusicBrainz release, year and cover art - MusicBrainz has no plot to give, so an album never gains one from here. This page updates itself while it runs.</p>
 <div id="refresh-panel" data-running="%s" data-status="%sadmin/status.json">
   <p id="refresh-state">%s</p>
   <p id="refresh-last" class="muted">%s</p>
