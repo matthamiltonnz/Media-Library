@@ -1134,7 +1134,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def title_page(self, con, viewer, base, title_id, summary=None, error=None,
                    owner=None):
-        row = con.execute("SELECT * FROM titles WHERE id = ?", (title_id,)).fetchone()
+        row = con.execute(
+            "SELECT t.*, a.name AS artist_name FROM titles t"
+            "  LEFT JOIN artists a ON a.id = t.artist_id"
+            " WHERE t.id = ?", (title_id,)).fetchone()
         if row is None:
             return self.respond(404, "No such title", "text/plain; charset=utf-8")
         items = con.execute(

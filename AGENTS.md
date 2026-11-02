@@ -6,7 +6,7 @@ Entry point `media_collection/app/server.py`; schema in
 `media_collection/migrations/*.sql` applied by `migrate.sh`.
 
 Version lives in `media_collection/config.yaml` and is displayed on the page
-header. Current: **0.23.23**.
+header. Current: **0.23.26**.
 
 ## Live deployment
 
@@ -261,3 +261,41 @@ four titles looked like duplicates when they were simply unreadable.
 - Swapping two `%s` arguments in the Play form put the version `<select>`
   inside the device `<select>`; the page then showed the versions as bare
   text with no control. Positional `%` formatting bites here repeatedly.
+
+## Music: artist is its own field (0.23.26)
+
+`titles.artist_id` → `artists(id, name)` has existed for a while and every one
+of the 545 music titles carries it, but `titles.name` still held
+"Artist — Album" (`artists.SEPARATOR = " — "`), so the page showed the artist
+twice and the form had no way to change it.
+
+- `migrations/0020_music_album_name.sql` strips the "<artist> — " prefix from
+  music names (544 rows; each was verified to start with its artist's name).
+- `_facts()` appends `row["artist_name"]` when the title query provides it, and
+  the title page now selects `t.*, a.name AS artist_name … LEFT JOIN artists`.
+- `_title_form` has an `Artist` input, which the save handler already fed to
+  `artists.link(con, title_id, field(form, "artist"))` — the field was simply
+  never rendered before.
+- `artists.link_all()` only touches titles with `artist_id IS NULL`, so the
+  split names are not re-derived or lost.
+- Jellyfin album routes are matched by **directory path** (`jellyfin.py` ~182,
+  `by_dir[...]`), not by title name, so renaming titles does not unlink music.
+
+Side effect worth knowing: with generic album names now matching on their own
+("IGOR", "Good"), three music titles hold two Jellyfin items each — albums by
+*different* artists that share a name. They cannot be told apart by year
+(music titles have none). The fix, not yet done, is to require the artist to
+agree — the artist name appears in the source path
+(`…/Tyler, The Creator/IGOR/…`), so `dedupe_versions` could compare it against
+`titles.artist_id`'s artist before keeping a route.
+
+### Two deployment traps hit here
+
+- `UPDATE titles SET … FROM artists a WHERE a.id = titles.artist_id` fails with
+  "ambiguous column name: name" even when every reference is qualified as
+  `titles.name`: SQLite resolves `SET name` against both tables. Use a
+  correlated subquery with no FROM clause instead.
+- A migration error leaves the add-on **Exited (1)** and `ha apps update` keeps
+  reporting the new `version_latest`; the container has to be started again
+  (`ha apps start local_media_collection` with `SUPERVISOR_TOKEN`) once the
+  migration is fixed.

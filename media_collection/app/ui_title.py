@@ -29,6 +29,8 @@ def _facts(row):
         bits.append(str(row["release_year"]))
     if row["kind"]:
         bits.append(KIND_LABELS.get(row["kind"], row["kind"]))
+    if "artist_name" in row.keys() and row["artist_name"]:
+        bits.append(row["artist_name"])
     if row["runtime_minutes"]:
         bits.append("%d min" % row["runtime_minutes"])
     if row["genres"]:
@@ -425,12 +427,15 @@ def _title_form(base, row):
 <form method="post" action="%stitle/%d">
   <div class="grid">
     <label>Name<input name="name" value="%s"></label>
+    <label>Artist<input name="artist" value="%s"></label>
     <label>Year<input name="release_year" value="%s"></label>
     <label>Kind<select name="kind">%s</select></label>%s
   </div>
   <p><button type="submit">Save title</button></p>
 </form>""" % (_text(base), row["id"], _text(row["name"]),
-             _text(row["release_year"] or ""), options, ids)
+             _text(row["artist_name"] if "artist_name" in row.keys()
+                   else ""), _text(row["release_year"] or ""),
+             options, ids)
 
 
 def _art_block(base, row, jellyfin_link):
