@@ -1126,13 +1126,35 @@ class Handler(BaseHTTPRequestHandler):
                 want = (asked.get("view") or ["grid"])[0]
                 search = (asked.get("q") or [""])[0].strip()
                 rows = artists.all_artists(con, viewer["id"])
+                owner_rows, owner_id = [], None
+                if asked.get("owner"):
+                    try:
+                        owner_id = int(asked["owner"][0])
+                    except ValueError:
+                        owner_id = None
+                tally = {}
+                for row in rows:
+                    for oid in set((row["owner_ids"] or "").split(",")):
+                        if oid:
+                            tally[oid] = tally.get(oid, 0) + 1
+                if tally:
+                    who = dict(con.execute(
+                        "SELECT id, display_name FROM users").fetchall())
+                    owner_rows = [
+                        {"id": int(oid), "name": who.get(int(oid), "Unknown"),
+                         "count": n}
+                        for oid, n in sorted(tally.items(), key=lambda kv: -kv[1])]
+                if owner_id is not None:
+                    rows = [row for row in rows
+                            if str(owner_id) in (row["owner_ids"] or "").split(",")]
                 if search:
                     needle = search.lower()
                     rows = [row for row in rows
                             if needle in (row["name"] or "").lower()]
                 return self.respond(200, ui_artists.render_list(
                     base, rows,
-                    "grid" if want == "grid" else "list", search))
+                    "grid" if want == "grid" else "list", search,
+                    owner_rows, owner_id))
 
             match = re.search(r"/artist/(\d+)/?$", route)
             if match:

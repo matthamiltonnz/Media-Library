@@ -41,7 +41,8 @@ def album_name(title_name, artist_name):
     return title_name or ""
 
 
-def render_list(base, artists, view="grid", query=""):
+def render_list(base, artists, view="grid", query="", owners=None,
+                chosen=None):
     """Every act with albums held, as a table or as a wall of covers."""
     from urllib.parse import quote
     search = ('<form method="get" action="%sartists" class="sub">'
@@ -56,6 +57,17 @@ def render_list(base, artists, view="grid", query=""):
     if query and not artists:
         search += ('<p class="muted">No artist matches "%s".</p>'
                    % _text(query))
+    if owners:
+        keep = "&amp;q=" + quote(query) if query else ""
+        parts = ['<a class="%s" href="%sartists?view=%s%s">Everyone</a>'
+                 % ("" if chosen is None else "current", _text(base), view,
+                    keep)]
+        parts += ['<a class="%s" href="%sartists?view=%s&amp;owner=%d%s">%s'
+                  '<span class="n">%d</span></a>'
+                  % ("current" if chosen == row["id"] else "", _text(base),
+                     view, row["id"], keep, _text(row["name"]), row["count"])
+                  for row in owners]
+        search += '<nav class="modes owners">%s</nav>' % "".join(parts)
     toggle = ('<p class="sub"><a href="%sartists?view=%s%s">%s</a></p>'
               % (_text(base), "list" if view == "grid" else "grid",
                  ("&q=" + quote(query)) if query else "",
@@ -156,5 +168,13 @@ def render_artist(base, artist, titles, labels, view="grid"):
 
 
 def _formats(row, labels):
-    return ", ".join(labels.get(fmt, fmt)
-                     for fmt in (row["formats"] or "").split(",") if fmt)
+    """The formats on the shelf, with a play mark instead of "Ripped
+    file": a ripped copy is a Jellyfin route, and saying so in words
+    on every album card was noise."""
+    raw = [fmt for fmt in (row["formats"] or "").split(",") if fmt]
+    shown = [labels.get(fmt, fmt) for fmt in raw if fmt != "ripped"]
+    text = ", ".join(shown)
+    if "ripped" in raw:
+        mark = '▶'   # escaped by _text(), so a glyph, not a span
+        text = text + " " + mark if text else mark
+    return text

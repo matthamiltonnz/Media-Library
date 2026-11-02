@@ -593,3 +593,34 @@ that exists only on the server - that would be a separate feature.
 Verified live: `Fill artist details` appears once on `/admin`, the artists block
 is heading plus summary (102 chars, no form), and the forms are
 `['/admin/refresh', 'admin/artists', ...]`.
+
+## Album cards and the artists page (0.23.68)
+
+An album card under an artist used to read "1999 - CD, Ripped file". Two
+problems: "Ripped file" is how a Jellyfin route is spelled in `items.format`,
+not news worth printing on 545 cards; and the artist list had no owner filter,
+unlike the catalogue.
+
+- `_formats(row, labels)` in `ui_artists.py` drops `ripped` from the format list
+  and appends a play glyph when the row has one. Both the grid caption and the
+  list view use it. "Ripped" here means "playable", which is what `has_rip`
+  tests on the catalogue grid (provider `rip` or `jellyfin`) - not the "is this
+  a file?" question of invariant 1, so testing `format` is right in this place.
+- The glyph is a bare U+25B6, not `<span class="playmark">`: the caption is
+  wrapped in `_text()` (which escapes), so a span arrived on the page as
+  `&lt;span class=&quot;playmark&quot;`. Use the span only where the markup is
+  not escaped - the catalogue grid builds its own HTML.
+- `artists.all_artists()` gained `owner_ids` (a `group_concat(DISTINCT
+  i4.owner_id)` subquery), `render_list()` takes `owners`/`chosen` and renders
+  the same `nav.modes.owners` chips the catalogue uses, and the `/artists`
+  branch counts artists per owner in Python and filters on `?owner=`. Live:
+  Ripped files 242, Jeanine 13, Mitchell 12; `?owner=5` -> 13 artists with the
+  chip marked current.
+
+Trap hit here: `patch144.py` died on an `assert` in its second step, so its
+third step never ran - but the first step had already written `artists.py`. The
+container was then rebuilt with a new `artists.py` and a **stale** `server.py`,
+and `/artists` rendered 257 artists with no chips. `grep -c owner_ids /app/*.py`
+showed `server.py:0`; a local grep for `owner_rows` had looked right (3 hits)
+because the catalogue's own owner chips use that same name. When a patch script
+touches several files, verify **each** file on the box.

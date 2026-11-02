@@ -87,6 +87,9 @@ def all_artists(con, viewer_id):
     return con.execute(
         "SELECT a.*, COUNT(t.id) AS albums,"
         " MIN(t.release_year) AS first_year, MAX(t.release_year) AS last_year,"
+        " (SELECT group_concat(DISTINCT i4.owner_id) FROM titles t4"
+        "    JOIN items i4 ON i4.title_id = t4.id"
+        "   WHERE t4.artist_id = a.id) AS owner_ids,"
         " (SELECT l.jf_id FROM titles t2"
         "    JOIN items i2 ON i2.title_id = t2.id"
         "    JOIN jellyfin_links l ON l.item_id = i2.id"
