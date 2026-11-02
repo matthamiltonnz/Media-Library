@@ -1435,9 +1435,9 @@ class Handler(BaseHTTPRequestHandler):
 
             if route.rstrip("/").endswith("/admin/artists"):
                 artists.start(DB_PATH)
+                # no banner: the admin page shows the job running inline
                 return self.respond(303, "", extra={
-                    "Location": base + "admin?artists="
-                    + quote("Filling artist details from MusicBrainz.")})
+                    "Location": base + "admin"})
 
                 if field(form, "clear"):
                     playback.choose(con, [])

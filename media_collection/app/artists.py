@@ -144,31 +144,50 @@ def main(argv=None):
 
 
 def enrich(con, limit=None):
-    """Fill in the MusicBrainz id (country, formed year) for artists without one."""
+    """Fill in what MusicBrainz knows about each act: id, country, start year.
+
+    It used to look only at artists with *no* MusicBrainz id, which on this
+    shelf meant six rows and, when their lookups missed, a job that filled
+    nothing. It now also tops up the blanks on acts that already have an id.
+    """
     import metadata
 
     rows = con.execute(
-        "SELECT id, name FROM artists WHERE musicbrainz_id IS NULL"
+        "SELECT id, name, musicbrainz_id, country, formed_year FROM artists"
+        " WHERE musicbrainz_id IS NULL OR country IS NULL"
+        "    OR formed_year IS NULL"
         " ORDER BY name").fetchall()
     filled = 0
     for row in rows:
         if limit is not None and filled >= limit:
             break
+        mbid = row["musicbrainz_id"]
         try:
-            found = metadata.musicbrainz_artist(row["name"])
-        except metadata.Throttle:
-            break                              # come back to it later
+            if not mbid:
+                looked = metadata.musicbrainz_artist(row["name"])
+                if not looked:
+                    continue
+                mbid = looked.get("mbid") or looked.get("id")
+                if not mbid:
+                    continue
+            details = metadata.musicbrainz_artist_by_id(mbid) or {}
         except Exception:
             continue
-        if not found:
-            continue
-        con.execute(
-            "UPDATE artists SET musicbrainz_id = ?, country = ?,"
-            " formed_year = ?, overview = COALESCE(overview, ?) WHERE id = ?",
-            (found["mbid"], found["country"], found["formed_year"],
-             found["note"], row["id"]))
+        updates, values = [], []
+        if not row["musicbrainz_id"]:
+            updates.append("musicbrainz_id = ?")
+            values.append(mbid)
+        if not row["country"] and details.get("country"):
+            updates.append("country = ?")
+            values.append(details["country"])
+        if not row["formed_year"] and details.get("year"):
+            updates.append("formed_year = ?")
+            values.append(details["year"])
+        if updates:
+            con.execute("UPDATE artists SET %s WHERE id = ?"
+                        % ", ".join(updates), values + [row["id"]])
+            filled += 1
         con.commit()
-        filled += 1
     return filled
 
 

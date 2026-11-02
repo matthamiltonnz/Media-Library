@@ -549,3 +549,19 @@ def refresh(con, title_id):
         message = ("%s not found in Wikidata - matched by name and year instead. %s"
                    % (" and ".join(unresolved), message))
     return message
+
+
+
+def musicbrainz_artist_by_id(mbid):
+    """One act by its MusicBrainz id: name, country, the year it started."""
+    found = _get("%s/artist/%s?fmt=json" % (MB_ROOT, mbid))
+    if not found or found.get("error"):
+        return None
+    life = found.get("life-span") or {}
+    begin = (life.get("begin") or "")[:4]
+    return {
+        "mbid": found.get("id") or mbid,
+        "name": found.get("name") or "",
+        "country": found.get("country"),
+        "year": int(begin) if begin.isdigit() else None,
+    }
