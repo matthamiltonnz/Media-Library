@@ -315,9 +315,11 @@ def sync_links(con, log=print, server=None):
         jf_name, jf_path = index["details"].get(jf_id, ("", ""))
         con.execute(
             "INSERT OR REPLACE INTO jellyfin_links"
-            " (item_id, jf_id, jf_kind, jf_name, jf_path, matched_by, synced_at)"
-            " VALUES (?, ?, ?, ?, ?, ?, datetime('now'))",
-            (row["item_id"], jf_id, jf_kind, jf_name, jf_path, matched_by))
+            " (item_id, jf_id, jf_kind, jf_name, jf_path, matched_by,"
+            "  server_id, synced_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))",
+            (row["item_id"], jf_id, jf_kind, jf_name, jf_path,
+             matched_by, server["id"]))
     con.commit()
     log("jellyfin: %(copies)d copies, %(by_path)d by path, %(by_name)d by name,"
         " %(unmatched)d unmatched" % stats)

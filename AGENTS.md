@@ -6,7 +6,7 @@ Entry point `media_collection/app/server.py`; schema in
 `media_collection/migrations/*.sql` applied by `migrate.sh`.
 
 Version lives in `media_collection/config.yaml` and is displayed on the page
-header. Current: **0.23.37**.
+header. Current: **0.23.38**.
 
 ## Live deployment
 
@@ -367,3 +367,21 @@ redirects to `/title/<id>` with no query and no useful referer, and the browser
 sends the cookie with that redirect, so the Back link still carries the view
 the viewer came from. `title_page()` takes no `back` argument — it computes it;
 passing one raises `TypeError` and the connection simply drops.
+
+## Why a title had no Jellyfin copy (0.23.38)
+
+`sync_links()` wrote `jellyfin_links` **without `server_id`**, while
+`materialise()` selects its rows with `WHERE l.server_id = ?`. Result: the sync
+reported thousands of matches and created no copies at all, and a title could
+sit there with only its disc copy while Jellyfin plainly held the album. The
+insert now carries `server["id"]` — the same missing-FK regression as the
+0.22.x `digital_sources` one, in the other table. Check
+`SELECT count(*), count(server_id) FROM jellyfin_links` first when copies
+stop appearing.
+
+Second, distinct cause, same symptom: `_name_match()` splits an album title on
+`" — "` and looks for `(album, artist, album)` before falling back to
+`(album, "", name)`. A title still named `"Pacifier — Pacifier"` matched
+neither key, because Jellyfin credits the album to **Shihad** while the shelf
+said Pacifier. With the name reduced to the album alone (`"Pacifier"`), the
+name-only key hits and the route appears on the next sync.
