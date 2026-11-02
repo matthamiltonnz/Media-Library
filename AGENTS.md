@@ -624,3 +624,26 @@ and `/artists` rendered 257 artists with no chips. `grep -c owner_ids /app/*.py`
 showed `server.py:0`; a local grep for `owner_rows` had looked right (3 hits)
 because the catalogue's own owner chips use that same name. When a patch script
 touches several files, verify **each** file on the box.
+
+## Filters survive the artists page too, and the scan counts (0.23.69)
+
+Two loose ends from 0.23.68.
+
+- `render_list()`'s **view toggle** now carries `owner` as well as `q`
+  (`/artists?view=list&amp;owner=5&amp;q=dido`), so switching between the grid
+  and the table no longer drops you back to every act. The search box gets a
+  hidden `name="owner"` input inserted by string surgery on the finished form
+  (`search.replace("</form>", ...)`) when a filter is active - a GET form
+  **replaces** its action's query string with the submitted fields, so the owner
+  cannot ride on `action="%sartists?owner=N"`. The little *clear* link beside the
+  box still drops `owner` on purpose: it is there to widen the view again.
+- `scan.STATE` gained `files` and `folders`, counted in `_listdir()` (a
+  module-level `counted` set keeps a cached listing from being counted twice,
+  and `start()` clears it). `summary()` reads "Scanning the media folders -
+  1,234 files in 56 folders so far." while a scan runs, so the admin line is no
+  longer a numberless "Scanning...". Verified by setting `scan.STATE` by hand
+  rather than by walking the real shares.
+
+Still open: artist `image_url` is empty for every act (needs Fanart.tv or
+Wikipedia portraits), and "Link a Jellyfin item by hand" offers search only -
+there is no way to browse the server's media folders from the page.
