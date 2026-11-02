@@ -158,7 +158,9 @@ def enrich(con, limit=None):
         "    OR formed_year IS NULL OR kind IS NULL"
         " ORDER BY name").fetchall()
     filled = 0
-    for row in rows:
+    _STATE.update(running=True, done=0, total=len(rows), filled=0)
+    for seen, row in enumerate(rows, 1):
+        _STATE["done"] = seen
         if limit is not None and filled >= limit:
             break
         mbid = row["musicbrainz_id"]
@@ -190,7 +192,9 @@ def enrich(con, limit=None):
             con.execute("UPDATE artists SET %s WHERE id = ?"
                         % ", ".join(updates), values + [row["id"]])
             filled += 1
+            _STATE["filled"] = filled
         con.commit()
+    _STATE["running"] = False
     return filled
 
 

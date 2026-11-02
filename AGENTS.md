@@ -6,7 +6,7 @@ Entry point `media_collection/app/server.py`; schema in
 `media_collection/migrations/*.sql` applied by `migrate.sh`.
 
 Version lives in `media_collection/config.yaml` and is displayed on the page
-header. Current: **0.23.57**.
+header. Current: **0.23.61**.
 
 ## Live deployment
 
@@ -550,6 +550,12 @@ jellyfin.progress()}` — and shows a live line under each block, plus a
 100 copies). `start_sync()` works on a **thread in the same process**, so those
 counters are visible to the web handler; a subprocess would not be.
 
-Still to do: `scan.py` and `artists.py` keep a `STATE` without `files` / `albums`
-counters, so their lines read "Scanning the media folders…" and "Filling artist
-details…" with no number.
+The artist fill now counts: `enrich()` sets `_STATE` to
+`running/done/total/filled` and the admin line reads
+"Filling artist details - 9 of 186 acts, 7 filled." Its form posts and then
+redirects to `admin#artists`, and `_artists_block` carries `id="artists"`, so
+clicking it no longer throws you to the top of the page (a plain 303 to
+`/admin` does exactly that — the browser starts a fresh page at the top).
+
+Still to do: `scan.py`'s `STATE` has no `files` counter, so its line reads
+"Scanning the media folders…" with no number.

@@ -1435,9 +1435,9 @@ class Handler(BaseHTTPRequestHandler):
 
             if route.rstrip("/").endswith("/admin/artists"):
                 artists.start(DB_PATH)
-                # no banner: the admin page shows the job running inline
+                # no banner, and no jump to the top: land on the block
                 return self.respond(303, "", extra={
-                    "Location": base + "admin"})
+                    "Location": base + "admin#artists"})
 
                 if field(form, "clear"):
                     playback.choose(con, [])

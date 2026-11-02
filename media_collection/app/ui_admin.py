@@ -163,7 +163,10 @@ def render(base, viewer, stats, message=None, refresh=None, duplicates=0,
         parts.append('<p class="sub">Scanning the media folders...</p>')
     filed = jobs.get("artists") or {}
     if filed.get("running"):
-        parts.append('<p class="sub">Filling artist details...</p>')
+        parts.append('<p class="sub">Filling artist details - %d of %d acts, %d filled.</p>'
+                         % (filed.get("done") or 0,
+                            filed.get("total") or 0,
+                            filed.get("filled") or 0))
     if jellyfin is not None:
         parts.append(_jellyfin_block(base, jellyfin))
         sync = jobs.get("jellyfin") or {}
@@ -208,7 +211,7 @@ def _artists_block(base):
     import artists
 
     state = artists.summary()
-    return """<h2>Artists</h2>
+    return """<h2 id="artists">Artists</h2>
 <p class="sub">%s</p>
 <form method="post" action="%sadmin/artists">
   <p><button type="submit">Fill artist details</button>
