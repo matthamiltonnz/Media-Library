@@ -1597,3 +1597,42 @@ title row in a database whose live original has none, which nearly sent me
 chasing a data-loss bug that does not exist. Use `VACUUM INTO '/tmp/x.db'` and
 check `PRAGMA integrity_check` before believing anything a copy says.
 
+
+## An owner filter narrows the card too (0.23.101)
+
+Filtering the catalogue by owner already narrowed the titles *and* the copy
+tally - Mitchell shows "158 titles · 183 copies", and 183 is exactly his own
+movie copies (every copy of those 158 titles would be 315) - but each card's
+format line came from a subquery in `render_index` that ignored the filter:
+
+```
+(SELECT group_concat(DISTINCT ai.format) FROM items ai
+  WHERE ai.title_id = t.id
+    AND (ai.visibility = 'shared' OR ai.owner_id = ?))
+```
+
+So *A Clockwork Orange* - Mitchell's 4K, Matt's digital - read
+"1971 · 4K Blu-ray · Digital" on Mitchell's page. The subquery is now spliced
+with `fmt_owner = " AND ai.owner_id = ?" if owner else ""`.
+
+Trap: the card query's placeholders are read in **text** order, and the SELECT
+list comes before the WHERE clause, so the params are
+
+```
+[viewer["id"]] + fmt_owner_params + [viewer["id"]] + extra
+```
+
+- the fmt_list viewer id, the owner, then the clause's own viewer id (which
+  `visible_clause` leaves for the caller to supply). Putting the owner after
+  the second viewer id binds it to the visibility test instead and silently
+  lists the wrong copies.
+
+`has_rip` (the play mark) is deliberately **not** owner-scoped: a Jellyfin route
+belongs to the `rips` account, so scoping it would clear the mark from every
+title the moment an owner filter is applied.
+
+Verified on a `VACUUM INTO` copy: owner=7 -> 158 titles · 183 copies and
+"1971 · 4K Blu-ray"; owner=2 -> 514 · 566 and "1971 · Digital";
+owner=7&format=uhd_4k -> 136 · 161, matching that pill exactly; unfiltered
+unchanged at 636 · 754 and "4K Blu-ray · Digital".
+

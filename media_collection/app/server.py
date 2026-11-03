@@ -827,6 +827,14 @@ def render_index(con, viewer, base, error=None, query="",
                                        only)
         fmt_wanted = [f for f in (format or "").split(",") if f]
 
+        # An owner filter narrows the copies a title is judged by, so the card's
+        # format line has to narrow with them: Mitchell's 4K must not be
+        # captioned with Matt's digital copy of the same film. The play mark is
+        # left title-wide on purpose - a Jellyfin route belongs to the
+        # household, not to whichever copy the viewer is looking at.
+        fmt_owner = " AND ai.owner_id = ?" if owner else ""
+        fmt_owner_params = [int(owner)] if owner else []
+
         cards = con.execute(
             "SELECT t.id, t.name, t.release_year, t.poster_url, t.kind,"
             " COALESCE(t.art_source, '') AS art_source,"
@@ -842,14 +850,15 @@ def render_index(con, viewer, base, error=None, query="",
             "   WHERE ri.title_id = t.id AND rd.provider IN ('rip', 'jellyfin')"
             "   LIMIT 1) AS has_rip,"
 
-            # every format the title holds, not just the ones being filtered
+            # the formats these copies hold - fmt_owner narrows it to the owner
             " (SELECT group_concat(DISTINCT ai.format) FROM items ai"
             "   WHERE ai.title_id = t.id"
-            "     AND (ai.visibility = 'shared' OR ai.owner_id = ?)) AS formats"
+            "     AND (ai.visibility = 'shared' OR ai.owner_id = ?)"
+            + fmt_owner + ") AS formats"
             " FROM titles t JOIN items i ON i.title_id = t.id"
             " WHERE " + clause +
             " GROUP BY t.id ORDER BY t.name COLLATE NOCASE",
-            [viewer["id"], viewer["id"]] + extra).fetchall()
+            [viewer["id"]] + fmt_owner_params + [viewer["id"]] + extra).fetchall()
         library = '<div class="cards">%s</div>' % ("".join(
             '<a class="card" href="{0}title/{1}{5}">{2}'
             '<div class="cap"><strong>{3}</strong><span class="muted">{4}</span></div></a>'
