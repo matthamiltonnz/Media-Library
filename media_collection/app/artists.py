@@ -121,7 +121,9 @@ def titles_for(con, artist_id, viewer_id):
         " FROM titles t JOIN items i ON i.title_id = t.id"
         " WHERE t.artist_id = ? AND t.kind = 'music'"
         " AND (i.visibility = 'shared' OR i.owner_id = ?)"
-        " GROUP BY t.id ORDER BY t.release_year, t.name COLLATE NOCASE",
+        " GROUP BY t.id ORDER BY t.release_year,"
+        " COALESCE(NULLIF(t.sort_name, ''), t.name) COLLATE NOCASE,"
+        " t.name COLLATE NOCASE",
         (artist_id, viewer_id)).fetchall()
 
 

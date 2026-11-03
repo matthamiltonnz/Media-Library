@@ -1722,3 +1722,35 @@ sources = "".join('<a …>%s</a>' … for item in found)
 and nothing in the markup separated them. It is `" \u00b7 ".join(…)` now, the
 same ` · ` separator the info line above it uses ("NZ · born 1976").
 
+
+## Titles file without their article (0.23.105)
+
+`titles.sort_name` had been in the schema since 0001 and was **NULL on all 1182
+rows**, so the catalogue ordered by `t.name`: "The Abyss" and "The A-Team" filed
+under T, while the act list had always put "The Beatles" under B through
+`artists.sort_name` ("The Beatles" -> "Beatles, The").
+
+- `migrations/0025_title_sort_name.sql` fills the column with the same
+  convention - The/A/An move to the end - and adds `titles_sort_name_on_insert`
+  and `titles_sort_name_on_rename` (`AFTER UPDATE OF name`, so the migration's
+  own UPDATE cannot fire it and a re-save that keeps the name is left alone).
+  Every writer is covered without touching Python: `add_item`,
+  `film_import`, `tv_import`, `music_import` (none of them mention the column),
+  and both rename paths (`normalise.py`, the title form).
+- `library_rows` and `render_index`'s card query order by
+  `COALESCE(NULLIF(t.sort_name, ''), t.name) COLLATE NOCASE, t.name COLLATE
+  NOCASE`; `artists.albums` uses the same key as the tie-break within a year.
+- Nothing renders `sort_name` - it is a key, not a name, so the page still says
+  "The Abyss".
+
+Live: 197 of 1182 titles moved. The film grid now reads 10,000 B.C., 12 Monkeys,
+127 Hours, 2 Fast 2 Furious, 2001 …, then Abraham Lincoln: Vampire Hunter,
+**The Abyss**, Ace Ventura, and the first four "The" cards are The Abyss, The
+Adventures of Tintin, The Amazing Spider-Man 2, The Amazing Spider-Man. The act
+list is unchanged at 1 Giant Leap, ABBA, Adele … with The Beths at the B's.
+
+Trap: a card's play mark sits **inside** `<strong>`, so scraping titles with
+`<strong>([^<]*)</strong>` silently misses every playable title - it looked as
+though "The Abyss" was missing from the page. Split on the mark, or strip the
+trailing space.
+

@@ -208,7 +208,10 @@ def library_rows(con, viewer_id, query="", kind="", owner=None, format=""):
         params += discs
     if any_of:
         sql += " AND (" + " OR ".join(any_of) + ")"
-    sql += " ORDER BY t.name COLLATE NOCASE, i.format"
+    # a leading "The"/"A"/"An" moves to the end of the key (0025_title_sort_name),
+    # so "The A-Team" files under A, the way artists.sort_name already did
+    sql += (" ORDER BY COALESCE(NULLIF(t.sort_name, ''), t.name) COLLATE NOCASE,"
+            " t.name COLLATE NOCASE, i.format")
     return con.execute(sql, params).fetchall()
 
 
@@ -857,7 +860,8 @@ def render_index(con, viewer, base, error=None, query="",
             + fmt_owner + ") AS formats"
             " FROM titles t JOIN items i ON i.title_id = t.id"
             " WHERE " + clause +
-            " GROUP BY t.id ORDER BY t.name COLLATE NOCASE",
+            " GROUP BY t.id ORDER BY COALESCE(NULLIF(t.sort_name, ''), t.name)"
+            " COLLATE NOCASE, t.name COLLATE NOCASE",
             [viewer["id"]] + fmt_owner_params + [viewer["id"]] + extra).fetchall()
         library = '<div class="cards">%s</div>' % ("".join(
             '<a class="card" href="{0}title/{1}{5}">{2}'
