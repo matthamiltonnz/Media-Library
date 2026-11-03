@@ -1708,3 +1708,17 @@ title Matt can see, and `POST /title/573/jellyfin` answers 200 carrying that
 sentence in the banner instead of "Sent to Jellyfin" - no play command reaches
 the device.
 
+
+## The "Read more" links had no gap (0.23.104)
+
+Every artist page with a biography ended in `Read more:
+WikipediaWikidataMusicBrainzDiscogs` - four underlined links run together,
+which reads as one long word. `render_artist()` built them with
+
+```python
+sources = "".join('<a …>%s</a>' … for item in found)
+```
+
+and nothing in the markup separated them. It is `" \u00b7 ".join(…)` now, the
+same ` · ` separator the info line above it uses ("NZ · born 1976").
+

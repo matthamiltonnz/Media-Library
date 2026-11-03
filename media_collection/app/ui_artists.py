@@ -129,9 +129,9 @@ def render_artist(base, artist, titles, labels, view="grid",
                  if item.get("url")]
     except (ValueError, AttributeError):
         found = []
-    sources = "".join('<a href="%s" target="_blank" rel="noopener">%s</a>'
-                      % (_text(item["url"]), _text(item.get("label") or "link"))
-                      for item in found)
+    sources = " \u00b7 ".join('<a href="%s" target="_blank" rel="noopener">%s</a>'
+                             % (_text(item["url"]), _text(item.get("label") or "link"))
+                             for item in found)
     linked = set(item.get("label") or "" for item in found)
 
     info = []
