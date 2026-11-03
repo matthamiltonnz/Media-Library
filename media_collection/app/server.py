@@ -259,7 +259,12 @@ def library_stats(con, viewer_id, query="", kind="", owner=None,
     clause, extra = visible_clause(query, kind, owner, format, only)
     params = [viewer_id] + extra
     base = ("FROM items i JOIN titles t ON t.id = i.title_id WHERE " + clause)
-    counted = base  # every copy counts, however it is stored
+    # A file is spelled format='ripped' whatever it came from - a Jellyfin route
+    # (no rip_path) or a rip on disk (rip_path set) - and it is the same copy as
+    # its disc, not a second one. It must not pad the tally, which would then
+    # disagree with the format pills below (they leave "ripped" out). Titles
+    # still come from `base`, so a title holding only a route is listed.
+    counted = base + " AND (i.format IS NULL OR i.format <> 'ripped')"
     titles = con.execute("SELECT COUNT(DISTINCT t.id) " + base, params).fetchone()[0]
     copies = con.execute("SELECT COUNT(*) " + counted, params).fetchone()[0]
     # one entry per stored format: a file is "ripped" whatever disc it came from

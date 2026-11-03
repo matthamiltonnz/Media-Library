@@ -1480,7 +1480,8 @@ The catalogue hid titles whose every copy is a file (`RIP_ONLY`) and left those
 copies out of the headline counts (`RIP_COPY`), with a link under the tallies -
 *Include ripped files* - to lift both. It was there for the first library import,
 which arrived as a wall of files, and it has been removed: every title is listed
-and every copy counts.
+and every copy counts. (The copy count went back to ignoring files in 0.23.100
+- see *Files are not counted* at the end of this file.)
 
 What went with it, in `render_index` / `library_rows` / `library_stats` /
 `visible_clause` and the `PAGE` template: the `rips` query parameter, the `rips=`
@@ -1560,4 +1561,39 @@ box. Adding `image: ghcr.io/<owner>/media-collection-{arch}` plus a
 `home-assistant/builder` workflow would fix that, but only once the workflow
 really publishes - a config that points at an image that is not there is worse
 than a build.
+
+
+## Files are not counted (0.23.100)
+
+0.23.98 removed the whole *Include ripped files* mechanism and left `counted =
+base` in `library_stats`, so the catalogue's headline counted **every**
+`format='ripped'` copy - 978 on the live shelf, 466 of them on films - while the
+format pills underneath it still skipped them (`for row in formats if
+row["fmt"] != "ripped"`). The film view read "636 titles · 1220 copies" above
+pills that added up to 754, which is how it was spotted.
+
+- `counted` is `base + " AND (i.format IS NULL OR i.format <> 'ripped')"`
+  again, so the tally and the pills agree: films **754**, music **547**, the
+  whole shelf **1305** (it read 2283).
+- `titles` still comes from `base`, so a title holding only a route stays in
+  the catalogue and can still be played. Keeping every title listed was the
+  half of 0.23.98 worth keeping; counting its files as copies was not.
+- A ripped **file** (`format='ripped'` with `rip_path` set) is excluded too, on
+  purpose: it is its disc's file, not a second copy. None exist live
+  (`itunes` 167 + `jellyfin` 978 routes, no `provider='rip'` rows).
+- The pill loop's `if row["fmt"] != "ripped"` is now redundant, and kept only
+  because it documents the intent.
+
+Verified on a `VACUUM INTO` copy of the live database: `library_stats` gives
+1182 titles / 1305 copies for the whole shelf, 636 / 754 for films and 542 /
+547 for music, and in each case the format rows add up to the copy count;
+`render_index` renders "636 titles · 754 copies"; `?format=bluray` gives 195
+titles · 197 copies (191 of them films, matching that pill).
+
+Trap: `sqlite3 /data/media.db ".backup /tmp/x.db"` streamed out of the container
+gave a file that was the right size, answered queries, and failed
+`PRAGMA integrity_check` (*Rowid out of order*) - it claimed 104 items with no
+title row in a database whose live original has none, which nearly sent me
+chasing a data-loss bug that does not exist. Use `VACUUM INTO '/tmp/x.db'` and
+check `PRAGMA integrity_check` before believing anything a copy says.
 
