@@ -1678,3 +1678,33 @@ before the change gives exactly 17 titles: Jeanine's 16 (568-599) plus
 cannot see. Her Bon Jovi album page now carries a **Play** button and a
 *Jellyfin matches* row.
 
+
+## A play the device cannot see (0.23.103)
+
+Jeanine's newly linked albums got a **Play** button, and pressing it said "Sent
+to Jellyfin" while nothing played. The play command is validated against the
+**session's** Jellyfin user, not our API key: the server accepts
+`POST /Sessions/<id>/Playing` and the device then silently drops an item its
+user cannot see - Matt's account cannot see `Jeanine's Music`.
+
+- `jellyfin.access_reason(base, key, session_id, jf_id)` asks whether that
+  session's user may see the item, and `play()` raises `JellyfinError` *before*
+  sending anything, so the page banner reads "Jellyfin: Xiaomi 25053PC47G
+  (Moonfin for Android 2.6.0) is signed in as Matt, who cannot see this title -
+  give that user access to the library in Jellyfin, or play it from a device
+  that has it."
+- The one question that honours a user's library access is
+  `GET /Users/<userId>/Items/<itemId>`. `/Items?Ids=<id>&UserId=<id>` answers
+  from the API key's view and returns the item anyway - measured: 1 of 1 for
+  both one of Matt's albums and one of Jeanine's - so it cannot be used here.
+- `JellyfinError` now carries `status` (0 when the server never answered), and
+  only a **404** counts as a refusal: a timeout or a 500 must never stop a play
+  that would have worked. A session carrying no `UserId` is left for Jellyfin
+  to refuse, as are the 404s for an unknown session.
+
+Verified live with a real session (the Xiaomi phone, signed in as Matt):
+`access_reason` returns the sentence above for Bon Jovi's album and `""` for a
+title Matt can see, and `POST /title/573/jellyfin` answers 200 carrying that
+sentence in the banner instead of "Sent to Jellyfin" - no play command reaches
+the device.
+

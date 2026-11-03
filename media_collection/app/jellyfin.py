@@ -28,7 +28,15 @@ _users = {}
 
 
 class JellyfinError(Exception):
-    """Anything that stops us talking to the server."""
+    """Anything that stops us talking to the server.
+
+    `status` is the HTTP code when the server answered at all (0 when it did
+    not), so a caller can tell "Jellyfin said no" from "we never got through".
+    """
+
+    def __init__(self, message, status=0):
+        super().__init__(message)
+        self.status = status
 
 
 def config(con=None):
@@ -121,7 +129,8 @@ def _call(base, key, path, params=None, method="GET", payload=None, timeout=TIME
             body = response.read().decode("utf-8", "replace")
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", "replace").strip()[:200]
-        raise JellyfinError("%s %s -> %s %s" % (method, path, exc.code, detail))
+        raise JellyfinError("%s %s -> %s %s" % (method, path, exc.code, detail),
+                            status=exc.code)
     except Exception as exc:
         raise JellyfinError("Could not reach Jellyfin at %s (%s)" % (base, exc))
     return json.loads(body) if body.strip() else {}
@@ -584,6 +593,49 @@ def _device_label(row):
     return app or device or "Jellyfin app"
 
 
+def _session_row(base, key, session_id):
+    """The `/Sessions` entry for one client, or {} when it has gone."""
+    if not session_id:
+        return {}
+    try:
+        rows = _call(base, key, "/Sessions", timeout=15) or []
+    except JellyfinError:
+        return {}
+    for row in rows:
+        if row.get("Id") == session_id:
+            return row
+    return {}
+
+
+def access_reason(base, key, session_id, jf_id):
+    """Why the session's user cannot see `jf_id`, or "" when it can.
+
+    A play command is checked against the *session's* Jellyfin user, not our
+    API key: the server accepts the command and the device then silently drops
+    an item its user cannot see, which reached the page as "Sent to Jellyfin"
+    with nothing playing. `GET /Users/<id>/Items/<item>` is the one listing
+    question that honours a user's library access - `/Items?Ids=…` answers from
+    the API key's view and calls an invisible item perfectly visible.
+
+    Only a 404 counts as a refusal: a timeout or a 500 must never stop a play
+    that would have worked, and a session carrying no user id cannot be asked.
+    """
+    session = _session_row(base, key, session_id)
+    user_id = session.get("UserId") or ""
+    if not user_id:
+        return ""
+    try:
+        _call(base, key, "/Users/%s/Items/%s" % (user_id, jf_id), timeout=15)
+        return ""
+    except JellyfinError as exc:
+        if exc.status != 404:
+            return ""
+    who = session.get("UserName") or "that Jellyfin user"
+    return ("%s is signed in as %s, who cannot see this title - give that user "
+            "access to the library in Jellyfin, or play it from a device that "
+            "has it." % (_device_label(session), who))
+
+
 def play(con, session_id, jf_id, media_source_id=None, kind=None):
     """Start `jf_id` on a Jellyfin client. Returns the banner message."""
     base, key = config(con)
@@ -592,6 +644,11 @@ def play(con, session_id, jf_id, media_source_id=None, kind=None):
     if not jf_id:
         raise JellyfinError("That copy is not linked to Jellyfin yet - "
                             "press Sync with Jellyfin in Admin.")
+    # the command is validated against the session's user, so a device whose
+    # user cannot see the library must be refused here, not left silent
+    why = access_reason(base, key, session_id, jf_id)
+    if why:
+        raise JellyfinError(why)
     # an album is one item holding tracks, and Jellyfin queues only the first
     # of them unless the tracks are named; a film keeps its single id
     item_ids = [jf_id]
