@@ -10,6 +10,8 @@ import re
 import sys
 import threading
 
+import sorting
+
 SEPARATOR = " — "
 
 
@@ -85,6 +87,7 @@ def link_all(con):
 
 def all_artists(con, viewer_id):
     """Every artist with something on the shelf, plus their album counts and art."""
+    sorting.register(con)      # NATSORT is per connection; see sorting.py
     return con.execute(
         "SELECT a.*, COUNT(t.id) AS albums,"
         " MIN(t.release_year) AS first_year, MAX(t.release_year) AS last_year,"
@@ -102,7 +105,7 @@ def all_artists(con, viewer_id):
         " WHERE t.kind = 'music'"
         " AND EXISTS (SELECT 1 FROM items i WHERE i.title_id = t.id"
         "             AND (i.visibility = 'shared' OR i.owner_id = ?))"
-        " GROUP BY a.id ORDER BY a.sort_name COLLATE NOCASE",
+        " GROUP BY a.id ORDER BY a.sort_name COLLATE NATSORT",
         (viewer_id,)).fetchall()
 
 
@@ -113,6 +116,7 @@ def get(con, artist_id):
 
 def titles_for(con, artist_id, viewer_id):
     """The albums of one artist this viewer can see, oldest first."""
+    sorting.register(con)      # NATSORT is per connection; see sorting.py
     return con.execute(
         "SELECT t.*, COUNT(i.id) AS copies, group_concat(DISTINCT i.format)"
         " AS formats, MIN(i.last_watched_on) AS last_watched_on,"
@@ -122,8 +126,8 @@ def titles_for(con, artist_id, viewer_id):
         " WHERE t.artist_id = ? AND t.kind = 'music'"
         " AND (i.visibility = 'shared' OR i.owner_id = ?)"
         " GROUP BY t.id ORDER BY t.release_year,"
-        " COALESCE(NULLIF(t.sort_name, ''), t.name) COLLATE NOCASE,"
-        " t.name COLLATE NOCASE",
+        " COALESCE(NULLIF(t.sort_name, ''), t.name) COLLATE NATSORT,"
+        " t.name COLLATE NATSORT",
         (artist_id, viewer_id)).fetchall()
 
 

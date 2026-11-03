@@ -29,6 +29,7 @@ import ui
 import ui_artists
 import ui_admin
 import ui_title
+import sorting
 
 PORT = int(os.environ.get("PORT", "8099"))
 DB_PATH = os.environ.get("DB_PATH", "/data/media.db")
@@ -143,6 +144,8 @@ def connect():
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA busy_timeout = 60000")
     con.execute("PRAGMA foreign_keys = ON")
+    # NATSORT compares digit runs by value, so "2 Fast" files before "10,000"
+    sorting.register(con)
     return con
 
 
@@ -178,6 +181,7 @@ def viewer_for(handler, con):
 # ------------------------------------------------------------------ views ----
 
 def library_rows(con, viewer_id, query="", kind="", owner=None, format=""):
+    sorting.register(con)      # NATSORT is per connection; see sorting.py
     sql = """
         SELECT i.id, t.id AS title_id, t.name AS title, t.release_year, i.format,
                i.edition, i.upc_ean, i.region, i.visibility, i.location,
@@ -210,8 +214,8 @@ def library_rows(con, viewer_id, query="", kind="", owner=None, format=""):
         sql += " AND (" + " OR ".join(any_of) + ")"
     # a leading "The"/"A"/"An" moves to the end of the key (0025_title_sort_name),
     # so "The A-Team" files under A, the way artists.sort_name already did
-    sql += (" ORDER BY COALESCE(NULLIF(t.sort_name, ''), t.name) COLLATE NOCASE,"
-            " t.name COLLATE NOCASE, i.format")
+    sql += (" ORDER BY COALESCE(NULLIF(t.sort_name, ''), t.name) COLLATE NATSORT,"
+            " t.name COLLATE NATSORT, i.format")
     return con.execute(sql, params).fetchall()
 
 
@@ -707,6 +711,7 @@ ROW = Template("""<tr>
 
 def render_index(con, viewer, base, error=None, query="",
                  view="list", kind="", owner=None, format="", only=False):
+    sorting.register(con)      # the card query orders by NATSORT too
     bits = []
     if query:
         bits.append("q=" + quote(query))
@@ -861,7 +866,7 @@ def render_index(con, viewer, base, error=None, query="",
             " FROM titles t JOIN items i ON i.title_id = t.id"
             " WHERE " + clause +
             " GROUP BY t.id ORDER BY COALESCE(NULLIF(t.sort_name, ''), t.name)"
-            " COLLATE NOCASE, t.name COLLATE NOCASE",
+            " COLLATE NATSORT, t.name COLLATE NATSORT",
             [viewer["id"]] + fmt_owner_params + [viewer["id"]] + extra).fetchall()
         library = '<div class="cards">%s</div>' % ("".join(
             '<a class="card" href="{0}title/{1}{5}">{2}'
@@ -1228,7 +1233,7 @@ def export_rows(con, viewer_id):
         " FROM items i JOIN titles t ON t.id = i.title_id"
         " JOIN users u ON u.id = i.owner_id"
         " WHERE i.visibility = 'shared' OR i.owner_id = ?"
-        " ORDER BY t.name COLLATE NOCASE, i.format", (viewer_id,)).fetchall()
+        " ORDER BY t.name COLLATE NATSORT, i.format", (viewer_id,)).fetchall()
 
 
 EXPORT_COLUMNS = ["Title", "Year", "Kind", "IMDb", "Format", "Edition", "UPC/EAN",

@@ -1754,3 +1754,30 @@ Trap: a card's play mark sits **inside** `<strong>`, so scraping titles with
 though "The Abyss" was missing from the page. Split on the mark, or strip the
 trailing space.
 
+
+## Numbers sort by value (0.23.106)
+
+The 20 digit-led titles read "1, 1 Giant Leap, 10 000 Hz Legend, 10,000 B.C.,
+12 Bar Bruise, 12 Monkeys, 127 Hours, 13, … , 2 Fast 2 Furious, 2001, 28 Days
+Later, 300" - "10,000" before "127" before "2", which is neither alphabetical
+nor numerical, because `COLLATE NOCASE` compares byte by byte.
+
+`app/sorting.py` adds a `NATSORT` collation: a run of digits compares by value
+(and then by length, so "7" < "007"), every other run compares case- and
+accent-blind (`Björk` == `Bjork`, so she files with the Bs), and a number always
+sorts before a word. It is used by `library_rows`, `render_index`'s card query,
+`artists.all_artists`, `artists.titles_for` and `export_rows`.
+
+- A collation belongs to a **connection** (`con.create_collation`), and a query
+  naming one that connection does not know dies with `no such collation
+  sequence: NATSORT`. `server.connect()` registers it, and those five query
+  builders register it themselves, so a bare `sqlite3.connect()` handed in
+  still works - which is how the render/verify scripts are written.
+- Numbers first is the Unicode/ICU default and what Finder and Explorer do;
+  Apple TV's "#" bucket at the end is a presentation choice, not a collation
+  rule. The film grid now reads 2 Fast 2 Furious, 3:10 to Yuma, 10,000 B.C.,
+  12 Monkeys, 28 Days Later, 127 Hours, 300, 300: Rise of an Empire, 2001: A
+  Space Odyssey; the act list still starts 1 Giant Leap, ABBA, Adele.
+- Cost: sorting 636 cards through a Python comparator is ~0.10 s per render
+  (the whole grid page), the list view 0.06 s, the act list 0.004 s.
+
