@@ -19,6 +19,8 @@ MEDIA_EXTENSIONS = (".mkv", ".mp4", ".m4v", ".avi", ".mov", ".ts", ".m2ts",
                     ".iso", ".wmv", ".mpg", ".mpeg", ".flac", ".mp3", ".m4a",
                     ".aac", ".ogg", ".opus", ".wav", ".wma", ".ape", ".aiff")
 PLAY_MEDIA = 512                      # media_player feature bit for play_media
+TURN_ON = 128                         # ... and for turn_on
+SELECT_SOURCE = 4                     # ... and for select_source (an app)
 ACTIVE_STATES = ("playing", "paused", "buffering", "idle", "on")
 
 
@@ -90,7 +92,12 @@ def players(refresh=False):
         found.append({"entity_id": entity_id,
                       "name": attributes.get("friendly_name") or entity_id,
                       "state": state.get("state") or "",
-                      "device_class": attributes.get("device_class") or ""})
+                      "device_class": attributes.get("device_class") or "",
+                      "sources": [str(app) for app in
+                                  (attributes.get("source_list") or [])],
+                      "can_select": bool(
+                          (attributes.get("supported_features") or 0)
+                          & SELECT_SOURCE)})
     found.sort(key=lambda item: item["name"].lower())
     _cache.update(at=time.time(), players=found)
     return found
@@ -230,28 +237,56 @@ def remember_player(con, entity_id):
         pass
 
 
-def open_on(entity_id, app_name="", name="", timeout=8):
-    """Wake a device and open an app on it - a store with a playback target.
+def open_on(target, app_name="", timeout=8):
+    """Turn a player on and open the app on it. Returns the sentence.
 
-    A bought title cannot be deep-linked (the Apple TV app has no public URL
-    for "play the film I own"), so this does the part that can be automated and
-    says so: turn the device on, select the app, and let the viewer pick the
-    title there. Returns the sentence for the page.
+    A player is whatever `playback_targets.kind` says it is:
 
-    Turning the device on raises on failure - a box that is off the network is
-    worth reporting. A device that cannot list its apps only warns, because the
-    wake-up still happened.
+      media_player   media_player.turn_on, then select_source(app)
+      input_select   input_select.select_option - how an automation is fired
+                     in most setups ("source: Disc player")
+      script         script.turn_on
+      automation     automation.trigger
+
+    A bought title cannot be deep-linked, so this opens the app and says so:
+    turn the device on, select the app, pick the title there.
+
+    Waking the device raises on failure - a box off the network is worth
+    reporting - while a device that will not list its apps only warns, because
+    the wake-up still happened.
     """
-    label = name or entity_id
+    entity_id = (target.get("ha_entity_id") or "").strip()
+    if not entity_id:
+        raise ValueError("that player has no Home Assistant entity set")
+    kind = target.get("kind") or "media_player"
+    domain = entity_id.split(".", 1)[0]
+    label = target.get("name") or entity_id
+
+    if kind == "script" or domain == "script":
+        _call("/services/script/turn_on", "POST", {"entity_id": entity_id},
+              timeout=timeout)
+        return "Ran %s." % label
+    if kind == "automation" or domain == "automation":
+        _call("/services/automation/trigger", "POST", {"entity_id": entity_id},
+              timeout=timeout)
+        return "Triggered %s." % label
+    if kind == "input_select" or domain == "input_select":
+        option = (target.get("input_source") or "").strip()
+        if not option:
+            raise ValueError("that input_select player has no option set")
+        _call("/services/input_select/select_option", "POST",
+              {"entity_id": entity_id, "option": option}, timeout=timeout)
+        return "Set %s to %s." % (label, option)
+
     _call("/services/media_player/turn_on", "POST", {"entity_id": entity_id},
           timeout=timeout)
-    if not app_name:
+    source = (app_name or target.get("input_source") or "").strip()
+    if not source:
         return "Woke the %s." % label
     try:
         _call("/services/media_player/select_source", "POST",
-              {"entity_id": entity_id, "source": app_name}, timeout=timeout)
+              {"entity_id": entity_id, "source": source}, timeout=timeout)
     except Exception as exc:
         return ("Woke the %s, but could not open %s (%s) - that device may not "
-                "list its apps." % (label, app_name, exc))
-    return "Woke the %s and opened %s." % (label, app_name)
-
+                "list its apps." % (label, source, exc))
+    return "Woke the %s and opened %s." % (label, source)

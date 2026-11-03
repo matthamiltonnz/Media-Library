@@ -24,12 +24,15 @@ def _adopt(store_rows):
     if not store_rows:
         return
     STORE_LABELS.update({row["key"]: row["label"] for row in store_rows})
+    STORE_BY_ID.clear()
+    STORE_BY_ID.update({row["id"]: row["label"] for row in store_rows})
     del STORE_CHOICES[:]
     STORE_CHOICES.extend((row["key"], row["label"]) for row in store_rows
-                         if row["kind"] == "store" and row["is_active"])
+                         if row["kind"] != "system" and row["is_active"])
 
 
 STORE_CHOICES = []
+STORE_BY_ID = {}
 
 
 def _text(value):
@@ -116,9 +119,18 @@ def _files(digital):
     return files
 
 
-def _stores(digital):
-    """{item_id: 'iTunes'} for copies bought from a store rather than ripped."""
+def _stores(digital, items=()):
+    """{item_id: 'iTunes'} for copies bought from a shop.
+
+    A digital copy carries its shop on the source row; a disc carries a
+    `store_id` (a retail shop), which _adopt turns into a label.
+    """
     found = {}
+    for item in items or ():
+        store_id = item["store_id"] if "store_id" in item.keys() else None
+        label = STORE_BY_ID.get(store_id) if store_id else None
+        if label:
+            found.setdefault(item["id"], label)
     for source in digital:
         provider = source["provider"]
         if provider in ("rip", "jellyfin") or not provider:
@@ -130,7 +142,7 @@ def _stores(digital):
 
 def _badges(items, digital, labels, base=None, title_id=None):
     """One badge per copy; pressing one opens that copy on the Copies tab."""
-    stores = _stores(digital)
+    stores = _stores(digital, items)
     ripped = _ripped(digital)
     badges = []
     for item in items:
@@ -146,30 +158,37 @@ def _badges(items, digital, labels, base=None, title_id=None):
 
 
 def _store_plays(base, row, shops):
-    """One section per store that names a device to open it on.
+    """One section per shop, with a button for each player it opens on.
 
-    `shops` is [(store_row, target_row, app_name)] from stores.playable_stores().
-    The button wakes the device and opens the app - a purchased title cannot be
+    `shops` is [(store_row, [player rows], app_name)] from
+    stores.playable_stores(). A shop is not one device - the Apple TV app runs
+    on the Apple TV, an Android TV and a phone - so every attached player gets
+    its own button, and each posts the store *and* the player.
+
+    The button wakes that player and opens the app; a purchased title cannot be
     deep-linked, so the sheet says so rather than pretending otherwise.
     """
     if not shops:
         return ""
     parts = []
-    for store, device, app in shops:
-        device_name = _text(device.get("name") or "")
+    for store, players, app in shops:
         app_name = _text(app or store["label"])
+        buttons = []
+        for player in players:
+            buttons.append(
+                '<form method="post" action="%stitle/%s/store">'
+                '<input type="hidden" name="store" value="%s">'
+                '<input type="hidden" name="target" value="%s">'
+                '<button type="submit">%s</button></form>'
+                % (_text(base), row["id"], _text(store["key"]), player["id"],
+                   _text(player.get("name") or player["ha_entity_id"] or "")))
         parts.append(
-            '<section class="store-play">\n'
-            '  <h3>On the %s</h3>\n'
-            '  <form method="post" action="%stitle/%s/store">\n'
-            '    <input type="hidden" name="store" value="%s">\n'
-            '    <button type="submit">Open %s</button>\n'
-            '  </form>\n'
-            '  <p class="muted">Wakes the %s and opens %s &#8212; pick the '
-            'title there.</p>\n'
-            '</section>' % (device_name, _text(base), row["id"],
-                             _text(store["key"]), app_name, device_name,
-                             app_name))
+            '<section class="store-play">'
+            '<h3>On %s</h3>'
+            '<div class="players">%s</div>'
+            '<p class="muted">Wakes the player and opens %s &#8212; pick the '
+            'title there.</p></section>'
+            % (app_name, "".join(buttons), app_name))
     return "\n".join(parts)
 
 
@@ -383,7 +402,7 @@ def _delete_block(base, row):
 def _copies_tab(base, row, items, digital, formats, labels, users,
                  viewer_id=None):
     parts = []
-    stores = _stores(digital)
+    stores = _stores(digital, items)
     files = _files(digital)
 
     def _is_file(item):

@@ -1839,3 +1839,51 @@ Checked on a copy of the live database: 1148 rows preserved through the rebuild,
 shows "On the Lounge Apple TV" and "Open Apple TV", and the POST answers
 "Could not wake Lounge Apple TV: <urlopen error timed out>" off the box.
 
+
+## A shop is a shop, and a shop has many players (0.23.108)
+
+Three things the store record could not say.
+
+- **Retail vs digital.** `stores.kind` is now `digital` | `retail` | `system`
+  (it was `store` | `system`), and `items.store_id` holds the shop a *disc* was
+  bought from; `digital_sources.provider` still holds the digital shop. There is
+  **one Store box** in the UI - the format decides where the answer is kept:
+  `fmt == "digital"` writes the source row, anything else sets `items.store_id`
+  (and clears it again when a copy turns digital). `stores.resolve(con, value,
+  kind)` creates a row of the right kind, so a typed "JB Hi-Fi" only ever
+  appears in the retail list and a typed "Apple TV" reuses `appletv`.
+- **One shop, many players.** `stores.target_id` became
+  `store_targets(store_id, target_id)`: the Apple TV app runs on the Apple TV,
+  on an Android/Google TV and on a phone, so `_store_plays()` draws one button
+  per attached player and each posts the `store` *and* the `target`.
+  `stores.playable_stores(con, keys)` takes keys - the `provider` of each
+  digital source plus the retail key behind `items.store_id`, which is what
+  `server.store_keys()` collects.
+- **A player is not always a media_player.** `playback_targets.kind` lost its
+  CHECK, and `playback.open_on(target, app)` dispatches on it: media_player ->
+  `turn_on` + `select_source(app)`, input_select -> `select_option(option=
+  input_source)`, script -> `turn_on`, automation -> `trigger`. That is what
+  lets a disc be "set the amp to BD" or "run the night script".
+
+The admin picker can only *hint* at capability: `playback.players()` now returns
+`sources` (each player's `source_list`) and `can_select`, so a device is listed
+as "Lounge Apple TV (apps: Netflix, Apple TV, Plex)". Home Assistant reports
+only what the integration publishes - a box that does not publish `source_list`
+cannot be checked, so the app name stays a hint on the store row, not a filter.
+
+Trap: two tables had to be rebuilt (`playback_targets` for its CHECK, `stores`
+for its CHECK and the dropped column) and `store_targets` references both, so
+the existing links are parked in a TEMP table first - `DROP TABLE` runs an
+implicit delete, and with `ON DELETE CASCADE` on the join it wipes the rows that
+were just copied across.
+
+Verified on a scratch DB: a blu-ray added with store "JB Hi-Fi" sets
+`items.store_id`, its copy line reads "JB Hi-Fi" and it offers no Play button;
+a digital copy with "apple tv" reuses `appletv` and keeps `store_id` NULL; a
+media_player and an input_select attached to Apple TV give two buttons and an
+"On Apple TV" heading; posting `store=appletv&target=<player>` off the box
+answers "Could not wake Lounge Apple TV: <urlopen error timed out>"; and each
+kind dispatched to the right service (`turn_on`+`select_source`,
+`select_option`, `script.turn_on`, `automation.trigger`). Live: 5 stores, 0
+links, 169 `appletv` rows, 0 retail-linked copies - nothing to migrate twice.
+

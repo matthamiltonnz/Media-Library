@@ -148,6 +148,31 @@ def connect():
     # NATSORT compares digit runs by value, so "2 Fast" files before "10,000"
     sorting.register(con)
     return con
+def with_players(con):
+    """Every store with the players attached to it, for the admin panel."""
+    rows = stores.load(con)
+    for row in rows:
+        row["players"] = stores.attached(con, row["id"])
+    return rows
+
+
+def store_keys(con, digital, items):
+    """Every shop behind these copies, for the Play sheet.
+
+    A digital copy carries its shop on the source row (`provider`), a disc on
+    the copy itself (`items.store_id`), so both are walked.
+    """
+    keys = [row["provider"] for row in digital or ()]
+    shops = stores.by_id(con)
+    for copy in items or ():
+        store_id = copy["store_id"] if "store_id" in copy.keys() else None
+        shop = shops.get(store_id) if store_id else None
+        if shop:
+            keys.append(shop["key"])
+    return keys
+
+
+
 
 
 # ------------------------------------------------------------------ users ----
@@ -1174,10 +1199,16 @@ def add_item(con, viewer, form):
                  field(form, "acquired_on") or None,
                  field(form, "notes") or None),
             )
-            store = stores.resolve(con, field(form, "store"))
+            store = stores.resolve(con, field(form, "store"),
+                                   "digital" if fmt == "digital" else "retail")
+            shop = stores.by_key(con).get(store) if store else None
             if fmt == "digital" and store:
                 con.execute("INSERT INTO digital_sources (item_id, provider)"
                             " VALUES (?, ?)", (cursor.lastrowid, store))
+            elif shop:
+                # a disc records the shop it was bought from on the copy
+                con.execute("UPDATE items SET store_id = ? WHERE id = ?",
+                            (shop["id"], cursor.lastrowid))
     except sqlite3.IntegrityError as exc:
         con.rollback()
         if "upc_ean" in str(exc):
@@ -1499,7 +1530,7 @@ class Handler(BaseHTTPRequestHandler):
                           "artists": artists.status(),
                           "jellyfin": jellyfin.progress(),
                           "clean": clean_job.status()},
-                    store_rows=stores.load(con),
+                    store_rows=with_players(con),
                     targets=stores.targets(con),
                     confirm=confirm)
                 return self.respond(200, page)
@@ -1706,7 +1737,8 @@ class Handler(BaseHTTPRequestHandler):
             users=con.execute("SELECT id, display_name FROM users"
                               " ORDER BY display_name").fetchall(),
             viewer_id=viewer["id"], tab=tab, back=back,
-            stores=stores.load(con), shops=stores.playable_stores(con, digital),
+            stores=stores.load(con),
+            shops=stores.playable_stores(con, store_keys(con, digital, items)),
             back_label=("\u2190 Back to the artist"
                         if (back or "").startswith("artist/")
                         else "\u2190 Back to the catalogue")))
@@ -1959,9 +1991,26 @@ class Handler(BaseHTTPRequestHandler):
                 name = field(form, "name")
                 if name:
                     stores.add_target(con, name,
-                                      field(form, "kind") or "apple_tv",
+                                      field(form, "kind") or "media_player",
                                       field(form, "ha_entity_id"),
-                                      field(form, "app_name"), commit=True)
+                                      field(form, "app_name"),
+                                      field(form, "input_source"), commit=True)
+                return self.respond(303, "", extra={
+                    "Location": (base or "/") + "admin"})
+
+            match = re.search(r"/stores/(\d+)/attach/?$", route)
+            if match:
+                picked = field(form, "target_id")
+                if picked.isdigit():
+                    stores.attach(con, int(match.group(1)), int(picked),
+                                  commit=True)
+                return self.respond(303, "", extra={
+                    "Location": (base or "/") + "admin"})
+
+            match = re.search(r"/stores/(\d+)/detach/(\d+)/?$", route)
+            if match:
+                stores.detach(con, int(match.group(1)), int(match.group(2)),
+                              commit=True)
                 return self.respond(303, "", extra={
                     "Location": (base or "/") + "admin"})
 
@@ -1973,18 +2022,16 @@ class Handler(BaseHTTPRequestHandler):
 
             match = re.search(r"/stores/(\d+)/?$", route)
             if match:
-                picked = field(form, "target_id")
                 stores.update(con, int(match.group(1)),
                               label_text=field(form, "label"),
-                              target_id=int(picked) if picked.isdigit() else "",
+                              kind=field(form, "kind") or None,
                               app_name=field(form, "app_name"), commit=True)
                 return self.respond(303, "", extra={
                     "Location": (base or "/") + "admin"})
 
             if route.rstrip("/").endswith("/stores"):
-                picked = field(form, "target_id")
                 stores.add(con, field(form, "label"),
-                           target_id=int(picked) if picked.isdigit() else None,
+                           kind=field(form, "kind") or "digital",
                            app_name=field(form, "app_name"), commit=True)
                 return self.respond(303, "", extra={
                     "Location": (base or "/") + "admin"})
@@ -2182,7 +2229,8 @@ class Handler(BaseHTTPRequestHandler):
             if match:
                 title_id = int(match.group(1))
                 row = stores.by_key(con).get(field(form, "store"))
-                device = stores.target(con, row["target_id"]) if row else None
+                picked = field(form, "target")
+                device = stores.target(con, int(picked) if picked.isdigit() else 0)
                 if not (row and device and (device.get("ha_entity_id") or "").strip()):
                     return self.title_page(
                         con, viewer, base, title_id,
@@ -2190,8 +2238,8 @@ class Handler(BaseHTTPRequestHandler):
                               " in Admin, under Stores.")
                 app = row["app_name"] or device.get("app_name") or ""
                 try:
-                    summary = playback.open_on(device["ha_entity_id"], app,
-                                               device.get("name") or row["label"])
+                    summary = playback.open_on(
+                        device, row["app_name"] or device.get("app_name") or "")
                 except Exception as exc:
                     return self.title_page(
                         con, viewer, base, title_id,
@@ -2317,15 +2365,22 @@ class Handler(BaseHTTPRequestHandler):
                     con.rollback()
                     return self.title_page(con, viewer, base, item["title_id"],
                                            error="That barcode is already on another copy.")
-                store = stores.resolve(con, field(form, "store"))
+                # One Store box, two places to keep it: a digital copy records
+                # the shop on its source row, a disc records it on the copy.
+                store = stores.resolve(con, field(form, "store"),
+                                       "digital" if fmt == "digital" else "retail")
                 # a purchase has one store; rips and Jellyfin keep their own
                 con.execute("DELETE FROM digital_sources WHERE item_id = ?"
                             " AND provider NOT IN ('rip', 'jellyfin')",
                             (item_id,))
-                if store:
+                if store and fmt == "digital":
                     con.execute("INSERT INTO digital_sources (item_id,"
                                 " provider) VALUES (?, ?)",
                                 (item_id, store))
+                shop = stores.by_key(con).get(store) if store else None
+                con.execute("UPDATE items SET store_id = ? WHERE id = ?",
+                            (shop["id"] if shop and fmt != "digital" else None,
+                             item_id))
                 con.commit()
                 return self.title_page(con, viewer, base, item["title_id"],
                                        summary="Copy updated.")

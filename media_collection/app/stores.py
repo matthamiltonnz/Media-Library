@@ -1,11 +1,17 @@
-"""Stores: where a digital copy came from, and the device that can open it.
+"""Stores: where a copy came from, and the players that can open it.
 
-`digital_sources.provider` holds the key ('itunes', 'appletv', 'jellyfin'), and
-a row in `stores` says what to call it, whether the pickers offer it, and which
-`playback_targets` device can open it. A store with a target is what puts
-"On the Apple TV" in the title page's Play sheet - wake the device, open the
-app - so a shop and a place to play from are the same record, which is what
-iTunes and the Apple TV app actually are.
+A store is a *digital* shop (iTunes, Apple TV, Bandcamp) or a *retail* one (a
+disc bought in a shop). The copy form has a single Store box - the format
+decides which it means: a digital copy records the shop on its
+`digital_sources` row (that row is also how the copy is reached), a physical
+copy records it in `items.store_id`.
+
+A store is also somewhere you can go to play it, and one shop is not one device:
+the Apple TV app runs on the Apple TV, on an Android/Google TV and on a phone.
+`store_targets` is that many-to-many, and the Play sheet lists every player
+attached to a store. `playback.open_on()` then drives whichever kind it is -
+a media_player, an input_select that fires an automation, a script, an
+automation.
 
 A 'system' store (jellyfin, rip) is a key the app writes itself and is never
 offered in a picker. A key with no row at all still renders: old rows win.
@@ -16,7 +22,7 @@ from functools import cmp_to_key
 
 import sorting
 
-# keys the app writes itself, and the fallback wording if a row is missing
+KINDS = ("digital", "retail", "system")
 SYSTEM = ("jellyfin", "rip")
 FALLBACK = {
     "itunes": "iTunes",
@@ -33,15 +39,17 @@ def _dicts(con, sql, args=()):
     return [dict(row) for row in con.execute(sql, args).fetchall()]
 
 
-def load(con, active_only=False):
-    """Every store: live shops in natural label order, then retired ones, then
-    the system keys."""
+def load(con, kind=None, active_only=False):
+    """Stores: live shops in natural label order, then retired ones, then the
+    system keys. `kind` narrows to 'digital' or 'retail'."""
     sql = "SELECT * FROM stores"
     if active_only:
         sql += " WHERE is_active = 1"
     rows = _dicts(con, sql)
-    shops = [row for row in rows if row["kind"] == "store"]
-    rest = [row for row in rows if row["kind"] != "store"]
+    if kind:
+        return [row for row in rows if row["kind"] == kind]
+    shops = [row for row in rows if row["kind"] != "system"]
+    rest = [row for row in rows if row["kind"] == "system"]
     shops.sort(key=cmp_to_key(lambda a, b: sorting.compare(a["label"], b["label"])))
     rest.sort(key=lambda row: row["key"])
     return ([row for row in shops if row["is_active"]] +
@@ -52,6 +60,10 @@ def by_key(con):
     return {row["key"]: row for row in load(con)}
 
 
+def by_id(con):
+    return {row["id"]: row for row in load(con)}
+
+
 def label(store_rows, key):
     """What to print for a provider key, even one that has no row."""
     row = store_rows.get(key) if isinstance(store_rows, dict) else None
@@ -60,10 +72,10 @@ def label(store_rows, key):
     return FALLBACK.get(key or "", key or "")
 
 
-def choices(con):
-    """(key, label) pairs a picker may offer: live shops, not system keys."""
+def choices(con, kind="digital"):
+    """(key, label) pairs a picker may offer, for one kind of shop."""
     return [(row["key"], row["label"])
-            for row in load(con, active_only=True) if row["kind"] == "store"]
+            for row in load(con, kind=kind, active_only=True)]
 
 
 
@@ -73,7 +85,7 @@ def _slug(text):
 
 
 def _free_key(con, label_text):
-    """A key nothing else uses, for a store typed by hand."""
+    """A key nothing else uses, for a shop typed by hand."""
     taken = {row["key"] for row in load(con)}
     base = _slug(label_text)
     key, n = base, 1
@@ -83,10 +95,10 @@ def _free_key(con, label_text):
     return key
 
 
-def resolve(con, value, commit=False):
-    """The key for a typed store: an existing key or label, else a new row.
+def resolve(con, value, kind="digital", commit=False):
+    """The key for a typed shop, of the kind the copy's format calls for.
 
-    Blank means no store at all, and "Apple TV" matches 'appletv' however it is
+    Blank means no shop at all, and "Apple TV" matches 'appletv' however it is
     typed, so free text widens the list instead of making a second entry with a
     different spelling. The caller commits - this runs inside add_item().
     """
@@ -95,38 +107,36 @@ def resolve(con, value, commit=False):
         return ""
     wanted = text.casefold()
     for row in load(con):
-        if row["key"].casefold() == wanted or row["label"].casefold() == wanted:
+        if row["kind"] != "system" and (
+                row["key"].casefold() == wanted
+                or row["label"].casefold() == wanted):
             return row["key"]
     key = _free_key(con, text)
-    con.execute("INSERT INTO stores (key, label, kind) VALUES (?, ?, 'store')",
-                (key, text))
+    con.execute("INSERT INTO stores (key, label, kind) VALUES (?, ?, ?)",
+                (key, text, kind if kind in KINDS else "digital"))
     if commit:
         con.commit()
     return key
 
 
-def add(con, label_text, target_id=None, app_name="", kind="store", commit=False):
-    """A new store, or None when the label is blank."""
+def add(con, label_text, kind="digital", app_name="", commit=False):
+    """A new shop, or None when the label is blank."""
     label_text = (label_text or "").strip()
     if not label_text:
         return None
     key = _free_key(con, label_text)
     cur = con.execute(
-        "INSERT INTO stores (key, label, kind, target_id, app_name)"
-        " VALUES (?, ?, ?, ?, ?)",
-        (key, label_text, kind, target_id or None, (app_name or "").strip()))
+        "INSERT INTO stores (key, label, kind, app_name) VALUES (?, ?, ?, ?)",
+        (key, label_text, kind if kind in KINDS else "digital",
+         (app_name or "").strip()))
     if commit:
         con.commit()
     return cur.lastrowid
 
 
-def update(con, store_id, label_text=None, target_id=None, app_name=None,
+def update(con, store_id, label_text=None, kind=None, app_name=None,
            is_active=None, commit=False):
-    """Change what a store is called, and what it can open.
-
-    An empty `target_id`/`app_name` clears it - that is a thing you do on
-    purpose - while None leaves it alone.
-    """
+    """Change what a shop is called, what it opens, and which kind it is."""
     sets, args = [], []
     if label_text is not None:
         label_text = label_text.strip()
@@ -134,9 +144,9 @@ def update(con, store_id, label_text=None, target_id=None, app_name=None,
             return False
         sets.append("label = ?")
         args.append(label_text)
-    if target_id is not None:
-        sets.append("target_id = ?")
-        args.append(target_id or None)
+    if kind in KINDS:
+        sets.append("kind = ?")
+        args.append(kind)
     if app_name is not None:
         sets.append("app_name = ?")
         args.append((app_name or "").strip())
@@ -153,15 +163,15 @@ def update(con, store_id, label_text=None, target_id=None, app_name=None,
 
 
 def remove(con, store_id, commit=False):
-    """Drop a store row. Copies that used its key keep the key and still show
-    the fallback wording, so deleting one loses nothing."""
+    """Drop a shop. Copies that used its key keep the key and still show the
+    fallback wording, so deleting one loses nothing but its players."""
     con.execute("DELETE FROM stores WHERE id = ?", (store_id,))
     if commit:
         con.commit()
 
 
 def targets(con):
-    """The devices a store can open."""
+    """Every player, whatever kind it is."""
     return _dicts(con, "SELECT * FROM playback_targets ORDER BY name COLLATE NOCASE")
 
 
@@ -172,38 +182,63 @@ def target(con, target_id):
     return rows[0] if rows else None
 
 
-def add_target(con, name, kind, ha_entity_id="", app_name="", commit=False):
-    """A device to open a store on: an Apple TV, a Kodi box, a Jellyfin app."""
+def add_target(con, name, kind, ha_entity_id="", app_name="",
+               input_source="", commit=False):
+    """A player: an Apple TV, a Kodi box, an input_select or a script."""
     name = (name or "").strip()
     if not name:
         return None
     cur = con.execute(
-        "INSERT OR IGNORE INTO playback_targets (name, kind, ha_entity_id, app_name)"
-        " VALUES (?, ?, ?, ?)",
-        (name, kind, (ha_entity_id or "").strip(), (app_name or "").strip()))
+        "INSERT OR IGNORE INTO playback_targets (name, kind, ha_entity_id,"
+        " app_name, input_source) VALUES (?, ?, ?, ?, ?)",
+        (name, kind or "media_player", (ha_entity_id or "").strip(),
+         (app_name or "").strip(), (input_source or "").strip()))
     if commit:
         con.commit()
     return cur.lastrowid
 
 
-def playable_stores(con, digital):
-    """Stores among these copies that name a device to open them on.
+def attached(con, store_id):
+    """The players a shop can be opened on."""
+    return _dicts(
+        con,
+        "SELECT t.* FROM store_targets st"
+        "  JOIN playback_targets t ON t.id = st.target_id"
+        " WHERE st.store_id = ? ORDER BY t.name COLLATE NOCASE",
+        (store_id,))
 
-    Returns [(store_row, target_row, app_name)], one per store, which is what
-    the Play sheet turns into "On the Apple TV" sections.
+
+def attach(con, store_id, target_id, commit=False):
+    con.execute("INSERT OR IGNORE INTO store_targets (store_id, target_id)"
+                " VALUES (?, ?)", (store_id, target_id))
+    if commit:
+        con.commit()
+
+
+def detach(con, store_id, target_id, commit=False):
+    con.execute("DELETE FROM store_targets WHERE store_id = ? AND target_id = ?",
+                (store_id, target_id))
+    if commit:
+        con.commit()
+
+
+def playable_stores(con, keys):
+    """The shops among these keys that have a player attached.
+
+    Returns [(store_row, [target rows], app_name)] in key order, which is what
+    the Play sheet turns into one "On the ..." section per player.
     """
     rows = by_key(con)
     seen, found = set(), []
-    for copy in digital or ():
-        key = copy["provider"] if "provider" in copy.keys() else ""
+    for key in keys or ():
         if not key or key in seen or key in SYSTEM:
             continue
-        row = rows.get(key)
-        if not row or not row["target_id"]:
+        store = rows.get(key)
+        if not store:
             continue
-        device = target(con, row["target_id"])
-        if not device:
+        players = attached(con, store["id"])
+        if not players:
             continue
         seen.add(key)
-        found.append((row, device, row["app_name"] or device["app_name"] or ""))
+        found.append((store, players, store["app_name"] or ""))
     return found
