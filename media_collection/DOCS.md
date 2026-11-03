@@ -30,12 +30,20 @@ occasional jobs:
 - **Import a CSV** — staged review, as described above.
 - **Export** — `export.csv` (every copy you can see, UTF-8 with BOM so Excel opens
   it cleanly) and `export.json` (the same rows as a backup-friendly document).
-- **Maintenance** — folding duplicate titles the importers created.
+- **Maintenance** — folding duplicate titles the importers created, and
+  **Clean database**: checks every recorded file and forgets the ones that have
+  gone, asks each Jellyfin server which items it still holds and drops the copies
+  whose item has been deleted there (or whose server row has gone), then prunes
+  copies left with nothing. A copy still on a shelf, or still linked to a live
+  item, is never touched — so it is safe to press on a shelf whose files all live
+  on a Jellyfin box. A server that cannot be reached is left alone entirely,
+  because an unreachable box must never look like an empty library.
 
 Exports are per viewer: shared copies plus your own private ones.
 
-- **Metadata** — *Refresh all metadata* walks every title in the background
-  (sequential, two requests per title: Wikipedia page search + summary) and fills
+- **Metadata** — one button, **Refresh metadata**, does both lookups at once:
+  it walks every title missing data in the background (sequential, two requests
+  per title: Wikipedia page search + summary) and fills
   plot, poster, year and IMDb id. The page polls `/admin/status.json` every three
   seconds while it runs, then reloads itself when the job stops. The "also
   overwrite" box forces a re-fetch for titles that already have metadata.
@@ -51,6 +59,15 @@ Exports are per viewer: shared copies plus your own private ones.
   becomes *Resume refresh* — press it later and it continues where it stopped,
   since it only targets titles still missing metadata.
 
+  The same button runs the act lookup as well — for every act its MusicBrainz
+  id, country, start year and kind, then a Wikipedia biography, portrait and
+  reading links — and both halves run **by themselves** too: on every start of
+  the add-on sixty titles and sixty acts that are missing something are looked
+  up in the background, and adding a title with *Look up metadata* ticked (it is
+  ticked by default) fetches it there and then, a new act's MusicBrainz record
+  and biography included. For an act already on the shelf that last step costs a
+  single row read.
+
 The catalogue opens in **Thumbnails** view (poster grid, one card per title with its
 formats and copy count); the **List view** link next to the search box switches to
 the table. The choice is carried through searches.
@@ -58,6 +75,42 @@ the table. The choice is carried through searches.
 "Add a copy" takes an optional **IMDb ID**; tick *Look up metadata* and the new
 title is created with its plot/poster/year straight away, landing you on its
 detail page.
+
+## Adding a title
+
+*Add a title* on the catalogue page asks what the thing is first - **Media
+type**: film, TV or music - and shows only the fields that type needs. Films and
+TV get an **IMDb id** box; music gets **artist**, and the artist and release
+MusicBrainz ids. The second group is copy detail whatever the type: format,
+owner, store, visibility, edition, barcode and where it lives. Choosing a music
+format (CD, vinyl, SACD, cassette) switches the media type to music by itself.
+
+Ticking *Look up metadata* fetches plot, poster and year as the title is added.
+Typing an IMDb id does the same without the tick, because an id means "look it
+up" - and the year on the form is then replaced by the one the id carries.
+
+The **Barcode** row has a **Scan** button - the rear camera reads the code on
+the case, where the browser can do that (Chrome and Edge can; Safari cannot, and
+says so) - and a **Look up** button for digits typed in by hand. A lookup fills
+only the boxes that are still empty: an album barcode comes back from
+MusicBrainz with its artist and year, anything else falls back to a product
+database that usually knows the name on the box. A barcode already in the
+catalogue is named in the line under the boxes, so the same disc is never
+catalogued twice.
+
+If that name and year are **already in the catalogue**, the title is not added:
+a page names the existing title and offers to open it, because what you have is
+almost certainly another copy of it - and copies belong on the title page,
+where the catalogue can ask about a duplicate:
+
+**Adding a copy** of something you already hold in that format (same owner) asks
+first - *Matt already owns a Blu-ray of 10,000 B.C. (2008) in Lounge shelf* -
+with **Add another copy** and **Cancel**, and nothing is written until you say
+so. A second copy is a real thing (one for the lounge, one for a bedroom), so
+this asks rather than refuses. For music the artist decides as well as the
+name: two acts can both have *Greatest Hits*, so a matching name under a
+different artist is a new title, while the same name with no artist at all is
+treated as the same album and refused.
 
 ## Copies
 
@@ -67,6 +120,22 @@ purchase date, last watched date and visibility. Open a copy to change it, delet
 it, or add another one (owner included) without leaving the page. A digital copy
 records the store it was bought from - iTunes, Apple TV or other - next to what it
 cost and when; Kodi is no longer offered because it sits outside Home Assistant.
+**Store** is empty ("-") unless something really was bought from a shop online,
+which is also the default when adding a title.
+
+## Where things are
+
+Every copy carries a **Location** - *Where it lives* on the add form: the room
+and the furniture, not the address. The catalogue starts with
+
+* **Lounge kallax** - every record, whoever owns it
+* **Lounge shelf** - Matt's films, TV and box sets
+* **Bedroom storage** - Matt's CDs
+* **Mitchell's bedroom** - Mitchell's films, TV and CDs
+
+Downloads and Jellyfin routes have no location, because they are not on a shelf;
+so do the copies of anyone else in the household. A location is free text, and
+the list view shows it beside each copy.
 
 ## By artist
 
@@ -79,12 +148,46 @@ is owned as, and a MusicBrainz link, so a music title edits the **MusicBrainz ID
 instead of the IMDb/TMDb pair.
 
 Artist details come from MusicBrainz without any Jellyfin involvement: **Admin →
-Artists → Fill artist details** looks up every act that has no id yet (one request
-a second, in the background) and stores the MusicBrainz id, country and the year
-the act started; a few are filled in automatically on each start. Since an artist
+Metadata → Refresh metadata** looks up every act that is missing a detail (one
+request a second, in the background) and stores the MusicBrainz id, country and
+the year the act started, then its Wikipedia biography; a few are filled in
+automatically on each start, and adding an album fills a brand-new act at once.
+Its progress
+line sits on that panel only while the fill is running, so the page carries no
+stale count. Since an artist
 has no picture of its own, the page and the cover wall borrow the art of their
 first album - Jellyfin's image when that album is linked, otherwise the Cover Art
 Archive picture MusicBrainz gave it.
+
+A biography sits above the albums. MusicBrainz has none — the only text it
+offers is a disambiguation line ("Group") — so **Fill artist details** looks each
+act up on Wikipedia once and stores the article's opening paragraph, its
+portrait, and a *Read more* row of links. The page carries a **Fetch details**
+button of its own, so a single act can be looked up (or re-looked-up, when the
+match was the wrong one) without waiting for the whole job.
+
+The article is found from the act's **MusicBrainz id**, not its name: the id
+leads to the act's Wikidata item, and that names the English article. That is
+what stops *Air* resolving to the gas rather than **Air (French band)**, and
+*St Germain* to the place rather than the musician. Only an act with no id (or
+one MusicBrainz has no links for) falls back to searching Wikipedia by name,
+which is where a common-word name goes wrong.
+
+*Read more* lists wherever else the act can be read about, taken from
+MusicBrainz's own relationships rather than guessed: Wikipedia, Wikidata,
+MusicBrainz, **Discogs** (the artist page, not a search), **AllMusic**,
+**Last.fm**, **IMDb** and the act's **official site** when they exist, capped at
+six. There is no keyless source of a longer biography than Wikipedia's lead
+paragraph — Fanart.tv, TheAudioDB and the Last.fm/Discogs APIs all want a key —
+so Wikipedia's extract is the text and the rest are links out.
+
+A **MusicBrainz id** box sits under *Rename artist*, for the lookups that failed
+or matched the wrong act. Paste the 36-character uuid from the artist's own
+MusicBrainz URL and press *Save id*: the id is stored, its MusicBrainz record is
+re-read for country, start year and kind (the fields a bad lookup leaves blank or
+takes from the wrong act), and the old "read more" links are dropped so **Fetch
+details** rebuilds them against the right act. A mistyped id is refused with a
+red banner and nothing written; an empty box clears the id on purpose.
 
 ## Filtering
 
@@ -102,15 +205,19 @@ a disc keeps its own row untouched. Old scans had hung the file off whichever co
 came first, which hid it; the scan now moves those onto their own copy
 (`repoint_rips`) on every run.
 
-Because the shelf is for managing discs, titles whose only copies are files are
-hidden by default - the link under the tallies (*Show titles that are only ripped
-files*) brings them back, and the **Ripped file** tally does the same with a click.
+Titles whose only copies are files used to be hidden from the catalogue, with a
+link under the tallies to bring them back; that switch was only ever there while
+the first import was being sorted out and is gone. Every title is listed, and the
+headline counts include every copy.
 
 ## Play
 
-A title page opens on **About**: one badge per copy (format, store and owner, so
-"Blu-ray · Matt" and "Digital · iTunes · Mitchell" read at a glance), then a single
-**Play** button. That button opens a small window with two labelled halves:
+A title page opens with the cover, a muted line of facts (year, kind, owner,
+store) and the **Play** button — right under those facts and above the copies,
+because starting a film should not mean scrolling past every copy of it first.
+A title with nothing playable shows a plain hint in that same place ("No file to
+play yet — rip the disc to a media folder…") and no button at all. The button
+opens a small window with two labelled halves:
 **From the shelf** picks a Home Assistant player and then the copy to start, and
 **On the Jellyfin server** picks the Jellyfin app that is open right now (Apple TV,
 Vero, a phone) and starts the linked item there. Nothing lists sessions on the page
@@ -130,6 +237,39 @@ That needs `homeassistant_api: true` in `config.yaml`; the token is read from
 `/run/s6/container_environment/SUPERVISOR_TOKEN` because the base image starts the
 service with a stripped environment. The last player used is remembered in the
 `settings` table, and failures are reported back on the title page.
+
+### The pinned player
+
+Once something is playing, a bar appears at the bottom of **every** page and
+stays there while you browse: the cover, the name (a link back to the title),
+"artist · album" or the device, a thin progress line, **Pause**/**Resume** and
+**Stop**. It asks the add-on every five seconds and the add-on asks Jellyfin
+(`/Sessions`), so playback started from Jellyfin's own app shows up too. The bar
+hides itself when nothing is playing, and the page grows a little padding
+instead of hiding its last row behind it.
+
+The bar carries a **transport row**: previous, rewind, play/pause, fast-forward,
+next and stop. Previous/next appear only while a track is playing (a film has
+nothing to skip to), and rewind/fast-forward step whatever Jellyfin's own client
+does with `Rewind`/`FastForward`. Stop stops the playback *and* closes the bar.
+
+### Several players at once
+
+Two players can have something on at the same time — a phone casting to the TV
+counts as two sessions, and two rooms make two more. When that happens the bar
+shows a small pill per player under the title, the one it is controlling filled
+in green and any paused one dimmed; pressing another pill hands the controls
+over. Without a second player the pills are not drawn at all.
+
+The bar remembers the player it was switched to. If that player stops, the next
+poll comes back with the best remaining session (a playing one before a paused
+one, and the most recently active after that) and the bar simply carries on with
+it, with that player's pill highlighted.
+
+An album sends its **tracks**, not just its album id: Jellyfin's
+`POST /Sessions/<id>/Playing` starts only the first track of an album item on
+most clients, so `album_tracks()` lists the album's audio items in disc and
+track order and names them all. A film keeps its single id.
 
 ## Playback sources (rips on the NAS)
 
@@ -288,10 +428,17 @@ certification, IMDb/TMDB links and plot; every copy you own with an inline edito
 watched**); the digital sources; and **Refresh metadata** plus a **Watched today**
 button per copy.
 
-**Choose cover art** sits under the poster and opens a dialog with every image the
+An album's facts line carries the act as a **link to the artist page**, so
+getting from "Homogenic" to the rest of Björk's shelf is one click — and the act
+page's albums link back with the page they were opened from, so *Back* returns to
+the artist rather than to the catalogue.
+
+A small pencil in the corner of the poster opens a dialog with every image the
 lookups have offered for the title (Wikipedia, Wikidata's IMDb/TMDB hand-off,
 MusicBrainz covers) plus the Jellyfin still; click one to make it the image the shelf
-shows.
+shows, press the little **×** on a candidate to forget it for good (a poster fetched
+for the wrong film otherwise stays in the list forever), or pick **Automatic** to go
+back to "Jellyfin first, then the poster".
 The choice is stored in `titles.art_source` (`jellyfin` or `poster`), so a refresh
 no longer overwrites a poster you picked, and the urls themselves are kept in
 `titles.art_candidates` (JSON) so you can switch back later.
@@ -324,15 +471,20 @@ catalogue fills that gap itself:
   handful of folders, not the whole share.
 * **Path inside the root** on a title page is pre-filled with the folder the scan
   found, so adding a missing copy is a single click rather than a typed path.
-* **Jellyfin**: paste the server URL and an API key (Dashboard → API Keys) under
-  Admin → Jellyfin, press *Sync with Jellyfin*, and every copy is linked to the item
-  Jellyfin already holds. The sync also runs once at start-up and whenever you press
+* **Jellyfin**: press *Add a server* on the admin page — a label, its URL and a key
+  (Dashboard → API Keys) — then *Sync with Jellyfin*, and every copy is linked
+  to the item Jellyfin already holds. The sync also runs once at start-up and
+  whenever you press
   the button, so films added since the last one get their button without a visit to
   Admin; names are matched loosely (`10,000 B.C.` finds *10,000 BC*, and a catalogue
   subtitle may be dropped). The title page then offers *Play in Jellyfin*, which sends
-  the film or album straight to a connected client. The key is stored in the
-  database, so it survives upgrades; `jellyfin_url` / `jellyfin_api_key` in the
-  the admin page is the only place to set them — the add-on options no longer carry these two keys.
+  the film or album straight to a connected client. Servers and their keys are
+  stored in the database (`jellyfin_servers`), so they survive upgrades; more
+  than one can be registered, each keeping its own routes, and the add-on
+  options carry no URL or API key any more — they are set on the admin page.
+  **Edit** under a server changes its label, address or key in place: leave the
+  key box empty to keep the key already stored (it is never shown), and run a
+  sync afterwards so the copies pick up a new label.
 
 ## Updating a running install
 

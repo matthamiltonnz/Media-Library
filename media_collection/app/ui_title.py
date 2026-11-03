@@ -23,21 +23,34 @@ def _text(value):
     return html.escape(str(value))
 
 
-def _facts(row):
+def _facts(row, base=""):
+    """The one-line summary under the title: year, kind, artist, runtime ...
+
+    Every part is escaped here, so the caller can drop the result into the page
+    as it is. The artist is the one link in the line, because an album page is
+    the obvious place to want the rest of that act's shelf - `base` is passed in
+    so the link follows the add-on's own prefix.
+    """
     bits = []
     if row["release_year"]:
-        bits.append(str(row["release_year"]))
+        bits.append(_text(str(row["release_year"])))
     if row["kind"]:
-        bits.append(KIND_LABELS.get(row["kind"], row["kind"]))
+        bits.append(_text(KIND_LABELS.get(row["kind"], row["kind"])))
     if "artist_name" in row.keys() and row["artist_name"]:
-        bits.append(row["artist_name"])
+        name = _text(row["artist_name"])
+        artist_id = (row["artist_id"] if "artist_id" in row.keys() else None)
+        if base and artist_id:
+            bits.append('<a href="%sartist/%d">%s</a>'
+                        % (_text(base), artist_id, name))
+        else:
+            bits.append(name)
     if row["runtime_minutes"]:
-        bits.append("%d min" % row["runtime_minutes"])
+        bits.append(_text("%d min" % row["runtime_minutes"]))
     if row["genres"]:
-        bits.append(row["genres"])
+        bits.append(_text(row["genres"]))
     if row["rating"]:
-        bits.append("rated %s" % row["rating"])
-    return " · ".join(_text(bit) for bit in bits)
+        bits.append(_text("rated %s" % row["rating"]))
+    return " · ".join(bits)
 
 
 def _links(row):
@@ -125,10 +138,9 @@ def _play_block(base, row, items, digital, players, last_player,
                     and source["root_path"])
                 or source["provider"] == "jellyfin"]
     jellyfin_ready = bool(jellyfin_link and jellyfin_configured)
-    head = "" if items else '<p class="muted">No copies recorded yet.</p>'
     if not playable and not jellyfin_ready:
-        return (head + '<p class="muted">No file to play yet - rip the disc to'
-                ' a media folder and the scan picks it up by itself.</p>')
+        return ('<p class="muted">No file to play yet - rip the disc to'
+                ' a media folder and the scan picks it up by itself.</p>', "")
 
     if playable:
         player_options = "".join(
@@ -190,15 +202,22 @@ def _play_block(base, row, items, digital, players, last_player,
     else:
         shelf = ""
 
+    music = (row["kind"] or "") == "music"
+    play_button = (
+        '<p><button type="submit">Play the album in Jellyfin</button>'
+        '<span class="sub">The whole album queues, not just the first'
+        ' track.</span></p>' if music
+        else '<p><button type="submit">Play in Jellyfin</button></p>')
     picker = _version_picker(digital, items)
     if not jellyfin_ready:
         jellyfin = ""
     elif sessions:
         session_options = "".join(
             '<option value="%s">%s%s</option>'
-            % (_text(session.get("id")), _text(session.get("name") or "device"),
-               " — " + _text(session.get("client")) if session.get("client")
-               else "")
+            % (_text(session.get("id")),
+               _text(session.get("name") or "device"),
+               " \u00b7 " + _text(session["user"])
+               if session.get("user") else "")
             for session in sessions)
         jellyfin = ('<h3>On the Jellyfin server</h3>'
                     '<p class="sub">Starts it on a Jellyfin app that is open'
@@ -208,32 +227,28 @@ def _play_block(base, row, items, digital, players, last_player,
                     '<label>Jellyfin device<select name="session_id">%s'
                     '</select></label>'
                     '%s'
-                    '<p><button type="submit">Play in Jellyfin</button></p>'
+                    '%s'
                     '</form>' % (_text(base), row["id"],
-                                          session_options, picker))
+                                          session_options, picker, play_button))
     else:
         jellyfin = ('<h3>On the Jellyfin server</h3>'
                     '<p class="muted">No Jellyfin app is open at the moment -'
                     ' start it on the device you want and press Play again.</p>')
 
     if not shelf and not jellyfin:
-        return head                 # nothing to play: no button, no sheet
-    return """%s
-<p><button type="button" class="primary" data-open="play">Play</button></p>
-<dialog id="play" class="sheet">
+        return ("", "")     # nothing to play: no button, no sheet
+
+    # The caller puts the button at the top of the page; the sheet is a
+    # modal, so where its markup sits in the document does not matter.
+    button = ('<p class="play-row"><button type="button" class="primary"'
+              ' data-open="play">Play</button></p>')
+    sheet = ("""<dialog id="play" class="sheet">
   <h2>Play %s</h2>
   %s
   %s
   <form method="dialog"><p><button type="submit">Close</button></p></form>
-</dialog>
-<script>
-document.addEventListener("click", function (event) {
-  var opener = event.target.closest("[data-open]");
-  if (opener) {
-    document.getElementById(opener.dataset.open).showModal();
-  }
-});
-</script>""" % (head, _text(row["name"]), shelf, jellyfin)
+</dialog>""" % (_text(row["name"]), shelf, jellyfin))
+    return button, sheet
 
 
 def _format_options(formats, labels, chosen):
@@ -244,11 +259,17 @@ def _format_options(formats, labels, chosen):
 
 
 def _store_options(chosen):
-    options = ['<option value=""%s>not a purchase</option>'
+    # the empty option is "no store" - a disc was not bought from a shop
+    # online, so it must not claim to be either a purchase or "not a
+    # purchase"; a NULL/empty store simply renders as a dash
+    options = ['<option value=""%s>-</option>'
                % ("" if chosen else " selected")]
     for store in PURCHASE_STORES:
+        # `chosen` arrives as the label the copy line prints ("Apple TV")
         options.append('<option value="%s"%s>%s</option>'
-                       % (store, " selected" if store == chosen else "",
+                       % (store,
+                          " selected" if chosen in (store, STORE_LABELS[store])
+                          else "",
                           _text(STORE_LABELS[store])))
     return "".join(options)
 
@@ -400,12 +421,6 @@ def _copies_tab(base, row, items, digital, formats, labels, users,
         '<dialog id="addcopy"><h2>Add a copy</h2>'
         '<form method="post" action="%sitems">'
         '<input type="hidden" name="title" value="%s">'
-        '<label>Media type<select name="kindpick"'
-        ' onchange="this.form.kind.value=this.value">'
-        '<option value="movie">Film</option>'
-        '<option value="tv">TV</option>'
-        '<option value="music">Music</option>'
-        '</select></label>'
         '<input type="hidden" name="kind" value="%s">'
         '<input type="hidden" name="release_year" value="%s">'
         '<input type="hidden" name="from" value="title">'
@@ -472,48 +487,72 @@ def _title_form(base, row):
 
 
 def _art_block(base, row, jellyfin_link):
-    """Pick which image the shelf shows: the Jellyfin still or a fetched poster."""
+    """The pencil on the cover: which image the shelf shows, and forgetting one.
+
+    It used to be a paragraph-wide *Choose cover art* button under the picture,
+    taking as much room as the picture itself. It is now a small pencil on the
+    corner of the cover, and the sheet it opens offers two things the old one
+    did not: a way to forget an image that is wrong (a poster fetched for the
+    wrong film hangs around in art_candidates forever) and a way back to the
+    automatic choice.
+    """
     picks = []
     if jellyfin_link:
-        picks.append(("jellyfin", base + "art/" + jellyfin_link["jf_id"], "Jellyfin"))
+        picks.append(("jellyfin", base + "art/" + jellyfin_link["jf_id"],
+                      "Jellyfin still"))
     try:
         for item in json.loads(row["art_candidates"] or "[]"):
             url = item.get("url")
-            if url:
-                picks.append(("poster", url, item.get("source") or "lookup"))
+            if url and not any(pick[1] == url for pick in picks):
+                picks.append(("poster", url, item.get("source") or "poster"))
     except (ValueError, AttributeError):
         pass
-    if row["poster_url"] and not any(p[1] == row["poster_url"] for p in picks):
+    if row["poster_url"] and not any(pick[1] == row["poster_url"]
+                                     for pick in picks):
         picks.append(("poster", row["poster_url"],
                       row["metadata_source"] or "poster"))
-    if len(picks) < 2:                   # nothing to choose between
+    if not picks:                    # nothing to choose between
         return ""
-    current = ui.pick_cover(base, jellyfin_link["jf_id"] if jellyfin_link else None,
+    current = ui.pick_cover(base,
+                            jellyfin_link["jf_id"] if jellyfin_link else None,
                             row["poster_url"], row["art_source"] or "")
     cells = "".join(
-        '<form class="artpick%s" method="post" action="%s">'
+        '<form class="artpick%s" method="post" action="%stitle/%d/art">'
         '<input type="hidden" name="source" value="%s">'
         '<input type="hidden" name="url" value="%s">'
-        '<button type="submit"><img src="%s" alt="" loading="lazy"></button>'
-        '<span>%s</span></form>'
-        % (" current" if url == current else "",
-           _text("%stitle/%d/art" % (base, row["id"])),
+        '<button type="submit" name="action" value="use">'
+        '<img src="%s" alt="" loading="lazy"><span>%s</span></button>'
+        '<button type="submit" name="action" value="forget" class="forget"'
+        ' title="Forget this image" aria-label="Forget this image">\u00d7'
+        '</button></form>'
+        % (" current" if url == current else "", _text(base), row["id"],
            _text(kind), _text(url), _text(url), _text(label))
         for kind, url, label in picks)
-    return ('<p><button type="button" onclick="artpick.showModal()">'
-            'Choose cover art</button></p>'
-            '<dialog id="artpick"><h2>Cover art</h2>'
-            '<p class="sub">Pick the image the shelf shows for this title.</p>'
-            '<div class="artpicks">%s</div>'
-            '<p><button type="button" onclick="artpick.close()">Close</button></p>'
-            '</dialog>' % cells)
+    automatic = (
+        '<form class="artpick%s" method="post" action="%stitle/%d/art">'
+        '<input type="hidden" name="action" value="auto">'
+        '<button type="submit"><span class="auto">Automatic</span>'
+        '<span>Jellyfin first, then the poster</span></button></form>'
+        % ("" if (row["art_source"] or "") else " current",
+           _text(base), row["id"]))
+    pencil = ('<button type="button" class="coveredit" data-open="artpick"'
+              ' title="Choose the cover image"'
+              ' aria-label="Choose the cover image">\u270e</button>')
+    return (pencil
+            + '<dialog id="artpick"><h2>Cover art</h2>'
+            '<p class="sub">Pick the image the shelf shows for %s.</p>'
+            '<div class="artpicks">%s%s</div>'
+            '<form method="dialog"><p><button type="submit">Close</button></p>'
+            '</form></dialog>'
+            % (_text(row["name"]), cells, automatic))
 
 
 def render(base, row, items, digital, formats, labels, summary=None, error=None,
            ripped_root="", roots=(), owner=None, players=(), last_player=None,
            jellyfin_link=None, jellyfin_sessions=(),
            jellyfin_configured=False, tab="about", users=(), viewer_id=None,
-           back=None):
+           back=None,
+           back_label="\u2190 Back to the catalogue"):
     parts = []
     if summary:
         parts.append('<p class="banner good">%s</p>' % _text(summary))
@@ -522,14 +561,25 @@ def render(base, row, items, digital, formats, labels, summary=None, error=None,
 
     cover = ui.pick_cover(base, jellyfin_link["jf_id"] if jellyfin_link else None,
                           row["poster_url"], row["art_source"] or "")
+    # the pencil sits on the cover, so both live in one box - and a title with
+    # no image at all gets neither (a 170x245 grey box is not an improvement)
     if cover:
-        parts.append('<img class="cover" src="%s" alt="" loading="lazy">'
-                     % _text(cover))
-    parts.append(_art_block(base, row, jellyfin_link))
+        parts.append('<div class="coverwrap">%s%s</div>'
+                     % ('<img class="cover" src="%s" alt="" loading="lazy">'
+                        % _text(cover),
+                        _art_block(base, row, jellyfin_link)))
 
-    facts = _facts(row)
+    facts = _facts(row, base)
     if facts:
         parts.append('<p class="sub">%s</p>' % facts)
+
+    # The Play button sits at the top: it used to be below the copies, so
+    # starting a film meant scrolling past every copy of it first.
+    play_button, play_sheet = _play_block(
+        base, row, items, digital, players, last_player, jellyfin_link,
+        jellyfin_configured, jellyfin_sessions, labels)
+    if play_button:
+        parts.append(play_button)
     links = _links(row)
     if links:
         parts.append('<p class="sub">%s</p>' % links)
@@ -557,16 +607,13 @@ def render(base, row, items, digital, formats, labels, summary=None, error=None,
         parts.append(_copies_tab(base, row, items, digital, formats, labels,
                                  users, viewer_id))
         parts.append(_delete_block(base, row))
-    if True:   # play sheet and the about block belong on every view
-        parts.append(_play_block(base, row, items, digital, players,
-                                 last_player, jellyfin_link,
-                                 jellyfin_configured, jellyfin_sessions,
-                                 labels))
+    parts.append(play_sheet)
 
     if back is None:
         back = ("?kind=%s" % row["kind"]
                 + ("&owner=%d" % owner if owner else ""))
-    return ui.page(base, row["name"], "".join(parts), back=back)
+    return ui.page(base, row["name"], "".join(parts), back=back,
+                   back_label=back_label)
 
 
 def _version_picker(digital, items):

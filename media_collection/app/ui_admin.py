@@ -5,6 +5,85 @@ import time
 import ui
 
 
+def _panel(title, body):
+    """One block of the admin page: a heading, then its controls."""
+    return ('<section class="panel">\n<h2>%s</h2>\n%s</section>'
+            % (html.escape(title), body))
+
+
+def confirm_root(base, root, files, copies):
+    """Ask before a media folder goes: what hangs off it goes too."""
+    return ("""
+<dialog class="sheet" open>
+<h2>Remove %s?</h2>
+<p>It accounts for %d file entr%s and %d cop%s. A copy that only this
+   folder backs is removed as well.</p>
+<form method="post" action="%sadmin/roots/%d/delete">
+  <p><button type="submit" name="choice" value="files">Remove and forget its
+     files</button>
+     <button type="submit" name="choice" value="keep">Remove the source
+     only</button>
+     <a href="%sadmin">Cancel</a></p>
+</form>
+</dialog>""" % (html.escape(root["label"]),
+                files, "y" if files == 1 else "ies",
+                copies, "y" if copies == 1 else "ies",
+                html.escape(base), root["id"], html.escape(base)))
+
+
+def _clean_block(base, state):
+    """Forget file records whose path has gone - an unplugged drive."""
+    note = ""
+    if state.get("running") or state.get("finished"):
+        total = state.get("total") or 0
+        routes = state.get("routes") or 0
+        pruned = state.get("pruned") or 0
+        files = ("no file-backed copies to check" if not total else
+                 "%d of %d file%s checked"
+                 % (state.get("checked") or 0, total,
+                    "" if total == 1 else "s"))
+        note = ('<p class="sub">Clean: %s, %d forgotten, %d %s%s</p>\n'
+                % (files, state.get("gone") or 0,
+                   pruned, "copy" if pruned == 1 else "copies",
+                   "" if state.get("running") else " pruned - done"))
+        verified = state.get("verified") or 0
+        if verified or routes:
+            note += ('<p class="sub">Jellyfin: %d %s checked against the '
+                     "server%s, %d route%s dropped.</p>\n"
+                     % (verified, "copy" if verified == 1 else "copies",
+                        "" if len(state.get("skipped") or []) < 2 else "s",
+                        routes, "" if routes == 1 else "s"))
+        skipped = state.get("skipped") or []
+        if skipped:
+            note += ('<p class="sub">%s could not be asked which items it '
+                     "still holds, so its copies were left alone.</p>\n"
+                     % html.escape(", ".join(skipped)))
+        if state.get("running") and state.get("phase"):
+            note += ('<p class="sub">Clean: %s&hellip;</p>\n'
+                     % html.escape(state["phase"]))
+    return """\n%s<form method="post" action="%sadmin/clean"
+      onsubmit="return confirm('Check every file and forget the ones that have gone?')">
+  <p><button type="submit">Clean database</button>
+     <span class="muted">checks every recorded file and forgets the ones
+     that have gone, drops Jellyfin copies whose server has been removed,
+     then prunes copies left with nothing. A copy still on a shelf, or still
+     linked to a server, is never touched</span></p>
+</form>""" % (note, html.escape(base))
+
+
+def _maintenance_block(base, duplicates):
+    """Fold titles that arrived twice: a disc import and a Jellyfin sync."""
+    if not duplicates:
+        return ('<p class="sub">No title has been imported twice, so there is '
+                "nothing to fold together.</p>")
+    return """
+<p class="sub">%d title%s arrived twice - typically one row from the disc
+   import and one from a Jellyfin sync. Folding keeps every copy.</p>
+<form method="post" action="%sadmin/dedupe">
+  <p><button type="submit">Merge duplicate titles</button></p>
+</form>""" % (duplicates, "" if duplicates == 1 else "s", html.escape(base))
+
+
 def _refresh_block(base, refresh):
     refresh = refresh or {}
     running = "1" if refresh.get("running") else "0"
@@ -30,26 +109,24 @@ def _refresh_block(base, refresh):
         state = ("Last run finished %s: %d updated, %d missed, %d rate-limited of %d."
                  % (refresh["finished"], refresh["updated"], refresh["failed"],
                     refresh.get("throttled", 0), refresh["total"]))
-        action = '<button type="submit">Refresh all metadata</button>'
+        action = '<button type="submit">Refresh metadata</button>'
     else:
         state = "Never run."
-        action = '<button type="submit">Refresh all metadata</button>'
+        action = '<button type="submit">Refresh metadata</button>'
     last = refresh.get("last") or ""
     return """
-<h2>Metadata</h2>
-<p>Walks every title in the background (one at a time — Wikipedia throttles bursts)
-   and fills what each source has. Films and TV get plot, poster, year and IMDb id from Wikipedia/Wikidata; albums get their MusicBrainz release, year and cover art - MusicBrainz has no plot to give, so an album never gains one from here. This page updates itself while it runs.</p>
 <div id="refresh-panel" data-running="%s" data-status="%sadmin/status.json">
   <p id="refresh-state">%s</p>
   <p id="refresh-last" class="muted">%s</p>
   <form method="post" action="%sadmin/refresh">
     %s
-    <label class="check"><input type="checkbox" name="force" value="1"> also overwrite
-      titles that already have metadata</label>
-  </form>
-  <form method="post" action="admin/artists">
-    <p><button type="submit">Fill artist details</button>
-       <span class="muted">Country, start year and kind (person or band) for every act, one a second.</span></p>
+    <p class="muted">One button, both lookups: films and TV from
+      Wikipedia/Wikidata, albums from MusicBrainz, and for every act its
+      MusicBrainz id, country, start year and kind plus a biography, portrait
+      and reading links from Wikipedia. Only what is missing is asked for, and
+      the same thing runs by itself when the add-on starts.</p>
+    <label class="check"><input type="checkbox" name="force" value="1"> also
+      overwrite titles that already have metadata</label>
   </form>
 </div>
 <script>
@@ -107,11 +184,12 @@ def _roots_block(base, roots):
              "</tr></thead><tbody>%s</tbody></table>" % rows) if roots else \
             '<p class="muted">No roots yet.</p>'
     return """
-<h2>Media folders</h2>
-<p>The folders that ripped files live in. A playback source stores a root plus the
+<p class="sub">The folders that ripped files live in. A playback source stores a root plus the
    path inside it, so moving the drive only means editing the folder — every row below
    can be changed in place and saved.</p>
 %s
+<details class="add">
+<summary>Add a root</summary>
 <form method="post" action="%sadmin/roots">
   <div class="grid">
     <label>Label<input name="label" placeholder="QNAP" required></label>
@@ -119,67 +197,75 @@ def _roots_block(base, roots):
   </div>
   <p><button type="submit">Add root</button></p>
 </form>
+</details>
 """ % (table, html.escape(base))
 
 
 def render(base, viewer, stats, message=None, refresh=None, duplicates=0,
-           roots=(), jellyfin=None, scan_message="", players=(), chosen=None, jobs=None):
-    parts = []
+           roots=(), jellyfin=None, scan_message="", players=(), chosen=None,
+           jobs=None, confirm=""):
     jobs = jobs or {}
+    parts = []
+    if confirm:
+        parts.append(confirm)
     if message:
         parts.append('<p class="banner good">%s</p>' % html.escape(message))
 
     parts.append(
-        '<p class="sub">Signed in as <strong>%s</strong>. %d copies · %d titles · '
-        "%d digital sources · %d owners.</p>"
-        % (html.escape(viewer["display_name"]), stats["items"], stats["titles"],
-           stats["digital"], stats["owners"]))
+        '<p class="sub">Signed in as <strong>%s</strong>. '
+        "%d titles &middot; %d copies &middot; %d digital sources"
+        " &middot; %d owners.</p>"
+        % (html.escape(viewer["display_name"]), stats["titles"],
+           stats["items"], stats["digital"], stats["owners"]))
 
-    parts.append("""
-<h2>Import</h2>
-<p>Load a Blu-ray.com / iTunes style CSV. Rows are staged for review first, so
-   nothing lands in the catalogue until you commit them.</p>
-<p><a href="%simport"><button type="button">Import a CSV…</button></a></p>
-""" % html.escape(base))
-
-    parts.append("""
-<h2>Export</h2>
-<p>A spreadsheet of every copy you can see, or a complete JSON backup.</p>
-<p>
-  <a href="%sexport.csv"><button type="button">Download CSV</button></a>
-  <a href="%sexport.json"><button type="button">Download JSON backup</button></a>
-</p>
-""" % (html.escape(base), html.escape(base)))
-
-    merge = ""
-    dedupe = ('<form method="post" action="%sadmin/dedupe"><p>%d title(s) exist twice — '
-              "typically one row from the disc import (no year) and one from iTunes. "
-              '<button type="submit">Merge duplicate titles</button></p></form>'
-              % (html.escape(base), duplicates)) if duplicates else \
-             '<p class="muted">No duplicate titles.</p>'
-    parts.append("<h2>Maintenance</h2>%s%s" % (merge, dedupe))
-
-    parts.append(_refresh_block(base, refresh))
-    parts.append(_roots_block(base, roots))
-    parts.append(_scan_block(base, scan_message, len(roots)))
-    scanned = jobs.get("scan") or {}
-    if scanned.get("running"):
-        parts.append('<p class="sub">Scanning the media folders...</p>')
     if jellyfin is not None:
-        parts.append(_jellyfin_block(base, jellyfin))
         sync = jobs.get("jellyfin") or {}
+        progress = ""
         if sync.get("running"):
-            parts.append('<p class="sub">Syncing: %s - %d of %d copies.</p>'
-                         % (html.escape(sync.get("phase") or "working"),
-                            sync.get("done") or 0,
-                            sync.get("total") or 0))
-    parts.append(_artists_block(base))
+            progress = ('<p class="sub">Syncing: %s &mdash; %d of %d copies.</p>'
+                        % (html.escape(sync.get("phase")
+                                       or "reading the library"),
+                           sync.get("done") or 0, sync.get("total") or 0))
+        parts.append(_panel("Jellyfin",
+                            progress + _jellyfin_block(base, jellyfin)))
+
+    parts.append(_panel("Media folders",
+                        _roots_block(base, roots)
+                        + _scan_block(base, scan_message, len(roots))))
+
+    metadata = ('<p class="sub">Films and TV get plot, poster, year '
+                "and IMDb id from Wikipedia and Wikidata; albums get "
+                "a MusicBrainz release, year and cover art. "
+                "MusicBrainz has no plot to give, so an album never "
+                "gains one. Both jobs run in the background and this "
+                'page keeps itself up to date.</p>\n'
+                + _refresh_block(base, refresh))
+    if (jobs.get("artists") or {}).get("running"):
+        # numbers only mean something while the fill is actually running
+        metadata += _artists_block(base)
+    parts.append(_panel("Metadata", metadata))
+
     if players:
-        parts.append(_players_block(base, players, chosen))
+        parts.append(_panel("Players", _players_block(base, players, chosen)))
+
+    parts.append(_panel("Import and export", """
+<p class="sub">A Blu-ray.com or iTunes style CSV is staged for review first,
+   so nothing lands in the catalogue until you commit it. Export gives a
+   spreadsheet of every copy you can see, or a full JSON dump.</p>
+<p><a href="%simport"><button type="button">Import a CSV&hellip;</button></a>
+   <a href="%sexport.csv"><button type="button">Download CSV</button></a>
+   <a href="%sexport.json"><button type="button">Download JSON</button></a></p>
+""" % (html.escape(base), html.escape(base), html.escape(base))))
+
+    parts.append(_panel("Maintenance",
+                        _maintenance_block(base, duplicates)
+                        + _clean_block(base, jobs.get("clean") or {})))
 
     if any((job or {}).get("running") for job in jobs.values()):
-        parts.append('<p class="sub" id="progress">Working - this page keeps itself up to date.</p>')
-        parts.append('<script>setTimeout(function () { location.reload(); }, 4000);</script>')
+        parts.append('<p class="sub" id="progress">Working&hellip;</p>\n'
+                     "<script>setTimeout(function () { location.reload(); },"
+                     " 4000);</script>")
+
     return ui.page(base, "Library admin", "".join(parts))
 
 
@@ -189,11 +275,12 @@ def _scan_block(base, message, roots=0):
         # nothing to walk: offering the button only produces an error
         note = ('<p class="sub">%s</p>' % html.escape(message)
                 if message else "")
-        return ('<h2>Media folders</h2>%s'
-                '<p class="muted">No media folders are set up yet - add one below and the scan can look for rips.</p>'
+        return ('%s'
+                '<p class="muted">No media folders are set up yet - press'
+                " <em>Add a root</em> above so the scan has somewhere"
+                " to look.</p>"
                 % note)
     return """
-<h2>Media folders</h2>
 %s
 <form method="post" action="%sscan">
   <p><button type="submit">Scan the media folders</button>
@@ -209,7 +296,7 @@ def _artists_block(base):
     import artists
 
     state = artists.summary()
-    return """<h2 id="artists">Artists</h2>
+    return """<h3 id="artists">Artists</h3>
 <p class="sub">%s</p>
 """ % (state or "Artist details come from MusicBrainz: the id, the country"
                " and the year the act started.", )
@@ -224,8 +311,7 @@ def _players_block(base, players, chosen):
     nothing means 'show them all' so it never blocks playback.
     """
     if not players:
-        return ('<h2>Players</h2>\n'
-                '<p class="sub">Home Assistant is not reporting any media'
+        return ('<p class="sub">Home Assistant is not reporting any media'
                 ' players that can take a file yet.</p>')
     rows = []
     for player in players:
@@ -250,8 +336,7 @@ def _players_block(base, players, chosen):
     else:
         note = ("All %d players Home Assistant reports are offered on title pages."
                 " Tick the ones you use to shorten that list." % len(players))
-    return """<h2>Players</h2>
-<p class="sub">%s</p>
+    return """<p class="sub">%s</p>
 <form method="post" action="%sadmin/players">
   <div class="grid players">%s</div>
   <p><button type="submit">Save players</button>
@@ -262,40 +347,88 @@ def _players_block(base, players, chosen):
 
 
 def _jellyfin_block(base, status):
-
-    """Jellyfin: how much of the catalogue the server can already play."""
+    """Jellyfin servers: what is registered, what it holds, and a sync."""
+    servers = status.get("servers") or []
     kinds = status.get("kinds") or {}
     detail = ", ".join("%d %s" % (count, kind)
-                       for kind, count in sorted(kinds.items())) or "nothing yet"
-    if not status.get("configured"):
-        state = ('<p class="sub">No API key yet - put <code>jellyfin_api_key</code> in the '
-                 'add-on options (Settings, Add-ons, Media Collection, Configuration).</p>')
-    else:
-        last = (" Last sync %s." % html.escape(status["synced_at"])
-                if status.get("synced_at") else " Not synced yet.")
-        state = ('<p class="sub">%s - %d of %d copies linked (%s).%s</p>'
-                 % (html.escape(status.get("url") or ""), status.get("linked") or 0,
-                    status.get("copies") or 0, html.escape(detail), last))
-    return """
-<h2>Jellyfin</h2>%s
+                       for kind, count in sorted(kinds.items())) or "nothing"
+    last = ("Last sync %s." % html.escape(str(status["synced_at"]))
+            if status.get("synced_at") else "Never synced.")
+    parts = []
+    if servers:
+        rows = []
+        for server in servers:
+            key = ('<span class="ok">set</span>' if server.get("api_key")
+                   else '<span class="dup">missing</span>')
+            name = html.escape(server["label"])
+            label = html.escape(server["label"], quote=True)
+            url = html.escape(server["url"], quote=True)
+            paused = ("" if server.get("is_active")
+                      else ' <span class="muted">(paused)</span>')
+            rows.append(
+                "<tr><td>%s%s</td>"
+                '<td><a href="%s" target="_blank" rel="noreferrer">%s</a></td>'
+                "<td>%s</td>"
+                '<td><form method="post" action="%sjellyfin/server/%d/delete"'
+                " onsubmit=\"return confirm('Remove this server? The copies"
+                " it alone backs go too.')\">"
+                '<button type="submit" class="danger">Remove</button>'
+                "</form></td></tr>"
+                % (name, paused, url, url, key, html.escape(base),
+                   server["id"]))
+            # a rotated key or a moved address is edited in place, and the
+            # key itself is never sent back to the browser
+            rows.append(
+                '<tr class="edit"><td colspan="4"><details>'
+                "<summary>Edit %s</summary>"
+                '<form method="post" action="%sjellyfin/server/%d">'
+                '<div class="grid">'
+                '<label>Label<input name="label" value="%s" required></label>'
+                '<label>Address<input name="url" value="%s" required></label>'
+                '<label>API key<input name="api_key" type="password"'
+                ' placeholder="leave blank to keep the current key"></label>'
+                "</div>"
+                '<p><button type="submit">Save</button>'
+                ' <span class="muted">the key is never shown - type a new one'
+                " to replace it, then run a sync.</span></p>"
+                "</form></details></td></tr>"
+                % (name, html.escape(base), server["id"], label, url))
+        parts.append("<table><thead><tr><th>Server</th><th>Address</th>"
+                     "<th>API key</th><th></th></tr></thead>"
+                     "<tbody>%s</tbody></table>" % "".join(rows))
+        routes = status.get("routes")
+        if routes is None:                 # a status dict from before 0.23.74
+            routes = status.get("linked") or 0
+        line = ("%d cop%s can play from Jellyfin"
+                % (routes, "y" if routes == 1 else "ies"))
+        if kinds:
+            line += " (%s matches)" % html.escape(detail)
+        parts.append('<p class="sub">%s &middot; %s</p>' % (line, last))
+        if any(server.get("is_active") for server in servers):
+            parts.append("""
 <form method="post" action="%sjellyfin/sync">
   <p><button type="submit">Sync with Jellyfin</button>
-     <span class="muted">Links every copy to the item Jellyfin already holds: albums and
-     TV seasons by folder, films by name and year.</span></p>
+     <span class="muted">links every copy to the item Jellyfin holds - films
+     by name and year, TV seasons and albums by folder.</span></p>
+</form>""" % html.escape(base))
+    else:
+        parts.append('<p class="sub">No server yet. Add one below and its '
+                     "films, shows and albums can be linked to the "
+                     "catalogue.</p>")
+    parts.append("""
+<details class="add">
+<summary>Add a server</summary>
+<form method="post" action="%sjellyfin/server">
+  <div class="grid">
+    <label>Label<input name="label" placeholder="Goodwood"></label>
+    <label>Address<input name="url" placeholder="http://192.168.1.10:8096"
+      required></label>
+    <label>API key<input name="api_key"
+      placeholder="Dashboard - API keys"></label>
+  </div>
+  <p><button type="submit">Add server</button>
+     <span class="muted">each server keeps its own routes, so two libraries
+     can both be linked.</span></p>
 </form>
-<details>
-  <summary>Server and API key</summary>
-  <form method="post" action="%sjellyfin/save">
-    <div class="grid">
-      <label>Server URL<input name="jellyfin_url" value="%s"
-        placeholder="http://192.168.1.10:8096"></label>
-      <label>API key<input name="jellyfin_api_key" type="password"
-        placeholder="%s"></label>
-    </div>
-    <p><button type="submit">Save</button>
-       <span class="muted">Jellyfin makes a key under Dashboard, API Keys. Leave the key
-       empty to keep the one already stored.</span></p>
-  </form>
-</details>""" % (state, html.escape(base), html.escape(base),
-                html.escape(status.get("url") or ""),
-                "stored - type to replace" if status.get("configured") else "paste the key")
+</details>""" % html.escape(base))
+    return "".join(parts)

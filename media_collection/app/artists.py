@@ -6,6 +6,7 @@ pages then work from a plain join instead of re-splitting every row.
 """
 
 import argparse
+import re
 import sys
 import threading
 
@@ -124,6 +125,51 @@ def titles_for(con, artist_id, viewer_id):
         (artist_id, viewer_id)).fetchall()
 
 
+MBID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}"
+                   r"-[0-9a-f]{12}$")
+
+
+def set_mbid(con, artist_id, value):
+    """Point an act at a MusicBrainz id, or clear it. Returns (ok, message).
+
+    The id is what the links and the "read more" row hang off, so a wrong or
+    missing one leaves an act with a MusicBrainz link to nothing. Setting it
+    here also re-reads the id's own record - country, start year, kind - because
+    those were the fields the failed lookup left blank or filled from the wrong
+    act. The derived links are dropped (not the biography: that was looked up by
+    name), so *Fetch details* rebuilds them against the id that is now stored.
+    """
+    import metadata
+
+    value = (value or "").strip().lower()
+    if value and not MBID.match(value):
+        return False, ("That is not a MusicBrainz id - it is the 36-character"
+                       " uuid from the artist's own MusicBrainz URL.")
+    if not value:
+        con.execute("UPDATE artists SET musicbrainz_id = NULL, link_urls = NULL,"
+                    " bio_at = NULL WHERE id = ?", (artist_id,))
+        con.commit()
+        return True, "MusicBrainz id cleared."
+    try:
+        details = metadata.musicbrainz_artist_by_id(value) or {}
+    except Exception as exc:                 # offline, throttled, whatever
+        details = {}
+        print("artists: MusicBrainz said %s" % exc)
+    con.execute(
+        "UPDATE artists SET musicbrainz_id = ?, country = ?, formed_year = ?,"
+        " kind = ?, link_urls = NULL, bio_at = NULL WHERE id = ?",
+        (value, details.get("country") or None, details.get("year") or None,
+         details.get("kind") or None, artist_id))
+    con.commit()
+    if not details:
+        return True, "Saved, but MusicBrainz did not answer for that id."
+    said = ", ".join(filter(None, [details.get("name"),
+                                   details.get("kind"),
+                                   details.get("country"),
+                                   str(details.get("year") or "")]))
+    return True, "Saved: %s." % (said or value)
+
+
 def rename(con, artist_id, name):
     con.execute("UPDATE artists SET name = ?, sort_name = ? WHERE id = ?",
                 (name, sort_name(name), artist_id))
@@ -146,6 +192,48 @@ def main(argv=None):
     return 0
 
 
+def _fill_from_musicbrainz(con, row):
+    """The id, country, start year and kind for one act.
+
+    Returns 1 if anything landed. The act is looked up by *name* only when it
+    has no id; otherwise the id's own record is read and the blanks are topped
+    up, so a wrong country or year from an old lookup is never overwritten.
+    """
+    import metadata
+
+    mbid = row["musicbrainz_id"]
+    try:
+        if not mbid:
+            looked = metadata.musicbrainz_artist(row["name"])
+            if not looked:
+                return 0
+            mbid = looked.get("mbid") or looked.get("id")
+            if not mbid:
+                return 0
+        details = metadata.musicbrainz_artist_by_id(mbid) or {}
+    except Exception:
+        return 0
+    updates, values = [], []
+    if not row["musicbrainz_id"]:
+        updates.append("musicbrainz_id = ?")
+        values.append(mbid)
+    if not row["country"] and details.get("country"):
+        updates.append("country = ?")
+        values.append(details["country"])
+    if not row["formed_year"] and details.get("year"):
+        updates.append("formed_year = ?")
+        values.append(details["year"])
+    if not row["kind"] and details.get("kind"):
+        updates.append("kind = ?")
+        values.append(details["kind"])
+    if not updates:
+        return 0
+    con.execute("UPDATE artists SET %s WHERE id = ?"
+                % ", ".join(updates), values + [row["id"]])
+    con.commit()
+    return 1
+
+
 def enrich(con, limit=None):
     """Fill in what MusicBrainz knows about each act: id, country, start year.
 
@@ -153,8 +241,6 @@ def enrich(con, limit=None):
     shelf meant six rows and, when their lookups missed, a job that filled
     nothing. It now also tops up the blanks on acts that already have an id.
     """
-    import metadata
-
     rows = con.execute(
         "SELECT id, name, musicbrainz_id, country, formed_year, kind FROM artists"
         " WHERE musicbrainz_id IS NULL OR country IS NULL"
@@ -166,42 +252,81 @@ def enrich(con, limit=None):
         _STATE["done"] = seen
         if limit is not None and filled >= limit:
             break
-        mbid = row["musicbrainz_id"]
-        try:
-            if not mbid:
-                looked = metadata.musicbrainz_artist(row["name"])
-                if not looked:
-                    continue
-                mbid = looked.get("mbid") or looked.get("id")
-                if not mbid:
-                    continue
-            details = metadata.musicbrainz_artist_by_id(mbid) or {}
-        except Exception:
-            continue
-        updates, values = [], []
-        if not row["musicbrainz_id"]:
-            updates.append("musicbrainz_id = ?")
-            values.append(mbid)
-        if not row["country"] and details.get("country"):
-            updates.append("country = ?")
-            values.append(details["country"])
-        if not row["formed_year"] and details.get("year"):
-            updates.append("formed_year = ?")
-            values.append(details["year"])
-        if not row["kind"] and details.get("kind"):
-            updates.append("kind = ?")
-            values.append(details["kind"])
-        if updates:
-            con.execute("UPDATE artists SET %s WHERE id = ?"
-                        % ", ".join(updates), values + [row["id"]])
-            filled += 1
-            _STATE["filled"] = filled
-        con.commit()
+        filled += _fill_from_musicbrainz(con, row)
+        _STATE["filled"] = filled
+    # a biography comes from Wikipedia, not MusicBrainz - and only once the
+    # MusicBrainz id above is there, because the links list it
+    filled += fill_bio(con)
     _STATE["running"] = False
     return filled
 
 
-_STATE = {"running": False, "filled": 0, "at": None}
+def enrich_one(con, artist_id):
+    """Details for a single act - what adding a title uses for a new one.
+
+    The same two lookups the job runs, but only for what is missing: a second
+    album by an act already on the shelf costs one row read.
+    """
+    row = con.execute(
+        "SELECT id, name, musicbrainz_id, country, formed_year, kind, bio_at"
+        "  FROM artists WHERE id = ?", (artist_id,)).fetchone()
+    if row is None:
+        return 0
+    made = 0
+    if not (row["musicbrainz_id"] and row["country"] and row["formed_year"]
+            and row["kind"]):
+        made += _fill_from_musicbrainz(con, row)
+    if row["bio_at"] is None:
+        made += fill_bio(con, artist_id=artist_id)
+    return made
+
+
+def fill_bio(con, artist_id=None, limit=None):
+    """Give acts a real biography, a portrait and "read more" links.
+
+    MusicBrainz has none of that - the "overview" it can offer is a
+    disambiguation line ("Group"), which is what the column held until now - so
+    the text comes from Wikipedia (metadata.artist_bio). An act that comes back
+    empty is stamped as well: without that, every run would ask Wikipedia about
+    the same handful of acts that have no article. The artist page's own button
+    passes an id and always asks again, so a wrong match can be retried.
+    """
+    import json
+
+    import metadata
+
+    if artist_id is None:
+        rows = con.execute(
+            "SELECT id, name, musicbrainz_id FROM artists"
+            " WHERE bio_at IS NULL ORDER BY name").fetchall()
+    else:
+        rows = con.execute(
+            "SELECT id, name, musicbrainz_id FROM artists WHERE id = ?",
+            (artist_id,)).fetchall()
+    made = 0
+    for row in rows:
+        if limit is not None and made >= limit:
+            break
+        try:
+            found = metadata.artist_bio(row["name"], row["musicbrainz_id"])
+        except Exception:
+            continue
+        if found:
+            con.execute(
+                "UPDATE artists SET overview = ?, image_url = ?, wiki_url = ?,"
+                " link_urls = ?, bio_at = datetime('now') WHERE id = ?",
+                (found["overview"], found["image_url"], found["wiki_url"],
+                 json.dumps(found["links"]), row["id"]))
+            made += 1
+            _STATE["bios"] = (_STATE.get("bios") or 0) + 1
+        else:
+            con.execute("UPDATE artists SET bio_at = datetime('now')"
+                        " WHERE id = ?", (row["id"],))
+        con.commit()
+    return made
+
+
+_STATE = {"running": False, "filled": 0, "bios": 0, "at": None}
 
 
 def status():
@@ -218,6 +343,10 @@ def summary():
                        state.get("filled") or 0))
         return "Filling artist details from MusicBrainz..."
     if state["at"]:
+        if state.get("bios"):
+            return ("Filled %d artist(s) from MusicBrainz and gave %d a"
+                    " Wikipedia biography on %s."
+                    % (state["filled"], state["bios"], state["at"]))
         return ("Filled %d artist(s) from MusicBrainz on %s."
                 % (state["filled"], state["at"]))
     return ""
@@ -227,7 +356,7 @@ def start(db_path, limit=None):
     """Fill artist details in the background - MusicBrainz allows one call a second."""
     if _STATE["running"]:
         return False
-    _STATE.update(running=True, filled=0)
+    _STATE.update(running=True, filled=0, bios=0)
 
     def _run():
         import datetime

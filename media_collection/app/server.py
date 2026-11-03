@@ -177,8 +177,7 @@ def viewer_for(handler, con):
 
 # ------------------------------------------------------------------ views ----
 
-def library_rows(con, viewer_id, query="", kind="", owner=None, format="",
-                 rips=False):
+def library_rows(con, viewer_id, query="", kind="", owner=None, format=""):
     sql = """
         SELECT i.id, t.id AS title_id, t.name AS title, t.release_year, i.format,
                i.edition, i.upc_ean, i.region, i.visibility, i.location,
@@ -209,24 +208,13 @@ def library_rows(con, viewer_id, query="", kind="", owner=None, format="",
         params += discs
     if any_of:
         sql += " AND (" + " OR ".join(any_of) + ")"
-    if not rips:
-        sql += " AND NOT " + RIP_ONLY
     sql += " ORDER BY t.name COLLATE NOCASE, i.format"
     return con.execute(sql, params).fetchall()
 
 
-# A title whose only copies are files on a media folder: hidden by default so the shelf is
-# about discs, one click away when browsing what can actually be played.
-RIP_ONLY = ("NOT EXISTS (SELECT 1 FROM items o WHERE o.title_id = t.id"
-            " AND NOT EXISTS (SELECT 1 FROM digital_sources r"
-            "   WHERE r.item_id = o.id AND r.provider = 'rip'))")
-# the same test for a single copy: true when this row has a file behind it
-RIP_COPY = ("EXISTS (SELECT 1 FROM digital_sources r"
-            " WHERE r.item_id = i.id AND r.provider = 'rip')")
-
 
 def visible_clause(query="", kind="", owner=None, format="",
-                   rips=False, only=False):
+                   only=False):
     where = ["(i.visibility = 'shared' OR i.owner_id = ?)"]
     params = []                              # viewer id is supplied by the caller
     if query:
@@ -267,15 +255,11 @@ def visible_clause(query="", kind="", owner=None, format="",
 
 
 def library_stats(con, viewer_id, query="", kind="", owner=None,
-                  format="", rips=False, only=False):
-    clause, extra = visible_clause(query, kind, owner, format, rips, only)
-    if not rips:
-        clause += " AND NOT " + RIP_ONLY
+                  format="", only=False):
+    clause, extra = visible_clause(query, kind, owner, format, only)
     params = [viewer_id] + extra
     base = ("FROM items i JOIN titles t ON t.id = i.title_id WHERE " + clause)
-    # ripped files are a playback convenience, so the headline counts leave them
-    # out unless the toggle asks for them
-    counted = base if rips else base + " AND NOT " + RIP_COPY
+    counted = base  # every copy counts, however it is stored
     titles = con.execute("SELECT COUNT(DISTINCT t.id) " + base, params).fetchone()[0]
     copies = con.execute("SELECT COUNT(*) " + counted, params).fetchone()[0]
     # one entry per stored format: a file is "ripped" whatever disc it came from
@@ -327,9 +311,26 @@ PAGE = Template("""<!doctype html>
   .tag { font-size: .72rem; border: 1px solid #8886; border-radius: 999px;
          padding: 0 .45rem; white-space: nowrap; }
   .barcode { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .82rem; }
-  form.add { display: grid; gap: .5rem;
-             grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
-             max-width: 46rem; }
+  form.add { display: grid; gap: .8rem; max-width: 46rem; }
+  form.add fieldset { border: 1px solid #8883; border-radius: 8px;
+                      padding: .3rem .8rem .9rem; margin: 0; min-width: 0; }
+  form.add legend { font-size: .78rem; text-transform: uppercase;
+                    letter-spacing: .04em; opacity: .7; padding: 0 .3rem; }
+  form.add .grid { display: grid; gap: .6rem .9rem;
+                   grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); }
+  form.add .grid label { display: grid; gap: .25rem; font-size: .85rem; }
+  form.add .grid .wide { grid-column: 1 / -1; }
+  form.add .actions { display: flex; align-items: center; gap: .6rem;
+                      margin: 0; }
+  form.add .actions .check { margin-right: auto; }
+  .withbutton { display: flex; gap: .3rem; align-items: stretch; }
+  .withbutton input { flex: 1; min-width: 0; }
+  .withbutton button { padding: .3rem .55rem; white-space: nowrap; }
+  #upc-said { margin: .4rem 0 0; font-size: .82rem; }
+  #scan-video { width: 100%; max-height: 60vh; border-radius: 8px;
+                background: #000; }
+
+  [hidden] { display: none !important; }
   input, select, button { font: inherit; padding: .45rem .55rem; border-radius: 6px;
                           border: 1px solid #8886; background: Canvas; color: CanvasText; }
   button { cursor: pointer; font-weight: 600; }
@@ -411,12 +412,6 @@ PAGE = Template("""<!doctype html>
            max-width: 32rem; width: calc(100% - 2rem); }
   dialog::backdrop { background: #0008; }
   dialog h2 { margin-top: 0; }
-  fieldset.music { border: 1px solid #8884; border-radius: 8px;
-                   padding: .5rem .7rem; margin: 0 0 .2rem;
-                   display: grid; gap: .5rem;
-                   grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); }
-  fieldset.music legend { font-size: .78rem; text-transform: uppercase;
-                          letter-spacing: .04em; opacity: .65; }
 </style>
 </head>
 <body>
@@ -437,49 +432,261 @@ $notice
 $error
 <h2>$heading$scope</h2>
 <div class="sub">$totals</div>
-$rips_toggle
 $library
 
 <dialog id="addcopy">
 <h2>Add a title</h2>
 <form class="add" method="post" action="${base}items">
-  <input name="title" placeholder="Title" required>
-  <input name="release_year" placeholder="Year" inputmode="numeric" pattern="[0-9]{0,4}">
-  <select name="format">$format_options</select>
-  <select name="owner_id">$owner_options</select>
-  <select name="store">$store_options</select>
-  <input name="edition" placeholder="Edition (optional)">
-  <input name="upc_ean" placeholder="UPC / EAN (optional)" inputmode="numeric">
-  <label>Media type<select name="kind" onchange="applyKind(this.value)">
-    <option value="movie">Film</option>
-    <option value="tv">TV</option>
-    <option value="music">Music</option>
-  </select></label>
-  <input name="imdb_id" placeholder="IMDb ID (optional, tt…)">
-  <input name="location" placeholder="Where it lives (optional)">
-  <select name="visibility">
-    <option value="shared">Shared with family</option>
-    <option value="private">Private to me</option>
-  </select>
-  <label class="check"><input type="checkbox" name="fetch_metadata" value="1">
-    Look up metadata</label>
-  <fieldset class="music">
-    <legend>Music</legend>
-    <input name="artist" placeholder="Artist (albums only)">
-    <input name="artist_mbid" placeholder="Artist MusicBrainz id (optional)">
-    <input name="musicbrainz_id" placeholder="Release MusicBrainz id (optional)">
+  <fieldset>
+    <legend>The title</legend>
+    <div class="grid">
+      <label>Media type
+        <select name="kind" onchange="addKind(this.value)">
+          <option value="movie">Film</option>
+          <option value="tv">TV</option>
+          <option value="music">Music</option>
+        </select>
+      </label>
+      <label>Title<input name="title" placeholder="The Lion King" required></label>
+      <label>Year<input name="release_year" placeholder="1994"
+        inputmode="numeric" pattern="[0-9]{0,4}"></label>
+      <label class="screen">IMDb id<input name="imdb_id"
+        placeholder="tt0110357"></label>
+      <label class="music" hidden>Artist<input name="artist"
+        placeholder="The Beatles"></label>
+      <label class="music" hidden>Artist MusicBrainz id
+        <input name="artist_mbid" placeholder="optional"></label>
+      <label class="music" hidden>Release MusicBrainz id
+        <input name="musicbrainz_id" placeholder="optional"></label>
+    </div>
   </fieldset>
-  <button type="submit">Add</button>
-  <button type="button" onclick="addcopy.close()">Cancel</button>
+  <fieldset>
+    <legend>The copy</legend>
+    <div class="grid">
+      <label>Format
+        <select name="format" onchange="addFormat(this.value)">
+$format_options
+        </select>
+      </label>
+      <label>Owner<select name="owner_id">$owner_options</select></label>
+      <label>Store<select name="store">$store_options</select></label>
+      <label>Visibility
+        <select name="visibility">
+          <option value="shared">Shared with family</option>
+          <option value="private">Private to me</option>
+        </select>
+      </label>
+      <label>Edition<input name="edition"
+        placeholder="Director's cut, remaster…"></label>
+      <label class="wide">Barcode
+        <span class="withbutton">
+          <input name="upc_ean" placeholder="UPC / EAN" inputmode="numeric"
+            pattern="[0-9]{12,13}" title="12 or 13 digits">
+          <button type="button" onclick="startScan()">Scan</button>
+          <button type="button" onclick="lookUp()">Look up</button>
+        </span>
+      </label>
+      <label>Where it lives<input name="location"
+        placeholder="Lounge shelf"></label>
+    </div>
+    <p class="sub" id="upc-said" hidden></p>
+  </fieldset>
+  <p class="actions">
+    <label class="check"><input type="checkbox" name="fetch_metadata" value="1"
+      checked>
+      Look up metadata</label>
+    <button type="button" onclick="addcopy.close()">Cancel</button>
+    <button type="submit">Add title</button>
+  </p>
 </form>
 </dialog>
 
+<dialog id="scanner">
+<h2>Scan a barcode</h2>
+<video id="scan-video" playsinline muted></video>
+<p class="sub" id="scan-said">Point the camera at the barcode on the case.</p>
+<p class="actions">
+  <button type="button" onclick="stopScan()">Cancel</button>
+</p>
+</dialog>
+
+<script>
+// The title dialog shows only what the chosen media type needs: IMDb for
+// film and TV, the MusicBrainz trio for music. `hidden` rather than a class,
+// so an unticked field is never submitted empty-handed by the browser's
+// own validation either.
+function addKind(kind) {
+  var dlg = document.getElementById('addcopy');
+  if (!dlg) { return; }
+  var music = kind === 'music';
+  var i;
+  var musicFields = dlg.querySelectorAll('.music');
+  for (i = 0; i < musicFields.length; i++) { musicFields[i].hidden = !music; }
+  var screenFields = dlg.querySelectorAll('.screen');
+  for (i = 0; i < screenFields.length; i++) { screenFields[i].hidden = music; }
+}
+// a record or a tape is music whatever the media type said a moment ago
+function addFormat(format) {
+  var musicFormat = ['cd', 'vinyl', 'sacd', 'cassette'].indexOf(format) >= 0;
+  var dlg = document.getElementById('addcopy');
+  if (!dlg || !musicFormat) { return; }
+  var pick = dlg.querySelector('select[name="kind"]');
+  if (pick && pick.value !== 'music') {
+    pick.value = 'music';
+    addKind('music');
+  }
+}
+document.addEventListener('DOMContentLoaded', function () {
+  var dlg = document.getElementById('addcopy');
+  if (!dlg) { return; }
+  var pick = dlg.querySelector('select[name="kind"]');
+  if (pick) { addKind(pick.value); }
+});
+
+// ------------------------------------------------------------- barcodes
+// Scan the case with the camera (BarcodeDetector, where the browser has
+// one) or type the digits, then ask the catalogue what they belong to.
+var scanTimer = null;
+var scanStream = null;
+
+function scanSupported() {
+  return typeof window.BarcodeDetector === 'function' &&
+         !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+}
+
+function stopScan() {
+  if (scanTimer) { clearInterval(scanTimer); scanTimer = null; }
+  if (scanStream) {
+    scanStream.getTracks().forEach(function (track) { track.stop(); });
+    scanStream = null;
+  }
+  var video = document.getElementById('scan-video');
+  if (video) { video.srcObject = null; }
+  var dlg = document.getElementById('scanner');
+  if (dlg && dlg.open) { dlg.close(); }
+}
+
+function barcodeField() {
+  var dlg = document.getElementById('addcopy');
+  return dlg ? dlg.querySelector('input[name="upc_ean"]') : null;
+}
+
+function say(text) {
+  var said = document.getElementById('upc-said');
+  if (!said) { return; }
+  said.hidden = !text;
+  said.textContent = text || '';
+}
+
+function startScan() {
+  var dlg = document.getElementById('scanner');
+  var said = document.getElementById('scan-said');
+  var video = document.getElementById('scan-video');
+  if (!dlg || !said || !video) { return; }
+  if (!scanSupported()) {
+    said.textContent = 'This browser cannot read barcodes. Type the digits, '
+      + 'or open the page in Chrome on a phone.';
+    dlg.showModal();
+    return;
+  }
+  said.textContent = 'Starting the camera...';
+  dlg.showModal();
+  navigator.mediaDevices.getUserMedia({video: {facingMode: 'environment'}})
+    .then(function (stream) {
+      scanStream = stream;
+      video.srcObject = stream;
+      var play = video.play();
+      if (play && play.catch) { play.catch(function () {}); }
+      said.textContent = 'Point the camera at the barcode on the case.';
+      var detector;
+      try {
+        detector = new window.BarcodeDetector(
+          {formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128']});
+      } catch (err) {
+        detector = new window.BarcodeDetector();
+      }
+      scanTimer = setInterval(function () {
+        if (video.readyState < 2) { return; }        // no frame yet
+        detector.detect(video).then(function (codes) {
+          if (!scanTimer) { return; }            // cancelled meanwhile
+          if (!codes || !codes.length) { return; }
+          var value = String(codes[0].rawValue || '').replace(/[^0-9]/g, '');
+          if (value.length < 12) { return; }
+          var field = barcodeField();
+          stopScan();
+          if (field) { field.value = value; }
+          lookUp();
+        }).catch(function () {});
+      }, 400);
+    })
+    .catch(function (err) {
+      said.textContent = 'No camera: ' + (err.message || err.name);
+    });
+}
+
+function lookUp() {
+  var field = barcodeField();
+  if (!field) { return; }
+  var code = field.value.replace(/[^0-9]/g, '');
+  if (code.length !== 12 && code.length !== 13) {
+    say('A barcode is 12 or 13 digits.');
+    return;
+  }
+  field.value = code;
+  say('Looking up ' + code + '...');
+  fetch('barcode?upc=' + code, {headers: {'Accept': 'application/json'}})
+    .then(function (reply) { return reply.json(); })
+    .then(fillFromBarcode)
+    .catch(function () {
+      say('Could not look that barcode up - is the catalogue offline?');
+    });
+}
+
+function fillFromBarcode(data) {
+  var dlg = document.getElementById('addcopy');
+  if (!dlg) { return; }
+  var notes = [];
+  if (data.existing) {
+    notes.push('Already in the catalogue: ' + data.existing.name
+      + ' (#' + data.existing.id + ').');
+  }
+  var found = data.found;
+  if (!found) {
+    notes.push('No match for ' + (data.upc || 'that barcode')
+      + ' - type the title.');
+  } else {
+    var fill = function (name, value) {
+      var field = dlg.querySelector('[name="' + name + '"]');
+      if (field && value && !String(field.value).trim()) {
+        field.value = value;
+      }
+    };
+    fill('title', found.title);
+    fill('release_year', found.year ? String(found.year) : '');
+    if (found.kind === 'music') {
+      var pick = dlg.querySelector('select[name="kind"]');
+      if (pick && pick.value !== 'music') {
+        pick.value = 'music';
+        addKind('music');
+      }
+      fill('artist', found.artist);
+      fill('musicbrainz_id', found.musicbrainz_id);
+    }
+    notes.push(found.source + ': ' + found.title
+      + (found.artist ? ' - ' + found.artist : '')
+      + (found.year ? ' (' + found.year + ')' : ''));
+  }
+  if (data.note) { notes.push(data.note); }
+  say(notes.join(' '));
+}
+</script>
+$nowplaying
 </body>
 </html>
 """)
 
 ROW = Template("""<tr>
-  <td><a href="${base}title/$title_id">$title</a></td>
+  <td><a href="${base}title/$title_id$from_query">$title</a></td>
   <td>$year</td>
   <td><span class="tag">$format</span></td>
   <td>$owner$private</td>
@@ -491,8 +698,7 @@ ROW = Template("""<tr>
 
 
 def render_index(con, viewer, base, error=None, query="",
-                 view="list", kind="", owner=None, format="", rips=False,
-                 only=False):
+                 view="list", kind="", owner=None, format="", only=False):
     bits = []
     if query:
         bits.append("q=" + quote(query))
@@ -505,19 +711,14 @@ def render_index(con, viewer, base, error=None, query="",
     if format:
         bits.append("format=" + quote(format))
     here = "?" + "&".join(bits) if bits else ""
-    bits_rips = [bit for bit in bits if not bit.startswith("rips=")]
-    if not rips:
-        bits_rips.append("rips=1")
-    rips_link = base + ("?" + "&".join(bits_rips) if bits_rips else "")
-    rips_toggle = ('<p class="sub"><a href="%s">%s</a></p>'
-                   % (html.escape(rips_link),
-                      "Hide ripped files from the counts" if rips
-                      else "Include ripped files"))
-
-    rows = library_rows(con, viewer["id"], query, kind, owner, format,
-                          rips)
+    # what a title page needs to come back here. It is quoted: unquoted,
+    # the first "&" ends the ?from= value and every filter after it is
+    # lost when the title page rebuilds the link (owner was the visible
+    # casualty - the catalogue kept the owner, the Back link did not).
+    back_suffix = f"?from={quote(here, safe='')}" if here else ""
+    rows = library_rows(con, viewer["id"], query, kind, owner, format)
     titles, copies, formats = library_stats(con, viewer["id"], query,
-                                            kind, owner, format, rips)
+                                            kind, owner, format)
     heading = "%d title%s · %d cop%s" % (titles, "" if titles == 1 else "s", copies,
                                         "y" if copies == 1 else "ies")
     def tally_link(fmt):
@@ -545,7 +746,7 @@ def render_index(con, viewer, base, error=None, query="",
     carry = "".join(hidden(name, value) for name, value in (
         ("q", query), ("kind", kind), ("owner", owner),
         ("view", view if view != "list" else ""),
-        ("rips", 1 if rips else ""), ("only", 1 if only else "")) if value not in ("", None, 0))
+        ("only", 1 if only else "")) if value not in ("", None, 0))
     boxes = "".join(
         '<label class="tallybox"><input type="checkbox" name="format"'
         ' value="%s"%s onchange="this.form.submit()"> %s'
@@ -554,7 +755,7 @@ def render_index(con, viewer, base, error=None, query="",
            " checked" if row["fmt"] in picked else "",
            html.escape(FORMAT_LABELS.get(row["fmt"], row["fmt"])),
            row["n"])
-        for row in formats if rips or row["fmt"] != "ripped")
+        for row in formats if row["fmt"] != "ripped")
     totals = ('<form class="tally" method="get" action="%s">%s%s'
               '<button type="submit">Apply</button>%s</form>'
               % (html.escape(base), carry,
@@ -571,7 +772,6 @@ def render_index(con, viewer, base, error=None, query="",
     extra = "".join([   # the filters a kind or owner chip has to keep
         "&amp;q=" + quote(query) if query else "",
         "&amp;format=" + quote(format) if format else "",
-        "&amp;rips=1" if rips else "",
         "&amp;view=grid" if view == "grid" else "",
     ])
     modes = "".join(
@@ -619,10 +819,8 @@ def render_index(con, viewer, base, error=None, query="",
     notice = ""
     if view == "grid":
         clause, extra = visible_clause(query, kind, owner, format,
-                                       rips, only)
+                                       only)
         fmt_wanted = [f for f in (format or "").split(",") if f]
-        if not rips:  # unticked, a title that is nothing but files stays out
-            clause += " AND NOT " + RIP_ONLY
 
         cards = con.execute(
             "SELECT t.id, t.name, t.release_year, t.poster_url, t.kind,"
@@ -648,7 +846,7 @@ def render_index(con, viewer, base, error=None, query="",
             " GROUP BY t.id ORDER BY t.name COLLATE NOCASE",
             [viewer["id"], viewer["id"]] + extra).fetchall()
         library = '<div class="cards">%s</div>' % ("".join(
-            '<a class="card" href="{0}title/{1}?from={5}">{2}'
+            '<a class="card" href="{0}title/{1}{5}">{2}'
             '<div class="cap"><strong>{3}</strong><span class="muted">{4}</span></div></a>'
             .format(
                 base, card["id"],
@@ -671,7 +869,7 @@ def render_index(con, viewer, base, error=None, query="",
                                    if f != "ripped"
                                    and (not fmt_wanted or f in fmt_wanted)))),
                     ])))
-                , html.escape(here)
+                , back_suffix
             )
             for card in cards) or '<p class="empty">Nothing yet — add your first disc.</p>')
     else:
@@ -679,6 +877,7 @@ def render_index(con, viewer, base, error=None, query="",
             ROW.substitute(
                 base=base,
                 title_id=r["title_id"],
+                from_query=back_suffix,
                 title=html.escape(r["title"]),
                 year=r["release_year"] or "",
                 format=FORMAT_LABELS.get(r["format"], r["format"]),
@@ -700,6 +899,7 @@ def render_index(con, viewer, base, error=None, query="",
                    "<th></th></tr></thead><tbody>%s</tbody></table>" % body)
     return PAGE.substitute(
         base=base,
+        nowplaying=ui.NOW_PLAYING,
         viewer=html.escape(viewer["display_name"]),
         error='<p class="banner">%s</p>' % html.escape(error) if error else "",
         notice=notice,
@@ -719,13 +919,12 @@ def render_index(con, viewer, base, error=None, query="",
                % (html.escape(base), kind,
                   "&amp;owner=%d" % owner if owner else "") if query else ""),
         view=view,
-        rips_toggle=rips_toggle,
         viewtoggle=(' · <a href="%s?view=%s&amp;kind=%s%s%s%s">%s</a>'
                     % (html.escape(base), "list" if view == "grid" else "grid",
                        html.escape(kind),
                        "&amp;q=" + html.escape(query) if query else "",
                        "&amp;owner=%d" % owner if owner else "",
-                       (("&amp;format=" + html.escape(format)) if format else "") + ("&amp;rips=1" if rips else ""),
+                       (("&amp;format=" + html.escape(format)) if format else ""),
                        "List view" if view == "grid" else "Thumbnails")
                     + (' · <a href="%sartists">By artist</a>'
                        % html.escape(base) if kind == "music" else "")),
@@ -738,9 +937,12 @@ def render_index(con, viewer, base, error=None, query="",
                 row["id"], html.escape(row["display_name"]),
                 " selected" if row["id"] == viewer["id"] else "")
             for row in owner_rows),
-        store_options="".join(
-            '<option value="{0}">{1}</option>'.format(s, ui_title.STORE_LABELS[s])
-            for s in PURCHASE_STORES),
+        # no store is the default: a disc was not bought from an online
+        # shop, so adding one must not record a purchase it never had
+        store_options=(('<option value="">-</option>' + "".join(
+            '<option value="{0}">{1}</option>'.format(s,
+                                                      ui_title.STORE_LABELS[s])
+            for s in PURCHASE_STORES))),
     )
 
 
@@ -759,15 +961,111 @@ def field(form, name):
     return (form.get(name) or [""])[0].strip()
 
 
-def add_item(con, viewer, form):
-    """Insert title (reused when it already exists) + item.
+def _title_row(con, title, year):
+    """The title a POST is about, matched the way the catalogue files it."""
+    return con.execute(
+        "SELECT t.id, t.name, t.release_year, t.imdb_id, t.kind,"
+        "       a.name AS artist_name"
+        "  FROM titles t LEFT JOIN artists a ON a.id = t.artist_id"
+        " WHERE lower(t.name) = lower(?)"
+        " AND COALESCE(t.release_year, -1) = COALESCE(?, -1)"
+        " ORDER BY t.id LIMIT 1", (title, year)).fetchone()
 
-    Returns (error, title_id): error is a message for the user, title_id the row
-    that was added to (used to jump to the detail page / fetch metadata).
+
+def _same_act(existing, form):
+    """Is a music title the same act's work, not just the same album name?
+
+    Two bands can both have an album called "Greatest Hits", so a name alone
+    must not make one of them a duplicate of the other. An empty artist on
+    either side counts as "cannot tell", which keeps the block.
+    """
+    if not existing or existing["kind"] != "music":
+        return True
+    wants = (field(form, "artist") or "").strip().lower()
+    holds = (existing["artist_name"] or "").strip().lower()
+    return not (wants and holds and wants != holds)
+
+
+def _same_copies(con, title_id, owner_id, fmt):
+    """The copies a new one would duplicate: same title, owner and format.
+
+    A second copy is a real thing (one for the lounge, one for a bedroom), so
+    this only ever asks - it never refuses.
+    """
+    return con.execute(
+        "SELECT i.id, i.format, i.location, i.acquired_on,"
+        "       COALESCE(u.display_name, 'somebody') AS who"
+        "  FROM items i LEFT JOIN users u ON u.id = i.owner_id"
+        " WHERE i.title_id = ? AND i.owner_id = ? AND i.format = ?"
+        " ORDER BY i.id", (title_id, owner_id, fmt)).fetchall()
+
+
+def _hidden_fields(form, skip=()):
+    """The submitted form again, as hidden inputs, so it can be re-posted."""
+    out = []
+    for name, values in form.items():
+        if name in skip:
+            continue
+        for value in values:
+            out.append('<input type="hidden" name="%s" value="%s">'
+                       % (html.escape(name, quote=True),
+                          html.escape(value, quote=True)))
+    return "".join(out)
+
+
+def clash_page(base, form, clash):
+    """Nothing was written: stop a duplicate title, or ask about a copy."""
+    row = clash["title"]
+    name = html.escape(row["name"])
+    year = row["release_year"]
+    label = f"{name} ({year})" if year else name
+    link = f"{html.escape(base)}title/{row['id']}"
+    if clash["kind"] == "title":
+        return ui.page(base, "Already in the catalogue", f"""
+<section class="panel">
+<h2>{label} is already here</h2>
+<p class="sub">Nothing was added: title #{row['id']} already carries that name
+   and year.</p>
+<p>If what you have is another copy of it, open the title and press
+   <em>Add a copy</em> - that one asks before it makes a duplicate.</p>
+<p><a href="{link}?tab=copies"><button type="button">Open {name}</button></a></p>
+</section>""")
+
+    first = clash["copies"][0]
+    fmt = FORMAT_LABELS.get(clash["format"], clash["format"])
+    who = html.escape(first["who"])
+    place = f" in {html.escape(first['location'])}" if first["location"] else ""
+    when = (f", added {html.escape(str(first['acquired_on'])[:10])}"
+            if first["acquired_on"] else "")
+    many = len(clash["copies"])
+    more = f" You already hold {many} of them." if many > 1 else ""
+    return ui.page(base, "Add a copy", f"""
+<dialog class="sheet" open>
+<h2>Another copy?</h2>
+<p>{who} already owns a {fmt} of {label}{place}{when}.{more}</p>
+<p class="sub">Nothing has been added yet.</p>
+<form method="post" action="{html.escape(base)}items">
+  {_hidden_fields(form, ('confirm_copy',))}
+  <input type="hidden" name="confirm_copy" value="1">
+  <p><button type="submit">Add another copy</button>
+     <a href="{link}?tab=copies">Cancel</a></p>
+</form>
+</dialog>""")
+
+
+def add_item(con, viewer, form):
+    """Insert a title (or reuse the one this copy belongs to) + one copy.
+
+    Returns (error, title_id, clash). error is a message for the user,
+    title_id the row that was added to. clash means nothing was written
+    and the caller must show the page it describes:
+
+        {"kind": "title", "title": row}  that title is already here
+        {"kind": "copy", "title": row, "format": fmt, "copies": [...]}
     """
     title = field(form, "title")
     if not title:
-        return "Title is required.", None
+        return "Title is required.", None, None
 
     kind = field(form, "kind")
     if kind not in KINDS:
@@ -781,22 +1079,32 @@ def add_item(con, viewer, form):
         kind = "music"             # the form claimed
 
     if fmt not in FORMATS:
-        return "Unknown format.", None
+        return "Unknown format.", None, None
 
     upc = re.sub(r"\D", "", field(form, "upc_ean")) or None
     if upc and len(upc) not in (12, 13):
-        return "UPC/EAN must be 12 or 13 digits.", None
+        return "UPC/EAN must be 12 or 13 digits.", None, None
 
     visibility = field(form, "visibility") or DEFAULT_VISIBILITY
     if visibility not in ("shared", "private"):
         visibility = "shared"
 
     imdb = (field(form, "imdb_id") or "").strip() or None
-    existing = con.execute(
-        "SELECT id, imdb_id FROM titles WHERE lower(name) = lower(?) "
-        "AND COALESCE(release_year, -1) = COALESCE(?, -1)",
-        (title, year),
-    ).fetchone()
+    owner_text = (re.sub(r"\D", "", field(form, "owner_id"))
+                  or str(viewer["id"]))
+    confirming = bool(field(form, "confirm_copy"))
+    existing = _title_row(con, title, year)
+    if not _same_act(existing, form):
+        existing = None            # a different act's album of the same name
+    if existing and not field(form, "from") and not confirming:
+        # the catalogue dialog only ever starts a title: it must not
+        # quietly become a second copy of one that is already here
+        return None, None, {"kind": "title", "title": existing}
+    if existing and not confirming:
+        same = _same_copies(con, existing["id"], int(owner_text), fmt)
+        if same:
+            return None, None, {"kind": "copy", "title": existing,
+                                "format": fmt, "copies": same}
     if existing:
         title_id = existing["id"]
         if imdb and imdb != existing["imdb_id"]:
@@ -809,17 +1117,25 @@ def add_item(con, viewer, form):
             (title, year, viewer["id"], imdb, kind)).lastrowid
 
     if kind == "music":
-        # an album can be filed under its artist and MusicBrainz release here
+        # an album can be filed under its artist and MusicBrainz release
         release_mbid = (field(form, "musicbrainz_id") or "").strip()
         if release_mbid:
             con.execute("UPDATE titles SET musicbrainz_id = ? WHERE id = ?",
                         (release_mbid, title_id))
         artists.link(con, title_id, field(form, "artist"),
                      field(form, "artist_mbid"))
+        # a brand-new act would otherwise sit there with no id, country or
+        # biography until someone pressed a button; a known one costs a read
+        linked = con.execute("SELECT artist_id FROM titles WHERE id = ?",
+                             (title_id,)).fetchone()
+        if linked and linked["artist_id"]:
+            try:
+                artists.enrich_one(con, linked["artist_id"])
+            except Exception as exc:      # a lookup must not lose the title
+                print("artists: %s" % exc)
 
     try:
-            owner_id = (re.sub(r"\D", "", field(form, "owner_id"))
-                        or viewer["id"])
+            owner_id = owner_text
             cursor = con.execute(
                 "INSERT INTO items (title_id, owner_id, format, edition,"
                 " upc_ean, location, visibility, added_by, price_paid,"
@@ -838,10 +1154,10 @@ def add_item(con, viewer, form):
     except sqlite3.IntegrityError as exc:
         con.rollback()
         if "upc_ean" in str(exc):
-            return "That barcode is already in the collection.", None
-        return "Could not save: %s" % exc, None
+            return "That barcode is already in the collection.", None, None
+        return "Could not save: %s" % exc, None, None
     con.commit()
-    return None, title_id
+    return None, title_id, None
 
 
 def parse_multipart(body, content_type):
@@ -935,6 +1251,92 @@ def stats(con):
     }
 
 
+def _back_target(value):
+    """Where a title's Back link may point: a ?query, or a page path.
+
+    A plain "?owner=2" comes from the catalogue. "artist/5?view=grid" comes
+    from an act's page, which is a different screen rather than a filter, and
+    ui.page() builds the link as base + this - so anything that could leave the
+    app (a scheme, a host, an absolute path) is refused.
+    """
+    value = (value or "").strip()
+    if not value:
+        return None
+    if value.startswith("?"):
+        return value
+    if re.match(r"^[A-Za-z0-9_.~-]+(/[A-Za-z0-9_.~-]+)*"
+                r"(\?[^\s\"'<>]*)?$", value):
+        return value
+    return None
+
+
+def now_playing_json(con, base, session=""):
+    """What the pinned player should show, as JSON for the page's poller.
+
+    `session` is the player the bar was switched to; without one the best
+    session is picked (playing before paused, then most recently active), and
+    a player that has gone quietly hands the controls back to that one.
+    """
+    found = jellyfin.active_sessions(con)
+    if not found:
+        return {"playing": False}
+    heard = None
+    for item in found:
+        if session and item["session"] == session:
+            heard = dict(item)
+            break
+    if heard is None:
+        heard = dict(found[0])
+    # the bar keys off this: without it every poll looked like silence and the
+    # player never appeared at all
+    heard["playing"] = True
+    # the catalogue usually knows the item, which gives the bar our own cover
+    # (a chosen poster, not Jellyfin's) and a link to the title page
+    row = con.execute(
+        "SELECT t.id, t.name, t.poster_url, t.art_source, ds.external_id"
+        "  FROM digital_sources ds"
+        "  JOIN items i ON i.id = ds.item_id"
+        "  JOIN titles t ON t.id = i.title_id"
+        " WHERE ds.provider = 'jellyfin'"
+        "   AND ds.external_id IN (?, ?, ?, ?) LIMIT 1",
+        (heard["item_id"], heard["album_id"], heard["parent_id"],
+         heard.get("series_id") or "")).fetchone()
+    if row:
+        heard["title_id"] = row["id"]
+        heard["title"] = row["name"]
+        heard["href"] = base + "title/%d" % row["id"]
+        heard["cover"] = ui.pick_cover(base, row["external_id"],
+                                       row["poster_url"],
+                                       row["art_source"] or "")
+    else:
+        heard["title"] = heard["name"]
+        heard["href"] = ""
+        heard["cover"] = base + "art/" + (heard["album_id"] or heard["item_id"])
+    # a track is called by its song name, so the act and album are the subtitle;
+    # an episode is "Series - S1 E4"; a film only needs the device name
+    parts = []
+    if heard.get("artist"):
+        parts.append(heard["artist"])
+    if heard.get("album"):
+        parts.append(heard["album"])
+    if not parts and heard.get("series"):
+        parts.append(heard["series"])
+        if heard.get("episode"):
+            parts.append("S%s E%s" % (heard.get("season") or 1,
+                                      heard["episode"]))
+    if not parts:
+        parts.append(heard.get("device") or "")
+    heard["subtitle"] = " \u00b7 ".join(filter(None, parts))
+    # the switcher: every player with something on, the chosen one included,
+    # so the bar can show that another player is going and hand control over
+    heard["sessions"] = [{"session": item["session"],
+                          "device": item["device"],
+                          "title": item["name"],
+                          "paused": item["paused"]}
+                         for item in found[:4]]
+    return heard
+
+
 def _catalogue_back(handler):
     """The catalogue query the viewer last used, as a `?…` back link."""
     for part in (handler.headers.get("Cookie") or "").split(";"):
@@ -981,8 +1383,39 @@ class Handler(BaseHTTPRequestHandler):
                                         "image/jpeg")
                 except jellyfin.JellyfinError:
                     return self.respond(404, "", "text/plain; charset=utf-8")
+            if route.rstrip("/").endswith("/nowplaying"):
+                wanted = (parse_qs(urlparse(self.path).query).get("session")
+                          or [""])[0]
+                return self.respond(200,
+                                    json.dumps(now_playing_json(con, base,
+                                                                wanted)),
+                                    "application/json")
             if route.rstrip("/").endswith("/health"):
                 return self.respond(200, json.dumps({"status": "ok"}), "application/json")
+            if route.rstrip("/").endswith("/barcode"):
+                # what a case barcode belongs to, for the add dialog
+                asked = (parse_qs(urlparse(self.path).query)
+                         .get("upc") or [""])[0]
+                code = re.sub(r"\D", "", asked)
+                if len(code) not in (12, 13):
+                    return self.respond(
+                        400, json.dumps(
+                            {"error": "A barcode is 12 or 13 digits."}),
+                        "application/json")
+                here = con.execute(
+                    "SELECT t.id, t.name FROM items i"
+                    " JOIN titles t ON t.id = i.title_id"
+                    " WHERE i.upc_ean = ?"
+                    " AND (i.visibility = 'shared' OR i.owner_id = ?)"
+                    " LIMIT 1", (code, viewer["id"])).fetchone()
+                match, note = metadata.upc_lookup(code)
+                return self.respond(200, json.dumps({
+                    "upc": code,
+                    "found": match,
+                    "note": note,
+                    "existing": dict(here) if here else None,
+                }), "application/json")
+
             if route.rstrip("/").endswith("/api/state"):
                 payload = {
                     "viewer": viewer["display_name"],
@@ -1009,94 +1442,37 @@ class Handler(BaseHTTPRequestHandler):
                     message = params["artists"][0]
                 elif params.get("scan") and scan.summary():
                     message = scan.summary()
-                page = ui_admin.render(
-                    base, viewer, stats(con), message,
-                    refresh_job.status(), len(dedupe.groups(con)),
-                    con.execute("SELECT * FROM media_roots ORDER BY medium, label").fetchall(),
-                    jellyfin.status(con), scan.summary(),
-                    players=playback.players(),
-                    chosen=playback.chosen(con),
-                    jobs={"scan": scan.status(),
-                          "artists": artists.status(),
-                          "jellyfin": jellyfin.progress()})
+                confirm = ""
                 asked = (params.get("confirm_root") or [""])[0]
                 if asked.isdigit():
                     root = con.execute("SELECT id, label FROM media_roots"
-                                       " WHERE id = ?", (int(asked),)).fetchone()
+                                       " WHERE id = ?",
+                                       (int(asked),)).fetchone()
                     if root:
                         files = con.execute(
                             "SELECT COUNT(*) FROM digital_sources"
                             " WHERE root_id = ? AND provider = 'rip'",
                             (root["id"],)).fetchone()[0]
                         copies = con.execute(
-                            "SELECT COUNT(DISTINCT item_id) FROM digital_sources"
+                            "SELECT COUNT(DISTINCT item_id)"
+                            " FROM digital_sources"
                             " WHERE root_id = ? AND provider = 'rip'",
                             (root["id"],)).fetchone()[0]
-                        panel = ('<dialog class="sheet" open><h2>Remove %s?</h2>'
-                                 ' It accounts for %d file entr%s and %d cop%s.</p>'
-                                 '<form method="post" action="%sadmin/roots/%d/delete">'
-                                 '<button type="submit" name="choice" value="files">'
-                                 'Remove and forget its files</button> '
-                                 '<button type="submit" name="choice" value="keep">'
-                                 'Remove the source only</button> '
-                                 '<a href="%sadmin">Cancel</a></form></dialog>'
-                                 % (html.escape(root["label"]), files,
-                                    "y" if files == 1 else "ies", copies,
-                                    "y" if copies == 1 else "ies",
-                                    html.escape(base), root["id"],
-                                    html.escape(base)))
-                        page = page.replace(
-                            "<h2>Media folders</h2>",
-                            panel + "<h2>Media folders</h2>", 1)
-                state = clean_job.status()
-                if state["running"] or state["finished"]:
-                    note = ('<p class="sub">Clean: %d of %d checked, '
-                            '%d forgotten, %d copies pruned%s</p>'
-                            % (state["checked"], state["total"], state["gone"],
-                               state["pruned"],
-                               "" if state["running"] else " \u2014 done"))
-                    if state["running"]:
-                        note += ('<script>setTimeout(function () {'
-                                 ' location.reload(); }, 2000);</script>')
-                    page = page.replace("<h2>Media folders</h2>",
-                                        note + "<h2>Media folders</h2>", 1)
-                found = con.execute("SELECT id, label, url, is_active"
-                                    " FROM jellyfin_servers ORDER BY id").fetchall()
-                if found:
-                    listed = "".join(
-                        '<li>%s <span class="muted">%s</span>'
-                        '<form method="post" action="%sjellyfin/server/%d/delete"'
-                        ' onsubmit="return confirm(\'Remove this server? Its links,'
-                        ' and any copy it alone backed, go too.\')">'
-                        '<button type="submit">Remove</button></form></li>'
-                        % (html.escape(row["label"]), html.escape(row["url"]),
-                           html.escape(base), row["id"])
-                        for row in found)
-                    panel = ('<h2>Jellyfin servers</h2><ul class="servers">%s</ul>'
-                             % listed)
-                else:
-                    panel = ('<h2>Jellyfin servers</h2><p class="muted">None '
-                             'configured: the catalogue is built from media '
-                             'folders alone.</p>')
-                panel += ('<form method="post" action="%sjellyfin/server">'
-                          '<div class="grid">'
-                          '<label>Label<input name="label" placeholder="Jellyfin"></label>'
-                          '<label>URL<input name="url"'
-                          ' placeholder="http://host:8096"></label>'
-                          '<label>API key<input name="api_key" type="password"'
-                          ' placeholder="optional"></label></div>'
-                          '<p><button type="submit">Add server</button></p></form>'
-                          % html.escape(base))
-                page = page.replace("<h2>Media folders</h2>",
-                                    panel + "<h2>Media folders</h2>", 1)
-                page = page.replace(
-                    "<h2>Media folders</h2>",
-                    '<form method="post" action="%sadmin/clean"' ' onsubmit="return confirm(\'Check every recorded file and forget '
-                    'the ones that are gone?\')">'
-                    '<p><button type="submit">Clean database</button> '
-                    '<span class="muted">forget file entries whose '
-                    'path no longer exists</span></p></form>' % base
-                    + "<h2>Media folders</h2>", 1)
+                        confirm = ui_admin.confirm_root(
+                            base, root, files, copies)
+                page = ui_admin.render(
+                    base, viewer, stats(con), message,
+                    refresh_job.status(), len(dedupe.groups(con)),
+                    con.execute("SELECT * FROM media_roots"
+                                " ORDER BY medium, label").fetchall(),
+                    jellyfin.status(con), scan.summary(),
+                    players=playback.players(),
+                    chosen=playback.chosen(con),
+                    jobs={"scan": scan.status(),
+                          "artists": artists.status(),
+                          "jellyfin": jellyfin.progress(),
+                          "clean": clean_job.status()},
+                    confirm=confirm)
                 return self.respond(200, page)
 
             if route.rstrip("/").endswith("/export.csv"):
@@ -1119,29 +1495,36 @@ class Handler(BaseHTTPRequestHandler):
             owner = int(owner_raw) if owner_raw.isdigit() else None
             fmt = ",".join(f for f in parse_qs(urlparse(self.path).query)
                            .get("format", []) if f)
-            rips = bool(parse_qs(urlparse(self.path).query).get("rips"))
             only = bool(parse_qs(urlparse(self.path).query).get("only"))
             if route.rstrip("/").endswith("/artists"):
                 asked = parse_qs(urlparse(self.path).query)
                 want = (asked.get("view") or ["grid"])[0]
                 search = (asked.get("q") or [""])[0].strip()
                 rows = artists.all_artists(con, viewer["id"])
+                total = len(rows)
                 owner_rows, owner_id = [], None
                 if asked.get("owner"):
                     try:
                         owner_id = int(asked["owner"][0])
                     except ValueError:
                         owner_id = None
+                # "Ripped files" is the account the Jellyfin and file copies
+                # belong to, not a person, so it gets no chip of its own - the
+                # catalogue's owner row leaves it out for the same reason
+                people = {row["id"]: row for row in con.execute(
+                    "SELECT id, display_name, username FROM users")}
                 tally = {}
                 for row in rows:
                     for oid in set((row["owner_ids"] or "").split(",")):
-                        if oid:
-                            tally[oid] = tally.get(oid, 0) + 1
+                        person = (people.get(int(oid))
+                                  if oid.isdigit() else None)
+                        if person is None or person["username"] == "rips":
+                            continue
+                        tally[oid] = tally.get(oid, 0) + 1
                 if tally:
-                    who = dict(con.execute(
-                        "SELECT id, display_name FROM users").fetchall())
                     owner_rows = [
-                        {"id": int(oid), "name": who.get(int(oid), "Unknown"),
+                        {"id": int(oid),
+                         "name": people[int(oid)]["display_name"],
                          "count": n}
                         for oid, n in sorted(tally.items(), key=lambda kv: -kv[1])]
                 if owner_id is not None:
@@ -1154,7 +1537,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.respond(200, ui_artists.render_list(
                     base, rows,
                     "grid" if want == "grid" else "list", search,
-                    owner_rows, owner_id))
+                    owner_rows, owner_id, total))
 
             match = re.search(r"/artist/(\d+)/?$", route)
             if match:
@@ -1164,10 +1547,14 @@ class Handler(BaseHTTPRequestHandler):
                                         "text/plain; charset=utf-8")
                 want = (parse_qs(urlparse(self.path).query).get("view")
                         or ["grid"])[0]
+                asked = parse_qs(urlparse(self.path).query)
+                notice = (asked.get("mbid")
+                          or asked.get("mbid_error") or [""])[0]
                 return self.respond(200, ui_artists.render_artist(
                     base, artist,
                     artists.titles_for(con, artist["id"], viewer["id"]),
-                    FORMAT_LABELS, "grid" if want == "grid" else "list"))
+                    FORMAT_LABELS, "grid" if want == "grid" else "list",
+                    notice, bool(asked.get("mbid_error"))))
 
             # detail page, always last so /title/<id>/metadata is handled in POST
             linking = re.search(r"/title/(\d+)/link/?$", route)
@@ -1188,7 +1575,7 @@ class Handler(BaseHTTPRequestHandler):
                 view="grid" if view == "grid" else "list",
                 owner=owner,
                 kind=kind if kind in ("movie", "tv", "music", "other") else "movie",
-                format=fmt, rips=rips, only=only),
+                format=fmt, only=only),
                 extra={"Set-Cookie": "mc_back=%s; Path=%s; SameSite=Lax"
                        % (quote(urlparse(self.path).query, safe=""),
                           base or "/")})
@@ -1274,7 +1661,7 @@ class Handler(BaseHTTPRequestHandler):
                or ["about"])[0]
         source = (parse_qs(urlparse(self.path).query).get("from")
                   or [""])[0]
-        back = source if source.startswith("?") else None
+        back = _back_target(source)
         if back is None:  # a plain card link carries no filter, so ask the browser
             seen = urlparse(self.headers.get("Referer") or "")
             if seen.query and not seen.path.startswith("/title"):
@@ -1289,22 +1676,49 @@ class Handler(BaseHTTPRequestHandler):
             jellyfin_configured=bool(jellyfin.config(con)[1]),
             users=con.execute("SELECT id, display_name FROM users"
                               " ORDER BY display_name").fetchall(),
-            viewer_id=viewer["id"], tab=tab, back=back))
+            viewer_id=viewer["id"], tab=tab, back=back,
+            back_label=("\u2190 Back to the artist"
+                        if (back or "").startswith("artist/")
+                        else "\u2190 Back to the catalogue")))
 
     def do_POST(self):
         form = parse_body(self)
         con = connect()
         try:
             viewer = viewer_for(self, con)
+            pressed = re.search(r"/nowplaying/?$", route_path(self))
+            if pressed:
+                try:
+                    jellyfin.control(con, field(form, "session_id"),
+                                     field(form, "action"))
+                except jellyfin.JellyfinError as exc:
+                    return self.respond(200, json.dumps(
+                        {"ok": False, "note": str(exc)}), "application/json")
+                return self.respond(200, json.dumps({"ok": True}),
+                                    "application/json")
+            asked = re.search(r"/artist/(\d+)/bio/?$", route_path(self))
+            if asked:
+                artist_id = int(asked.group(1))
+                try:
+                    artists.fill_bio(con, artist_id=artist_id)
+                except Exception as exc:       # a lookup must not kill the page
+                    print("artists: %s" % exc)
+                return self.respond(303, "", extra={
+                    "Location": base_path(self) + "artist/%d" % artist_id})
             renamed = re.search(r"/artist/(\d+)/?$", route_path(self))
             if renamed:
+                artist_id = int(renamed.group(1))
+                where = base_path(self) + "artist/%d" % artist_id
                 wanted = (field(form, "artist_name") or "").strip()
                 if wanted:
-                    artists.rename(con, int(renamed.group(1)),
-                                   wanted)
-                return self.respond(303, "", extra={
-                    "Location": base_path(self) + "artist/%d"
-                    % int(renamed.group(1))})
+                    artists.rename(con, artist_id, wanted)
+                elif field(form, "action") == "mbid":
+                    # the id form; a blank box clears it on purpose
+                    ok, message = artists.set_mbid(con, artist_id,
+                                                   field(form, "musicbrainz_id"))
+                    where += "?%s=%s" % ("mbid" if ok else "mbid_error",
+                                        quote(message))
+                return self.respond(303, "", extra={"Location": where})
             gone = re.search(r"/title/(\d+)/unlink/?$", route_path(self))
             if gone:
                 source = (field(form, "source_id") or "").strip()
@@ -1441,7 +1855,10 @@ class Handler(BaseHTTPRequestHandler):
                     "Location": base + "admin?deduped=%d" % folded})
 
             if route.rstrip("/").endswith("/admin/refresh"):
+                # one button, two lookups: the titles (Wikipedia/Wikidata for
+                # films and TV, MusicBrainz for albums) and the acts themselves
                 refresh_job.start(DB_PATH, force=bool(field(form, "force")))
+                artists.start(DB_PATH)
                 return self.respond(303, "", extra={"Location": base + "admin"})
 
             if route.rstrip("/").endswith("/admin/players"):
@@ -1518,6 +1935,36 @@ class Handler(BaseHTTPRequestHandler):
                 return self.respond(303, "", extra={
                     "Location": (base or "/") + "admin"})
 
+            match = re.search(r"/jellyfin/server/(\d+)$", route.rstrip("/"))
+            if match:
+                # a rotated key or a moved address, changed in place
+                row = con.execute(
+                    "SELECT id, label, url, api_key FROM jellyfin_servers"
+                    " WHERE id = ?", (int(match.group(1)),)).fetchone()
+                if row:
+                    label = field(form, "label").strip() or row["label"]
+                    url = (field(form, "url").strip().rstrip("/")
+                           or row["url"])
+                    key = field(form, "api_key").strip() or row["api_key"]
+                    con.execute("UPDATE jellyfin_servers"
+                                " SET label = ?, url = ?, api_key = ?"
+                                " WHERE id = ?",
+                                (label, url, key, row["id"]))
+                    primary = con.execute(
+                        "SELECT MIN(id) FROM jellyfin_servers"
+                        " WHERE is_active = 1").fetchone()[0]
+                    if primary == row["id"]:
+                        # play, sessions and artwork read this pair
+                        for name, value in (("jellyfin_url", url),
+                                            ("jellyfin_api_key", key)):
+                            con.execute(
+                                "INSERT OR REPLACE INTO settings"
+                                " (key, value) VALUES (?, ?)",
+                                (name, value))
+                    con.commit()
+                return self.respond(303, "", extra={
+                    "Location": (base or "/") + "admin"})
+
             if route.rstrip("/").endswith("/jellyfin/sync"):
                 if jellyfin.start_sync(DB_PATH):
                     message = "Jellyfin sync started - the links refresh in the background."
@@ -1531,19 +1978,43 @@ class Handler(BaseHTTPRequestHandler):
             match = re.search(r"/title/(\d+)/art/?$", route)
             if match:
                 title_id = int(match.group(1))
+                action = field(form, "action") or "use"
                 source = field(form, "source")
                 url = field(form, "url").strip()
-                if source == "jellyfin":
+                if action == "auto":
+                    # back to "Jellyfin first, then the poster", keeping the
+                    # fetched poster as the fallback
+                    con.execute("UPDATE titles SET art_source = NULL"
+                                " WHERE id = ?", (title_id,))
+                elif action == "forget" and url:
+                    # drop it from the remembered candidates and, when it is the
+                    # image on show, stop showing it
+                    row = con.execute(
+                        "SELECT art_candidates, poster_url FROM titles"
+                        " WHERE id = ?", (title_id,)).fetchone()
+                    try:
+                        kept = [item for item in
+                                json.loads(row["art_candidates"] or "[]")
+                                if item.get("url") != url]
+                    except ValueError:
+                        kept = []
+                    con.execute("UPDATE titles SET art_candidates = ?"
+                                " WHERE id = ?", (json.dumps(kept), title_id))
+                    if (row["poster_url"] or "") == url:
+                        con.execute("UPDATE titles SET poster_url = NULL,"
+                                    " art_source = NULL WHERE id = ?",
+                                    (title_id,))
+                elif source == "jellyfin":
                     con.execute("UPDATE titles SET art_source = 'jellyfin'"
                                 " WHERE id = ?", (title_id,))
-                elif source == "poster" and url.startswith(("http://", "https://", "/")):
+                elif source == "poster" and url.startswith(("http://",
+                                                            "https://", "/")):
                     con.execute("UPDATE titles SET poster_url = ?,"
                                 " art_source = 'poster' WHERE id = ?",
                                 (url, title_id))
                 con.commit()
                 return self.respond(303, "", extra={
                     "Location": base + "title/%d" % title_id})
-
             match = re.search(r"/title/(\d+)/sources/?$", route)
             if match:
                 title_id = int(match.group(1))
@@ -1655,10 +2126,15 @@ class Handler(BaseHTTPRequestHandler):
                                 "SELECT jf_id FROM jellyfin_links WHERE item_id = ?"
                                 " ORDER BY jf_id LIMIT 1",
                                 (owner_item["item_id"],)).fetchone()
-                    summary = jellyfin.play(con, field(form, "session_id"),
-                                            (jf_id["jf_id"] if jf_id else None)
-                                            or (link["jf_id"] if link else ""),
-                                            ms_id)
+                    kind_row = con.execute(
+                        "SELECT kind FROM titles WHERE id = ?",
+                        (title_id,)).fetchone()
+                    summary = jellyfin.play(
+                        con, field(form, "session_id"),
+                        (jf_id["jf_id"] if jf_id else None)
+                        or (link["jf_id"] if link else ""),
+                        ms_id,
+                        kind=kind_row["kind"] if kind_row else "")
                     return self.title_page(con, viewer, base, title_id, summary=summary)
                 except jellyfin.JellyfinError as exc:
                     return self.title_page(con, viewer, base, title_id,
@@ -1814,9 +2290,14 @@ class Handler(BaseHTTPRequestHandler):
                 return self.respond(303, "", extra={"Location": base})
 
             if route.rstrip("/").endswith("/items"):
-                error, title_id = add_item(con, viewer, form)
+                error, title_id, clash = add_item(con, viewer, form)
                 if error:
                     return self.respond(400, render_index(con, viewer, base, error=error))
+                if clash:
+                    # 409 for a refused title, 200 for a question
+                    return self.respond(
+                        200 if clash["kind"] == "copy" else 409,
+                        clash_page(base, form, clash))
                 wants_metadata = bool(field(form, "fetch_metadata")) or bool(
                     (form.get("imdb_id") or [""])[0].strip())
                 if title_id and wants_metadata:
@@ -1849,6 +2330,9 @@ def main():
     except Exception as exc:  # a tidy-up must never stop the shelf coming up
         log("linkers: tidy up skipped (%s)" % exc)
     artists.start(DB_PATH, limit=60)          # a few details per start
+    # titles that arrived without metadata (an import, a bare add) get
+    # looked up too; with nothing missing this is a single query
+    refresh_job.start(DB_PATH, limit=60)
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
 
 

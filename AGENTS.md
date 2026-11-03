@@ -6,7 +6,7 @@ Entry point `media_collection/app/server.py`; schema in
 `media_collection/migrations/*.sql` applied by `migrate.sh`.
 
 Version lives in `media_collection/config.yaml` and is displayed on the page
-header. Current: **0.23.62**.
+header. Current: **0.23.98**.
 
 ## Live deployment
 
@@ -29,8 +29,16 @@ tools/deploy.sh
 `tools/deploy.sh` (added after macOS wiped `/tmp` and took the old
 `h.exp`/`apply.sh` helpers with it) tars `media_collection`, streams it to
 `/tmp/mc.tgz` on the host, untars into `/addons`, runs `ha store reload` and
-`ha apps update local_media_collection`, and exits non-zero unless
-`version_latest` equals the packaged version.
+`ha apps update local_media_collection`, and exits non-zero unless the
+**installed** version equals the packaged one.
+
+It now refuses a version the box already runs, and polls `version` rather than
+`version_latest`. Both were needed: on the 0.23.75 deploy `ha apps update`
+queued the job, `version_latest` flipped to 0.23.75, the script printed
+`deployed`, and the container was still running 0.23.74 for a minute - new code
+apparently missing, `grep -c 'summary>Edit' /app/ui_admin.py` returning 0.
+Check `ha apps info` for `version` (installed) vs `version_latest` (store); a
+`sudo docker inspect -f '{{.Config.Image}}'` shows which build is live.
 
 - SSH key auth to `hassio@192.168.234.3` works directly; no expect script,
   no password on stdin.
@@ -741,3 +749,756 @@ without Unlinking each Jellyfin match by hand.
 
 Verified on the live box with a throwaway title: the button rendered, the POST
 answered 303, and `titles`/`items` came back 0 and 0.
+
+## The admin page is one panel per job (0.23.73)
+
+The page used to be flat headings with two of them reading *Media folders*, and
+the Jellyfin section came twice: `_jellyfin_block` drew the old single
+`jellyfin_url` / `jellyfin_api_key` form while `server.py` injected a second
+*Jellyfin servers* panel by string surgery (`page.replace("<h2>Media
+folders</h2>", panel + ...)`), so the servers list, the clean button and the
+folders table were piled on top of one another.
+
+- `ui_admin._panel(title, body)` wraps a block in `<section class="panel">`
+  (bordered, rounded, 62rem max). `render()` emits Jellyfin, Media folders,
+  Metadata (with the `Artists` summary as `h3 id="artists"`), Players (only when
+  Home Assistant reports any), Import and export, Maintenance. Every heading on
+  the page is unique.
+- `render()` grew two arguments: `jobs["clean"]`, so the clean job's progress and
+  auto-reload travel the same path as the others, and `confirm`, the HTML from
+  the new `ui_admin.confirm_root()`. **`server.py` no longer edits the rendered
+  page** - there is no `page.replace(...)` left in it. Anything added to the
+  admin page is passed in, never spliced.
+- The Jellyfin panel lists `jellyfin_servers` (label, address, whether a key is
+  set, Remove) and always ends with the **Add a server** form. The sync button
+  appears only when at least one active server exists. `jellyfin.status()` now
+  carries `"servers"` (every row, `is_active` included) and `"routes"`
+  (`digital_sources` rows with `provider = 'jellyfin'`) for this. Print `routes`,
+  never `linked`: `jellyfin_links` holds one row per item per library, so on the
+  live box it reads 2047 while the catalogue has 981 playable Jellyfin copies.
+- The add form posts to `%sjellyfin/server` - **singular**. The handler tests
+  `.endswith("/jellyfin/server")`, so a plural `/jellyfin/servers` falls through
+  to a 404 with nothing in the log. Delete is `%sjellyfin/server/<id>/delete`.
+- `.panel` rules live in `ui.py` beside the rest (`.panel table`, `.panel > h2`,
+  `.panel > h3`, `.panel form`); `h3` had no styling before this.
+
+Checked on a scratch DB (`sh media_collection/migrate.sh /tmp/test.db`) with the
+server on :8123: `/admin` 200; headings `Jellyfin, Media folders, Metadata,
+(Artists), Import and export, Maintenance`; `?confirm_root=6` opens the dialog;
+POST `/jellyfin/server` -> 303 and the row appears with *Sync with Jellyfin*;
+POST `/jellyfin/server/1/delete` -> 303 and the panel falls back to *No server
+yet*.
+
+## Editing a server, and a quiet artists line (0.23.75)
+
+- Every server row is followed by a second `<tr class="edit">` holding a
+  `<details><summary>Edit <label></summary>` form that posts to
+  `%sjellyfin/server/<id>` (no `/delete`). The handler sits just after the
+  delete branch and matches `r"/jellyfin/server/(\d+)$"` on
+  `route.rstrip("/")`; the add handler's `.endswith("/jellyfin/server")` cannot
+  catch it, and the delete suffix cannot match the `$` anchor.
+- The API key is **never rendered** (`type="password"`, empty value,
+  `placeholder="leave blank to keep the current key"`), so an edit sends `""`
+  and the handler keeps `row["api_key"]`. Verified: posting an empty key left
+  the stored key alone, posting `rotated` replaced it, and the page HTML
+  contained the old key nowhere.
+- `config(con)` - what `play()`, `sessions()`, `image()` and `search_items()`
+  use - **used to read only env, options and the legacy `settings` pair**, so
+  editing `jellyfin_servers` would have changed nothing for playback. It now
+  prefers the lowest-numbered active `jellyfin_servers` row and falls back to
+  `settings`, and the edit handler mirrors the primary row into
+  `settings.jellyfin_url` / `jellyfin_api_key` so the two never disagree
+  (checked: `config(con)` returned the edited URL and key).
+- The `Artists` line ("Filled 0 artist(s) from MusicBrainz on ...") is now
+  emitted **only while the artists job is running** -
+  `render()` adds `_artists_block(base)` when `jobs["artists"]["running"]`, so
+  an idle page has no stale count and no `id="artists"` anchor. The anchor
+  therefore exists exactly when the fill does, which is when the
+  `admin#artists` redirect lands. `artists.summary()` itself is unchanged.
+
+## The add forms hide behind their own button (0.23.76)
+
+`Add a server` and `Add a root` are `<details class="add"><summary>Add a
+server</summary>` blocks - collapsed until clicked, no JavaScript. The summary is
+styled as a button (`.panel details.add > summary`: border, radius, `list-style:
+none` plus a hidden `::-webkit-details-marker`, a `+`/`-` prefix) so it does not
+read like the bare `Edit <label>` summaries above them, and they are **never**
+auto-opened - not even when the list is empty, which is why the roots empty
+state says "press *Add a root* above" rather than "add one below".
+
+## The add-title dialog is gated by media type (0.23.77)
+
+`server.py`'s `PAGE` template (the catalogue) carried an *Add a title* dialog
+whose fields all sat in one `form.add` grid, with the **Media type** select
+buried in the middle and `onchange="applyKind(this.value)"` on it - a function
+that only exists in `ui.SHELL` (where it drives the title page's *Add a copy*
+dialog), because `PAGE` had **no `<script>` at all**. So on the catalogue that
+call was a silent JavaScript error and nothing was ever gated.
+
+- The dialog is now two fieldsets - *The title* (Media type first, then Title,
+  Year, IMDb id for film/TV, Artist + two MusicBrainz ids for music) and
+  *The copy* (Format, Owner, Store, Visibility, Edition, Barcode, Where it
+  lives) - with real `<label>` text above each input instead of
+  placeholder-only fields, and the metadata checkbox + Cancel/Add in an
+  `.actions` row.
+- Gating is the `hidden` attribute on `label.music` / `label.screen`, driven by
+  `addKind()` in a new `<script>` at the end of `PAGE`. `[hidden] { display:
+  none !important; }` is needed because `form.add .grid label { display: grid }`
+  otherwise beats the user agent's `[hidden]` rule. The three music labels also
+  carry `hidden` in the markup, so the default (Film) is right before the script
+  runs.
+- `addFormat()` upgrades the media type to music when vinyl/cd/sacd/cassette is
+  chosen - one way only, so a digital album is never flipped back to a film.
+- `form.add` is no longer the grid; each fieldset holds its own `.grid`. The old
+  `fieldset.music` rules are gone, replaced by `form.add fieldset` / `legend`
+  (with `min-width: 0`, or a fieldset's `min-content` blows the dialog out on a
+  phone).
+- Trap: `PAGE` is a `string.Template`, so any `$` added to the markup or the
+  script becomes a substitution placeholder. Only `$base`, `$format_options`,
+  `$owner_options` and `$store_options` exist there.
+- Verified on a scratch DB: two legends, music fields hidden by default, and
+  POST `/items` still creates a film (imdb + metadata) and an album (artist
+  linked).
+- Worth knowing: posting an `imdb_id` forces a metadata refresh in the POST
+  handler (`wants_metadata = bool(fetch_metadata) or bool(imdb_id)`), so the
+  year typed into the form is replaced by the id's year - tt0111161 turned 1999
+  into 1994 during testing. Deliberate ("an id means look it up"), not a
+  regression from the dialog.
+
+The barcode scanner and lookup landed in 0.23.78 - see the next section.
+
+## Scanning a barcode, and what it looks up (0.23.78)
+
+The add dialog's Barcode row now carries **Scan** and **Look up**.
+
+- `startScan()` opens `<dialog id="scanner">` (a `<video playsinline muted>`)
+  and reads frames with `BarcodeDetector` (`ean_13`, `ean_8`, `upc_a`, `upc_e`,
+  `code_128`) every 400 ms. On a hit it stops the stream, puts the digits into
+  `input[name="upc_ean"]` and runs the lookup. Only Chromium-based browsers
+  (Chrome/Edge, Android included) have `BarcodeDetector`; Safari does not, so
+  the dialog says so plainly and the field stays there for typing. `getUserMedia`
+  needs HTTPS or localhost - HA ingress is HTTPS, a plain `http://host:8099` is
+  not, and the camera refuses there.
+- `lookUp()` calls `GET <base>barcode?upc=<digits>` - relative, so it follows
+  `<base href>` under an ingress path - and fills **only empty fields**, so a
+  second scan never overwrites what was typed. A MusicBrainz hit also flips the
+  media type to music and fills the artist and release id.
+- `GET /barcode` (in `do_GET`, beside `/health`) answers
+  `{"upc", "found", "note", "existing"}`; 400 for anything that is not 12 or 13
+  digits. `existing` names the title when a copy already carries that barcode
+  (shared copies, or the viewer's own).
+- `metadata.upc_lookup(upc)` tries **MusicBrainz** `release?query=barcode:<upc>`
+  first and falls back to **UPCitemdb**'s keyless trial endpoint for anything
+  that is not an album. The note carries whatever went wrong ("MusicBrainz is
+  rate-limiting us...", "UPCitemdb has no product for that code."), so the page
+  can say why it found nothing instead of staying silent.
+- Two guards the live data forced: the MusicBrainz search is **fuzzy**, so a
+  candidate only counts when `release["barcode"]` really equals the scan (a
+  `barcode:0000000000000` search cheerfully returns six releases), and codes
+  whose digits are all the same are rejected as placeholders - without both, a
+  junk barcode resolved to "Alessandro Alessandroni Plays His Music From
+  Spaghetti Westerns".
+- Verified: `upc_lookup('7293627293259')` -> *Jazz Beatles* (MusicBrainz, 2000);
+  `0000000000000` -> the placeholder note; `123456789012` -> the album **and**
+  `existing: {"id": 1, "name": "Dialog Test Film"}` for the copy that carries
+  it; 3 digits -> 400. The JS was run in node against a stub DOM: it fills
+  title/year/artist/mbid, flips the kind to music, and leaves typed values
+  alone on a second scan.
+
+## Locations, and a store that is null (0.23.79)
+
+- `migrations/0022_media_locations.sql` fills `items.location`, which was NULL
+  on all 2283 copies. It works by **format**, not by title kind: vinyl (whoever
+  owns it) -> *Lounge kallax*; Matt's bluray/3d/4k/dvd/vhs/other -> *Lounge
+  shelf*; Matt's cd/sacd/cassette -> *Bedroom storage*; Mitchell's discs ->
+  *Mitchell's bedroom*. Owners are found by `display_name`, never by id, so the
+  file is safe to read on another install. `digital` (iTunes) and `ripped`
+  (Jellyfin routes) stay NULL - they are not on a shelf - as do Jeanine's and
+  Justin's copies, which nobody asked about.
+  Live result: 504 *Bedroom storage*, 409 *Lounge shelf*, 187 *Mitchell's
+  bedroom*, 15 *Lounge kallax*, 1168 still NULL.
+- A music **title** held on a disc gets the disc's shelf: 8 of Matt's concert
+  Blu-rays and DVD reissues sit in *Lounge shelf*, which is where the case is.
+- The copy editor's **Store** box read "not a purchase" for everything. Two
+  things were wrong: the empty option carried that claim, and `_store_options`
+  compared the option *key* (`itunes`) against `chosen`, which `_stores()`
+  hands over as the *label* ("Apple TV") - so even a bought copy showed "not a
+  purchase". It now matches either, and the empty option is a plain `-`.
+- The add dialog's Store list had **no** empty option, so it defaulted to Apple
+  TV. `store_options` now starts with `<option value="">-</option>`, so a disc
+  is saved with no store at all (`add_item` writes a `digital_sources` row only
+  for `store in PURCHASE_STORES`, so nothing is recorded).
+- Checked against a copy of the live database (`/tmp/live.db`, taken with
+  `sqlite3 /data/media.db ".backup /tmp/live.db"` and `cat`-streamed out of the
+  container): the migration applies as migration 0022, `/title/1` renders
+  `name="location" value="Lounge shelf"`, an iTunes copy selects *Apple TV* and
+  a plain disc selects `-`.
+
+## A duplicate title is refused, a duplicate copy is questioned (0.23.80)
+
+`add_item()` used to *reuse* any title with the same name and year and quietly
+append the copy, so adding "The Lion King" from the catalogue gave you a second
+copy of the existing row with no word about it.
+
+- `add_item(con, viewer, form)` now returns **(error, title_id, clash)**.
+  `clash` means nothing was written and the caller must show `clash_page()`:
+  `{"kind": "title", "title": row}` for the catalogue dialog (a brand-new title
+  that is already here), or `{"kind": "copy", "title": row, "format": fmt,
+  "copies": [...]}` for the copy dialog (same owner, same format).
+- The two dialogs are told apart by the **`from=title`** field the title page's
+  *Add a copy* form already carried; the catalogue dialog posts no `from`.
+- `/items` answers **409** for a refused title and **200** for the copy
+  question. `clash_page()` renders either through `ui.page(...)`: the refusal is
+  a `.panel` with a button to `/title/<id>?tab=copies`, the question is a
+  `<dialog class="sheet" open>` that re-posts the whole form through
+  `_hidden_fields(form, ("confirm_copy",))` plus `confirm_copy=1`.
+- `_title_row()` returns the artist name too, and `_same_act()` keeps a music
+  match honest: two bands can both have *Greatest Hits*, so a matching name
+  under a different artist is a new title. Verified: same act -> 409, different
+  act -> 303 and a new row, no artist at all -> 409 (it cannot tell, so it does
+  not guess).
+- `_same_copies()` matches on **title + owner + format**, never on the title
+  alone: a second copy is a real thing (lounge and bedroom), so it asks and
+  never refuses.
+- The copy dialog lost its *Media type* select. It existed only to feed a
+  hidden `kind` through `onchange="this.form.kind.value=this.value"`, and it
+  always *displayed* Film, even on a music title. The hidden `kind` (the
+  title's own kind) stays. That left `ui.SHELL`'s `applyKind()` and the two
+  script blocks hunting for `select[name="kindpick"]` dead, so they are gone -
+  `applyKind` had already been replaced by `addKind` in `PAGE`.
+- The Barcode box gained `pattern="[0-9]{12,13}"`, so a mistyped code is caught
+  by the browser instead of coming back as a 400 page that loses the form.
+- Checked on the copy of the live database (`/tmp/live.db`): re-adding
+  "10,000 B.C." (2008) -> 409 and the page names title #1; a blu-ray copy for
+  Matt -> 200 "Matt Hamilton already owns a Blu-ray of 10,000 B.C. (2008) in
+  Lounge shelf", `confirm_copy` -> 303 to `/title/1?tab=copies` and the copy
+  count went 2 -> 3; a dvd or a Mitchell copy -> 303 with no question.
+
+## The catalogue's filters survive the Back link (0.23.81)
+
+Opening a title from a filtered catalogue and pressing *Back to the catalogue*
+came back to a different view - the owner filter, and anything filtered after
+it, was gone. The cause was **encoding**, not logic. The thumbnail card linked
+to `title/<id>?from=<query>` with the query only HTML-escaped, so the first `&`
+ended the `?from=` value:
+
+```
+/title/764?from=?q=dido&kind=music&owner=2
+   parse_qs -> from="?q=dido", kind="music", owner="2"
+```
+
+The title page only reads `from`, so `back` became `?q=dido` and the other
+parameters were dropped on the floor. `title_page()` takes the first `from`
+that starts with `?` and never consults the Referer afterwards, so the
+truncated value won and the browser's real URL was never asked.
+
+- `render_index()` now builds `back_suffix = "?from=" + quote(here, safe="")`
+  once, and both link builders use it: the grid card (`{5}`, template changed
+  from `title/{1}?from={5}` to `title/{1}{5}`) and the list row
+  (`ROW` gained `$from_query`). The list row carried **no** `from` at all
+  before, so it leaned on the Referer; now both views are explicit.
+- `title_page()` needed no change: `parse_qs` decodes the value back to
+  `?q=dido&kind=music&owner=2`, which starts with "?" as it expects.
+- Verified on a copy of the live database: `/?q=dido&kind=music&owner=2&format
+  =cd&view=grid` cards link to
+  `?from=%3Fq%3Ddido%26kind%3Dmusic%26owner%3D2%26view%3Dgrid%26format%3Dcd`
+  and that title's Back link is
+  `/?q=dido&kind=music&owner=2&view=grid&format=cd`; the list view does the
+  same; `?owner=2` and `?owner=3` still return different card counts.
+- The `mc_back` cookie was never the problem - it stores
+  `quote(urlparse(self.path).query)`, the whole query, which is why the filters
+  survived a **POST** but not a card click.
+- `ui_title.render()`'s `back is None` fallback is what hid the bug from
+  `/title/<id>` fetched on its own: it builds `?kind=<row kind>` (+ owner) so a
+  title with no `from`, no Referer and no cookie still renders.
+
+Still open: `ui_artists` links to `%stitle/%d` with no `from`, and the act list
+sets no `mc_back`, so a title opened from `/artists?owner=5` comes back to the
+catalogue rather than the act list. Fixing that needs the back target to carry
+a **path**, not just a query, because `ui.page()` does `base + back`.
+
+
+
+## Title page rework: the pencil, the biography, the pinned player (0.23.82)
+
+### Where cover art actually lives
+
+`titles.poster_url`, `titles.art_candidates` and `titles.art_source` (migration
+0014). `art_candidates` is a JSON list of `{"source", "url"}` - every image a
+lookup ever offered, capped at the last 12 by `metadata.remember_art()` - and
+`poster_url` is the one in use when `art_source = 'poster'`. **No image files
+are stored**: a url points at Wikipedia/IMDb or at `/art/<jf_id>`, which
+proxies Jellyfin. So "deleting a cover" is editing those three columns, which is
+what `POST /title/<id>/art` now does with `action=`:
+
+- `use` (default) - the old behaviour, `source=jellyfin` or `source=poster&url=`;
+- `forget` - drop that url from `art_candidates`, and if it is `poster_url`
+  clear `poster_url`/`art_source`;
+- `auto` - `art_source = NULL`, i.e. Jellyfin first then the poster, keeping
+  the fetched poster as the fallback.
+
+The chooser is a pencil on the bottom-right corner of the cover, inside a
+`.coverwrap` that now *floats* the image (the old rule floated `img.cover`
+itself, so the pencil would have floated away from it). Each candidate in the
+sheet has a small x Forget button, and the sheet ends with an *Automatic* tile.
+
+A title with no image at all (98 of 1182 on the live shelf) gets neither a grey
+placeholder nor a pencil: `_art_block()` returns "" when there is nothing to
+choose between, and `render()` only draws the `.coverwrap` when there is a
+cover to decorate.
+
+
+### The biography on an artist page
+
+`artists.overview` was junk - MusicBrainz's disambiguation, so "Group" or
+"American singer-songwriter and pianist" - because MusicBrainz has no
+biography. `migrations/0023_artist_bio.sql` adds `wiki_url`, `link_urls`
+(JSON) and `bio_at`, and `metadata.artist_bio(name, mbid)` fills them from
+Wikipedia: the lead extract, the lead image, and links to Wikipedia, Wikidata
+(from `prop=pageprops`), MusicBrainz and a Discogs search.
+
+- `metadata.wikipedia_artist_name()` tries the plain title, then `(band)` /
+  `(musician)`, then Wikipedia's own search - and every hit must pass
+  `_about_music()` (a role word from `MUSIC_ROLES`) and must not be a
+  disambiguation page, or a film called "Heat" becomes a band.
+- `artists.fill_bio()` runs at the end of `enrich()` (so *Fill artist details*
+  does it) and on its own from the artist page's **Fetch details** button
+  (`POST /artist/<id>/bio`). An act whose lookup comes back empty is stamped
+  with `bio_at` anyway, otherwise every run re-asks about the same handful of
+  acts with no article; the button bypasses that.
+- `render_artist()` shows the bio only when `wiki_url` is set, so rows still
+  holding the old "Group" text show nothing until they are filled.
+- `ui.page(..., back=...)` builds `base + back`, and `title_page()` now accepts
+  a `from` that is a **page path** (`_back_target()`): the act page links with
+  `from=artist/2?view=grid`, so Back returns to the act and reads
+  "Back to the artist" (`ui.page()` grew `back_label`; SHELL's static wording
+  became `@@BACKLABEL@@`). That closes the "a title opened from /artists comes
+  back to the catalogue" gap.
+
+### The pinned player
+
+`ui.NOW_PLAYING` is one string - `<style>`, the `<aside id="nowplaying">`
+markup and its script - dropped in by `ui.page()` through `@@NOWPLAYING@@` and
+by the **catalogue's own `PAGE`** through `$nowplaying`. `PAGE` is a
+`string.Template` and is *not* `ui.SHELL`; forgetting it left the bar on every
+page except the home page, which is exactly where you start playback from.
+
+- `GET /nowplaying` answers `{"playing": false}`, or the item:
+  `jellyfin.now_playing()` reads `/Sessions` and prefers a playing session over
+  a paused one, then the most recently active. `server.now_playing_json()` maps
+  the item back through `digital_sources.external_id` - trying the item, album,
+  parent and **series** id - so the bar uses our own cover and links to
+  `/title/<id>`; an unmapped item falls back to `/art/<album id>` and no link.
+- The script polls `fetch('nowplaying')` every 5 s. It is **relative** on
+  purpose: both shells carry `<base href>`, while `$base`/`@@BASE@@` differ
+  between them. `POST /nowplaying` takes `action=pause|resume|stop` +
+  `session_id`, answers JSON (`jellyfin.control()`) and the bar hides itself,
+  setting `body.has-nowplaying` (5.2rem bottom padding) so the last row of a
+  page is still reachable.
+- Trap: the pencil's `[data-open]` must work on a title with nothing to play,
+  and `_play_block` returns early there - so its inline script is never
+  emitted. The click handler lives in the shell now, guarded with
+  `!sheet.open` because the play sheet's own handler is registered first.
+
+### An album played one track
+
+`jellyfin.play()` sent `ItemIds: <album id>`, and Jellyfin starts only the first
+track of an album item. It now takes `kind` and, for music, sends the album's
+tracks: `album_tracks()` lists `/Items?ParentId=<album>&IncludeItemTypes=Audio
+&SortBy=ParentIndexNumber,IndexNumber` and `ItemIds` becomes a comma-joined
+list. Verified against the live server: *Homogenic* -> 10 ids.
+
+Also fixed while there: `MediaSourceIds` was sent as `[media_source_id]`, and
+`urlencode()` turns a list into a Python repr (`%5B%27...%27%5D`) which Jellyfin
+ignores. It is a plain string now.
+
+
+## What 0.23.82 got wrong (0.23.84)
+
+Three things the first cut of the rework shipped broken.
+
+- **The pinned player never appeared.** `now_playing_json()` returned the
+  session dict without `playing: True`, and the bar's first line of JavaScript
+  is `if (!data || !data.playing) { hide; return; }` - so every poll looked
+  like silence. The endpoint was answering correctly all along
+  (`title`, `cover`, `subtitle`, `position` were all there); only the flag was
+  missing. Any new field the bar keys off has to be checked in the *rendered*
+  JSON, not just in Python.
+- **The cover shrank to a thumbnail.** `img.cover` carries
+  `width: 170px; max-width: 38%`, and wrapped in a floating `.coverwrap` the
+  percentage resolved against a box whose width is shrink-to-fit *from the
+  image* - so the picture collapsed. The wrapper now owns the size
+  (`width: 170px; max-width: 38%`) and the image is `width: 100%;
+  max-width: none; height: auto`.
+- **The Jellyfin device names are all Jellyfin gives.** `/Sessions` carries
+  `DeviceName` (whatever the app reported: "android TV", "Google Chromecast"),
+  `Client` ("Moonfin for Android TV"), `ApplicationVersion`, `UserName`,
+  `DeviceId` and `RemoteEndPoint`; `/Devices` adds `AppName`, `AppVersion`,
+  `LastUserName`. There is no room, model or friendly name anywhere in the
+  API - a custom name set in Jellyfin's own Devices page is the only way to get
+  "Lounge TV", and it arrives as `DeviceName`. `_device_label()` therefore
+  builds `"<device> (<client> <version>)"`, `sessions()` adds the user and
+  sorts by `LastActivityDate` (newest first, so the device you just used is at
+  the top of the picker).
+
+
+## The Play button moved to the top (0.23.85)
+
+`_play_block()` in `ui_title.py` returns **two strings** now - `(button,
+sheet)` - instead of one. `render()` calls it right after the facts line and
+appends only the button there; the sheet (a modal, so where its markup sits in
+the document does not matter) is appended after the copies and the delete
+block. The button used to sit below the copies, so starting a film meant
+scrolling past every copy of it first.
+
+Two things fell out of that change:
+
+- the old `head` ("No copies recorded yet.") is gone - the Copies section says
+  that itself, and at the top of the page it read as a remark about the wrong
+  thing;
+- the sheet no longer carries its own `[data-open]` script, because `ui.SHELL`
+  has had the generic handler since 0.23.82. A title with nothing playable
+  returns `("", "")`, so there is still no button and no dialog - the hint
+  ("No file to play yet - rip the disc...") is now emitted in the button's
+  place, above the copies.
+
+
+## An album links to its act (0.23.86)
+
+`_facts(row, base)` in `ui_title.py` takes `base` now and renders the artist as
+`<a href="<base>artist/<id>">` when the row carries `artist_id`. It does: the
+title page query selects `t.*` plus `a.name AS artist_name`, and `t.*` includes
+`artist_id`.
+
+- Everything on that line is escaped *inside* `_facts`, and the caller appends
+  the result unescaped (`'<p class="sub">%s</p>' % facts`) - so only the artist
+  bit may be markup. `_text()` on each label, an anchor for the artist.
+- A film has no `artist_name`, and an album whose `artist_id` is NULL renders
+  plain text, so nothing changes for either.
+- The act page's album cards already carry `from=artist/<id>?view=...`, so
+  album -> artist -> album -> Back lands on the artist again.
+
+
+## The filter pills work on every page (0.23.87)
+
+`nav.modes` - the pill row that filters by kind on the catalogue and by owner on
+the artists page - was styled **only** in the catalogue's own `PAGE`. `ui.SHELL`
+had no such rules, so `/artists` drew the identical markup as a run-on of
+underlined links: "EveryoneRipped files242Matt Hamilton233...". The four rules
+now sit in both shells, the same way `.cards` and `table` already do.
+
+Two things in `render_list()` were wrong as well:
+
+- the **Everyone** pill had no count, unlike the catalogue's. It takes a
+  `total` now - the number of acts *before* the owner filter narrows the list -
+  which the `/artists` branch passes as `len(rows)`.
+- its `current` class was **inverted** (`"" if chosen is None else "current"`),
+  so the unfiltered list marked Everyone current *and* marked the chosen owner
+  when there was one. It reads `"current" if chosen is None else ""` now,
+  exactly like the catalogue's `% ("" if owner else "current")`.
+
+
+## No link twice on an artist page (0.23.88)
+
+`render_artist()` printed MusicBrainz twice for every act that had a biography:
+once in the info line beside the country ("All artists · MusicBrainz · GB ·
+formed 1980") and again in *Read more*. The `link_urls` JSON is parsed at the
+top of the function now, and the info line only offers MusicBrainz when that
+row does not already carry it:
+
+- a filled act -> `All artists · GB · formed 1980`, with MusicBrainz inside
+  *Read more*;
+- an act with an id but no biography yet -> the info line keeps the link,
+  because there is no *Read more* row to hold it;
+- an act with no id at all -> "Look up on **MusicBrainz**", which is the search
+  page and a different link altogether.
+
+
+## Standard transport buttons on the pinned player (0.23.89)
+
+The bar had word buttons ("Pause"/"Resume") and a bare text square for stop,
+which read as three different things. It now carries two round `.npbtn`s with
+inline **SVG** glyphs - play/pause and stop - because the Unicode media
+characters (`\u23f8`, `\u25b6`, `\u25a0`) render differently, or not at all,
+from font to font and platform to platform.
+
+- **One toggle, two faces**: both glyphs are in the DOM and
+  `#nowplaying.paused .i-play` / `.i-pause` decide which shows. `paint()` sets
+  that class from `data.paused` and writes the button's `title`/`aria-label` as
+  "Play" or "Pause", so the label says what a press will *do*, not what it is.
+- **Stop closes the box**: `press('stop')` calls `hide()` *before* the POST and
+  sets `quietUntil = Date.now() + 4000`, which makes `poll()` return early -
+  without that the next five-second poll paints the bar straight back while
+  Jellyfin is still clearing the session, which looks like Stop did nothing.
+- A refused control (`{"ok": false, "note": ...}` from `POST /nowplaying`) is
+  written into the bar's subtitle now instead of being swallowed by the JS.
+
+`jellyfin.control()` maps the three actions to
+`/Sessions/<id>/Playing/{Pause,Unpause,Stop}`; all three return Jellyfin's 404
+for an unknown session, and an unknown action is refused before any HTTP call.
+
+
+## No "Ripped files" chip (0.23.90)
+
+The artists page built its owner chips from a Python tally over every
+`owner_ids` entry `all_artists()` returned, and that includes the synthetic
+`rips` account the Jellyfin and file copies belong to - so "Ripped files 242"
+sat beside the household's names, counting every playable title. The tally now
+skips `users.username = 'rips'`, which is the rule the catalogue's owner query
+already used (`WHERE u.username <> 'rips'` in `render_index`).
+
+Nothing else moves: the copies still belong to that account, the chip is only
+absent from the *filter*, `?owner=<rips id>` still filters if asked directly,
+`/api/state` still reports it, and the format filters never offered `ripped` at
+all (`name="format" value="ripped"` appears nowhere - only the add dialog's
+format select has that option).
+
+
+## Previous, next, rewind, fast-forward (0.23.91)
+
+Jellyfin answers every playback command on **one** route -
+`POST /Sessions/{sessionId}/Playing/{command}` - where the command is the
+`PlaystateCommand` enum: `Stop, Pause, Unpause, NextTrack, PreviousTrack, Seek,
+Rewind, FastForward, PlayPause`. That is not guesswork: Jellyfin 10.9 serves its
+OpenAPI document at `/api-docs/openapi.json` (2.7 MB), so
+`paths["/Sessions/{sessionId}/Playing/{command}"]["post"]["parameters"]` lists
+the enum and the optional `seekPositionTicks`. `jellyfin.CONTROLS` gained `next`,
+`previous`, `forward` and `rewind`; `seek` is deliberately absent because
+nothing offers a seek bar.
+
+`ui.NOW_PLAYING` carries six round buttons now - previous, rewind, play/pause,
+fast-forward, next, stop - and previous/next are hidden unless the item is
+music: `paint()` toggles `#nowplaying.music` from `data.kind === 'audio'`, and
+`#nowplaying.music .npbtn.prev` / `.next` is what shows them. Rewind and
+fast-forward stay for every kind. On a narrow screen the cover makes way
+(`@media (max-width: 27rem)`) so six buttons still fit beside the title.
+
+`press()` no longer drops a press while another is in flight. A counter
+(`inFlight`) replaced the boolean `busy` flag, so tapping next three times sends
+three commands while the five-second poller still keeps out of the way - with
+the flag only the first of four quick taps went through, which running the live
+script in node showed at once.
+
+
+## Several players at once (0.23.92)
+
+`jellyfin.now_playing()` used to pick one session and throw the rest away, so a
+second player going in another room was invisible. It splits in two now:
+
+- `active_sessions(con)` returns **every** session with a `NowPlayingItem`,
+  sorted playing-before-paused and then by `LastActivityDate`. A phone casting
+  to the TV makes two sessions, which is why the list - not a single pick - is
+  the honest shape;
+- `now_playing(con, session=None)` returns the asked-for session, else the
+  first of that list.
+
+`GET /nowplaying` accepts `?session=<id>`, and `now_playing_json()` answers with
+the chosen item **plus** `sessions`: a short list of `{session, device, title,
+paused}` for the bar. An id that has gone falls back to the best session and the
+bar adopts `data.session`, so a player that stops never leaves the bar dead with
+a stale session id.
+
+`ui.NOW_PLAYING` draws a pill per player under the subtitle - only when there is
+more than one - the current one in the same green as the filter chips
+(`.np-players button.current`) and paused ones dimmed. Pressing a pill sets
+`now.session` and polls `?session=` again, so pause, stop, next and rewind all
+act on that player afterwards.
+
+Trap: `now_playing_json()` calls `jellyfin.active_sessions(con)` **once** and
+picks from that list. Calling `now_playing()` for the item and `active_sessions()`
+for the pills would hit Jellyfin's `/Sessions` twice per poll, per open page.
+
+
+## Correcting an act's MusicBrainz id (0.23.93)
+
+The artist page carries a **MusicBrainz id** box under *Rename artist*: the fix
+for a lookup that failed or matched the wrong act. `artists.set_mbid()` does
+more than store a string.
+
+- It validates the 36-character uuid first; a typo comes back as
+  `?mbid_error=...` and **nothing is written**.
+- It then re-reads `metadata.musicbrainz_artist_by_id()` and writes country,
+  start year and kind from that record - the fields a bad lookup leaves blank or
+  takes from the wrong act.
+- It drops `link_urls` and `bio_at` (not the biography: that was looked up by
+  *name*, so it is not invalidated by the id) - the "read more" row disappears
+  until *Fetch details* rebuilds it against the id now stored.
+- A blank box clears the id on purpose. That is why the form posts a hidden
+  `action=mbid`: `parse_qs` drops blank values, so without it an empty submit
+  would be indistinguishable from "this is the other form".
+
+The POST handler is the existing rename branch in `server.py`: `artist_name`
+present -> `artists.rename()`; `action=mbid` -> `artists.set_mbid()`. Both
+redirect back to the act, the second with `?mbid=` or `?mbid_error=`, which
+`render_artist(notice=..., bad=...)` shows as a `.banner good|bad`.
+
+
+## An act's article comes from its MusicBrainz id (0.23.94)
+
+`metadata.artist_bio()` looked acts up on Wikipedia by **name** only, so "Air"
+resolved to the gas and the French band had no biography - and because
+`fill_bio()` stamps `bio_at` on a failure, that act was never asked about again.
+
+- `musicbrainz_url_rels(mbid)` reads MusicBrainz's own relationships
+  (`/artist/<id>?inc=url-rels`): `wikidata`, `wikipedia`, `discogs`, `allmusic`,
+  `last.fm`, `imdb`, `official homepage`, … It sleeps `MB_PAUSE` after the call
+  like the other MusicBrainz readers - one request a second.
+- `artist_bio()` now tries the id first: MusicBrainz `wikidata` rel -> qid ->
+  `enwiki_title(qid)` -> the article. A `wikipedia` rel is the next fallback,
+  and the name search runs only when the act has no id or MusicBrainz links it
+  to nothing.
+- The links row uses those rels instead of guessing: a real Discogs *artist*
+  page plus AllMusic / Last.fm / IMDb / official site when they exist, capped at
+  six. The Discogs *search* link survives only as the fallback.
+- `_about_music()` grew the other disambiguation wordings: "Topics referred to by
+  the same term" is how `Air (band)` introduces itself, and it was slipping
+  through the name path.
+- `migrations/0024_artist_bio_retry.sql` sets `bio_at = NULL` where `wiki_url` is
+  NULL, releasing the 16 acts the old rule had stamped as hopeless - the job only
+  asks about rows with no stamp, so without this they would stay empty forever.
+
+Verified: `Air` -> `Air_(French_band)` (491 chars, portrait, six links), `Björk`
+-> `Björk`, `St Germain` -> `St_Germain_(musician)`, `Apollo 440` ->
+`Apollo_440`. `Moog 213` -> `Blair_Joscelyne`, which is right: Moog is that
+person's channel.
+
+
+## One refresh button, and it runs by itself (0.23.95)
+
+The Metadata panel had two forms - *Refresh all metadata* (titles) and *Fill
+artist details* (acts). One button starts both now: `POST /admin/refresh` calls
+`refresh_job.start()` **and** `artists.start()`, and the panel says so.
+
+What runs when:
+
+- **Startup** (`server.py main()`): scan, the Jellyfin sync, then
+  `artists.start(DB_PATH, limit=60)` and - new - `refresh_job.start(DB_PATH,
+  limit=60)`. Both take a `limit`, because a shelf holds hundreds of titles no
+  lookup will ever fill (190 music titles with no id/poster and 267 films/TV with
+  no overview/poster on this one); an unbounded sweep on every restart would keep
+  Wikipedia busy for nothing. In steady state both find nothing and cost a query.
+- **Adding a title**: `add_item()` links the artist, then calls
+  `artists.enrich_one(con, artist_id)` - the MusicBrainz record plus the
+  Wikipedia biography for a new act, and a single row read for an act already on
+  the shelf. The add dialog's *Look up metadata* box is ticked by default, so the
+  title itself is fetched too.
+- **The button**: everything missing, unbounded, with `force` to re-fetch titles
+  that already have metadata.
+
+`artists.enrich_one()` and the job share `_fill_from_musicbrainz(con, row)`, so
+the two paths cannot drift apart.
+
+Trap: `refresh_job.start()` used to have no `limit`, and `main()` calling it
+unbounded meant every restart would re-walk the whole backlog - the same titles,
+forever, because some can never be matched.
+
+## Clean database left the media folders (0.23.96)
+
+`_clean_block` - the **Clean database** button - sat at the bottom of the *Media
+folders* panel, beside *Add a root* and *Scan the media folders*, though it is not
+about the folders: it validates rows already recorded. It now sits in
+*Maintenance*, under *Merge duplicate titles*.
+
+What it actually does (`clean_job._run`), and what it does **not** touch:
+
+1. `DELETE FROM digital_sources WHERE provider='jellyfin' AND (server_id IS NULL
+   OR server_id NOT IN (SELECT id FROM jellyfin_servers))` - the **only** place a
+   Jellyfin route can go, and it fires only when the server row itself has been
+   removed. Its row count is kept in `STATE["routes"]`.
+2. `provider='rip'` rows whose `root_id` is not a known root are deleted, then
+   every remaining `provider='rip'` row with a path is `os.path.exists()`-ed
+   against its root and the missing ones deleted.
+3. `dedupe.orphans()` prunes copies left with nothing - `format='ripped'`, no
+   barcode, notes not `rip pending`, and **no `digital_sources` row at all**. A
+   Jellyfin copy always carries its route, so it and its title survive.
+
+`itunes` rows and anything without a `provider='rip'` path are never checked -
+there is no file to look for. The live shelf has **zero** `provider='rip'` rows
+(providers: `itunes` 167, `jellyfin` 981), so pressing it today checks nothing,
+drops nothing, and reports "no file-backed copies to check".
+
+Verified on a copy of the live database: a ghost route (server 9999) seeded onto a
+healthy Jellyfin copy, plus a second copy holding *only* such a route, then the
+job - `jellyfin` routes 981 -> 981, items 2288 -> 2288, both ghost routes gone,
+the ghost copy pruned, and the first copy kept with its live route and its title.
+Three seeded `provider='rip'` rows (one real file, two missing) with a root gave
+"3 of 3 files checked, 2 forgotten" and kept the real file.
+
+The progress line reads `Clean: <files> checked, N forgotten, N Jellyfin routes
+dropped, N copies pruned - done`, with "no file-backed copies to check" instead
+of a file count when there are none - it used to say "0 of 0 checked" and
+"1 copies pruned".
+
+
+## Dead Jellyfin routes go too (0.23.97)
+
+A Jellyfin copy whose item has been deleted from the server cannot play, and no
+sync will rebuild it - `materialise()` only creates routes from items that exist.
+Clean database asks each server and drops those routes.
+
+- `jellyfin.existing_ids(con, server_id, ids, chunk=50)` - one `GET /Items` per 50
+  ids (`Ids=a,b,c&Recursive=true&Fields=Path&Limit=50`), returning the set the
+  server confirmed. It returns **None** when the question could not be put (no
+  such row among `servers()`, which is `is_active = 1` only, or no url) and lets
+  `JellyfinError` through for a request that really failed, so "could not ask" and
+  "everything is gone" stay distinguishable. An empty `external_id` is never in
+  the answer.
+- `clean_job._drop_dead_routes(con)` groups routes by server, calls that once per
+  server, and for every id the server did not return deletes the route and its
+  `jellyfin_links` row (`item_id` + `jf_id`), leaving the copy to
+  `dedupe.orphans()`. It runs **before** `dedupe.orphans()` in `_run`, after the
+  dead-server and file checks.
+- A server that raises `JellyfinError`, or that `servers()` does not list, is
+  skipped whole and the page says so: "Goodwood could not be asked which items it
+  still holds, so its copies were left alone." That guard is the important one -
+  a dropped connection must never look like an empty library and wipe 981 copies.
+- `clean_job.STATE` grew `verified` (routes confirmed alive), `skipped` (labels of
+  servers not asked) and `phase` ("asking Jellyfin which items it still holds",
+  shown while it runs). The note is two paragraphs now: `Clean: ... - done` and
+  `Jellyfin: 981 copies checked against the server, 0 routes dropped.`
+
+Measured against the live server on a copy of the live database: all 981 routes
+(945 distinct ids - one item can back several copies) were confirmed present, so
+nothing is dropped today. Two seeded ghost ids (`deadbeefdeadbeef` on a healthy
+copy, `cafebabecafebabe` on a copy holding nothing else) gave `routes=2,
+pruned=1`, jf 983 -> 981, items 2294 -> 2293, the healthy copy and its live route
+intact, the ghost's `jellyfin_links` row gone, its copy pruned, its title kept.
+Pointing the server url at `http://127.0.0.1:9` gave `routes=0, pruned=0,
+skipped=['Goodwood']` and deleted nothing.
+
+Trap: `_drop_dead_routes` runs **before** `dedupe.orphans()` on purpose. The
+route is deleted first, so by the time the prune asks "does this copy hold
+anything?" the answer is honest; run the prune first and every dead route's copy
+survives, because the route still looks like a reason to exist. It also relies on
+`jellyfin_links` being keyed by `item_id` - the table allows one link row per item
+(`UNIQUE (item_id)`), so the delete is `item_id = ? AND jf_id = ?`.
+
+
+## The "Include ripped files" switch is gone (0.23.98)
+
+The catalogue hid titles whose every copy is a file (`RIP_ONLY`) and left those
+copies out of the headline counts (`RIP_COPY`), with a link under the tallies -
+*Include ripped files* - to lift both. It was there for the first library import,
+which arrived as a wall of files, and it has been removed: every title is listed
+and every copy counts.
+
+What went with it, in `render_index` / `library_rows` / `library_stats` /
+`visible_clause` and the `PAGE` template: the `rips` query parameter, the `rips=`
+argument through four signatures, both SQL fragments, the `$rips_toggle`
+placeholder, the `rips_toggle=` substitution, the `("rips", 1 if rips else "")`
+tally input, the `&amp;rips=1` carried by the view toggle **and** by the kind /
+owner chip links, and the `rips or row["fmt"] != "ripped"` test on the format
+pills. `?rips=1` is ignored now - it changes nothing.
+
+Trap: the flag had a dozen homes and only one of them was the visible link. They
+are not all in one function, and a missed one compiles fine and then raises
+`NameError: name 'rips' is not defined` on the first page load - which is what the
+first pass did, in `extra` (the filter string the kind and owner chips carry).
+`grep -n '\brips\b' server.py` must come back with the three `username <>
+'rips'` rows and nothing else before this is finished; the `ripped` owner account,
+`dedupe.RIP_OWNER_NAME` and `ui_title.FILES_OWNER` are a different idea and stay.
+
+The visible effect on the live shelf is nil: there are no `provider='rip'` rows
+(981 `jellyfin`, 167 `itunes`), so both fragments matched nothing - the home page
+reads 636 titles · 1220 copies either side of the change.
+

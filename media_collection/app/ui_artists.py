@@ -1,6 +1,8 @@
 """Artist list and artist page: who made the albums on the shelf."""
 
 import html
+import json
+import urllib.parse
 
 import ui
 
@@ -42,7 +44,7 @@ def album_name(title_name, artist_name):
 
 
 def render_list(base, artists, view="grid", query="", owners=None,
-                chosen=None):
+                chosen=None, total=None):
     """Every act with albums held, as a table or as a wall of covers."""
     from urllib.parse import quote
     search = ('<form method="get" action="%sartists" class="sub">'
@@ -64,9 +66,10 @@ def render_list(base, artists, view="grid", query="", owners=None,
             '<input type="hidden" name="owner" value="%d"></form>' % chosen, 1)
     if owners:
         keep = "&amp;q=" + quote(query) if query else ""
-        parts = ['<a class="%s" href="%sartists?view=%s%s">Everyone</a>'
-                 % ("" if chosen is None else "current", _text(base), view,
-                    keep)]
+        parts = ['<a class="%s" href="%sartists?view=%s%s">Everyone%s</a>'
+                 % ("current" if chosen is None else "", _text(base), view,
+                    keep,
+                    '<span class="n">%d</span>' % total if total else "")]
         parts += ['<a class="%s" href="%sartists?view=%s&amp;owner=%d%s">%s'
                   '<span class="n">%d</span></a>'
                   % ("current" if chosen == row["id"] else "", _text(base),
@@ -114,18 +117,35 @@ def render_list(base, artists, view="grid", query="", owners=None,
                    back="?kind=music&view=grid")
 
 
-def render_artist(base, artist, titles, labels, view="grid"):
-    """One act: what is known about them and the albums that belong to them."""
+def render_artist(base, artist, titles, labels, view="grid",
+                  notice="", bad=False):
+    """One act: the biography, where to read more, and the albums."""
+    # The links are read first because the line under the title must not repeat
+    # one of them: MusicBrainz appeared twice on this page - once beside the
+    # country, once in "Read more" - whenever the act had a biography.
+    found = []
+    try:
+        found = [item for item in json.loads(artist["link_urls"] or "[]")
+                 if item.get("url")]
+    except (ValueError, AttributeError):
+        found = []
+    sources = "".join('<a href="%s" target="_blank" rel="noopener">%s</a>'
+                      % (_text(item["url"]), _text(item.get("label") or "link"))
+                      for item in found)
+    linked = set(item.get("label") or "" for item in found)
+
     info = []
-    if artist["musicbrainz_id"]:
-        info.append('<a href="https://musicbrainz.org/artist/%s" target="_blank"'
-                    ' rel="noopener">MusicBrainz</a>'
-                    % _text(artist["musicbrainz_id"]))
-    else:
+    if not artist["musicbrainz_id"]:
+        # no id yet: offer the search, which is a different link altogether
         info.append('<a href="https://musicbrainz.org/search?query=%s&amp;type='
                     'artist" target="_blank" rel="noopener">Look up on'
                     ' MusicBrainz</a>'
                     % _text(html.escape(artist["name"]).replace(" ", "+")))
+    elif "MusicBrainz" not in linked:
+        # only when it is not already one of the "Read more" links below
+        info.append('<a href="https://musicbrainz.org/artist/%s" target="_blank"'
+                    ' rel="noopener">MusicBrainz</a>'
+                    % _text(artist["musicbrainz_id"]))
     if artist["country"]:
         info.append(_text(artist["country"]))
     if artist["formed_year"]:
@@ -138,40 +158,80 @@ def render_artist(base, artist, titles, labels, view="grid"):
               % (_text(base), artist["id"],
                  "list" if view == "grid" else "grid",
                  "List view" if view == "grid" else "Thumbnails"))
-    head = ('<p class="sub"><a href="%sartists">All artists</a> · %s</p>%s'
-            % (_text(base), " · ".join(info),
-               '<p>%s</p>' % _text(artist["overview"])
-               if artist["overview"] else ""))
+    head = ('<p class="sub"><a href="%sartists">All artists</a> \u00b7 %s</p>'
+            % (_text(base), " \u00b7 ".join(info)))
     count = ('<p class="sub">%d album%s</p>'
              % (len(titles), "" if len(titles) == 1 else "s"))
+
+    # The biography sits above the albums: a portrait, what Wikipedia says,
+    # and where to read more. MusicBrainz's one-word "overview" ("Group") is
+    # not shown at all - only an act with a real article carries a wiki_url.
+    if (artist["overview"] or "").strip() and artist["wiki_url"]:
+        portrait = ('<img class="portrait" src="%s" alt="" loading="lazy">'
+                    % _text(artist["image_url"])) if artist["image_url"] else ""
+        bio = ('<div class="bio">%s<div><p>%s</p>%s</div></div>'
+               % (portrait, _text(artist["overview"]),
+                  '<p class="sub">Read more: %s</p>' % sources
+                  if sources else ""))
+    else:
+        bio = ('<p class="muted">No biography yet - press <em>Fetch details'
+               '</em> and it is looked up on Wikipedia.</p>')
+    details = ('<form method="post" action="%sartist/%d/bio" class="sub">'
+               '<button type="submit">%s</button></form>'
+               % (_text(base), artist["id"],
+                  "Fetch details again" if artist["wiki_url"] else "Fetch details"))
+
     rename = ('<form method="post" action="%sartist/%d" class="sub">'
               '<label>Name<input name="artist_name" value="%s"></label> '
               '<button type="submit">Rename artist</button></form>'
               % (_text(base), artist["id"], _text(artist["name"])))
+    # A wrong or missing id is why an act ends up with a MusicBrainz link to
+    # nothing (or to the wrong act), so it can be typed in or corrected here.
+    # `action=mbid` tells the POST handler which of the two forms this was, and
+    # is always sent - a blank box means "clear it".
+    mbid = ('<form method="post" action="%sartist/%d" class="sub">'
+            '<input type="hidden" name="action" value="mbid">'
+            '<label>MusicBrainz id<input name="musicbrainz_id" value="%s"'
+            ' size="38" placeholder="00000000-0000-0000-0000-000000000000">'
+            '</label> <button type="submit">Save id</button>'
+            '<span class="muted"> the 36-character uuid in the artist\'s own'
+            ' MusicBrainz URL</span></form>'
+            % (_text(base), artist["id"],
+               _text((artist["musicbrainz_id"] if "musicbrainz_id"
+                       in artist.keys() else "") or "")))
 
+    # `from` carries this page, so a title opened from here comes back here
+    here = _text(urllib.parse.quote("artist/%d?view=%s"
+                                    % (artist["id"], view), safe=""))
     if view == "grid":
         cards = "".join(
-            '<a class="card" href="%stitle/%d">%s<div class="cap">'
+            '<a class="card" href="%stitle/%d?from=%s">%s<div class="cap">'
             '<strong>%s</strong><span class="muted">%s</span></div></a>'
-            % (_text(base), row["id"],
+            % (_text(base), row["id"], here,
                _thumb(base, row["jf_id"], row["poster_url"]),
                _text(album_name(row["name"], artist["name"])),
-               _text(" · ".join(filter(None, [str(row["release_year"] or ""),
-                                              _formats(row, labels)]))))
+               _text(" \u00b7 ".join(filter(None, [str(row["release_year"] or ""),
+                                                  _formats(row, labels)]))))
             for row in titles)
-        body = head + count + toggle + '<div class="cards">%s</div>' % cards
+        body = (bio + details + count + toggle
+                + '<div class="cards">%s</div>' % cards)
     else:
         rows = "".join(
-            '<tr><td><a href="%stitle/%d">%s</a></td><td>%s</td>'
+            '<tr><td><a href="%stitle/%d?from=%s">%s</a></td><td>%s</td>'
             '<td class="muted">%s</td><td class="muted">%s</td></tr>'
-            % (_text(base), row["id"],
+            % (_text(base), row["id"], here,
                _text(album_name(row["name"], artist["name"])),
                _text(row["release_year"] or ""), _text(_formats(row, labels)),
                _text(row["last_watched_on"] or "not watched"))
             for row in titles)
-        body = (head + count + toggle + '<table><tr><th>Album</th><th>Year</th>'
-                '<th>Owned as</th><th>Watched</th></tr>%s</table>' % rows)
-    return ui.page(base, artist["name"], rename + body, back="artists")
+        body = (bio + details + count + toggle
+                + '<table><tr><th>Album</th><th>Year</th><th>Owned as</th>'
+                  '<th>Watched</th></tr>%s</table>' % rows)
+    banner = ('<p class="banner %s">%s</p>'
+              % ("bad" if bad else "good", _text(notice))
+              if notice else "")
+    return ui.page(base, artist["name"],
+                    banner + head + rename + mbid + body, back="artists")
 
 
 def _formats(row, labels):

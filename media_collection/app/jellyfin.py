@@ -32,7 +32,13 @@ class JellyfinError(Exception):
 
 
 def config(con=None):
-    """(base_url, api_key): environment, then add-on options, then the settings table."""
+    """(base_url, api_key) for the paths that talk to one server: play,
+    sessions and artwork.
+
+    Environment first, then the add-on options, then the server the admin
+    page keeps (the lowest-numbered active one), then the old settings pair
+    the single-server build wrote - so editing a server takes effect here.
+    """
     url = (os.environ.get("JELLYFIN_URL") or "").strip()
     key = (os.environ.get("JELLYFIN_API_KEY") or "").strip()
     if not (url and key):
@@ -44,6 +50,12 @@ def config(con=None):
         url = url or str(options.get("jellyfin_url") or "").strip()
         key = key or str(options.get("jellyfin_api_key") or "").strip()
     if con is not None:
+        first = con.execute("SELECT url, api_key FROM jellyfin_servers"
+                            " WHERE is_active = 1 ORDER BY id").fetchone()
+        if first:
+            url = url or (first["url"] or "")
+            key = key or (first["api_key"] or "")
+    if con is not None and not (url and key):
         rows = dict(con.execute("SELECT key, value FROM settings"
                                 " WHERE key IN ('jellyfin_url', 'jellyfin_api_key')"))
         url = url or (rows.get("jellyfin_url") or "")
@@ -56,6 +68,40 @@ def servers(con):
     return [dict(row) for row in con.execute(
         "SELECT id, label, url, api_key FROM jellyfin_servers"
         " WHERE is_active = 1 ORDER BY id")]
+
+
+def existing_ids(con, server_id, ids, chunk=50):
+    """Which of these item ids the server still holds.
+
+    Returns None when the question could not be put - the server row is
+    missing or inactive, or the request failed - because an unreachable box
+    must never look like an empty library. A JellyfinError raised here really
+    did come from a request, so the caller can tell the two apart. An empty id
+    (a route with no external_id) is never in the answer.
+    """
+    server = None
+    for row in servers(con):
+        if row["id"] == server_id:
+            server = row
+            break
+    if server is None or not (server["url"] or "").strip():
+        return None
+    base = server["url"].rstrip("/")
+    key = server["api_key"] or ""
+    wanted = [jf_id for jf_id in ids if jf_id]
+    found = set()
+    for start in range(0, len(wanted), chunk):
+        part = wanted[start:start + chunk]
+        data = _call(base, key, "/Items", {
+            "Ids": ",".join(part),
+            "Recursive": "true",
+            "Fields": "Path",
+            "Limit": str(len(part)),
+        })
+        for item in (data.get("Items") or []):
+            if item.get("Id"):
+                found.add(item["Id"])
+    return found
 
 
 def _call(base, key, path, params=None, method="GET", payload=None, timeout=TIMEOUT):
@@ -478,14 +524,45 @@ def sessions(con=None):
     for row in rows:
         if not row.get("SupportsRemoteControl"):
             continue
-        found.append({"id": row.get("Id") or "",
-                      "name": row.get("DeviceName") or row.get("Client") or "Jellyfin client",
-                      "client": row.get("Client") or ""})
-    found.sort(key=lambda item: item["name"].lower())
+        found.append({
+            "id": row.get("Id") or "",
+            "name": _device_label(row),
+            "client": row.get("Client") or "",
+            "version": row.get("ApplicationVersion") or "",
+            "user": row.get("UserName") or "",
+            "device_id": row.get("DeviceId") or "",
+            "ip": row.get("RemoteEndPoint") or "",
+            "playing": bool(row.get("NowPlayingItem")),
+            "at": row.get("LastActivityDate") or "",
+        })
+    # the device you used last is the one you probably want first
+    found.sort(key=lambda item: (item["at"], item["name"]), reverse=True)
     return found
 
 
-def play(con, session_id, jf_id, media_source_id=None):
+def _device_label(row):
+    """How to name a Jellyfin client, from what the client says about itself.
+
+    Jellyfin has no friendly device name of its own. `DeviceName` is whatever
+    the app reported when it connected ("android TV", "Google Chromecast"),
+    `Client` is the app ("Moonfin for Android TV") and `ApplicationVersion` its
+    version - there is no room name, no model and no location anywhere in the
+    API. So the label is built from those plus the Jellyfin user, which is what
+    actually tells two identical boxes apart; the session's `RemoteEndPoint`
+    tells them apart too. Renaming a device in Jellyfin's own Devices page sets
+    a custom name that arrives here as `DeviceName`, and is the only way to get
+    "Lounge TV" to appear.
+    """
+    device = (row.get("DeviceName") or "").strip()
+    client = (row.get("Client") or "").strip()
+    version = (row.get("ApplicationVersion") or "").strip()
+    app = " ".join(part for part in (client, version) if part)
+    if device and app and device.lower() != client.lower():
+        return "%s (%s)" % (device, app)
+    return app or device or "Jellyfin app"
+
+
+def play(con, session_id, jf_id, media_source_id=None, kind=None):
     """Start `jf_id` on a Jellyfin client. Returns the banner message."""
     base, key = config(con)
     if not session_id:
@@ -493,12 +570,131 @@ def play(con, session_id, jf_id, media_source_id=None):
     if not jf_id:
         raise JellyfinError("That copy is not linked to Jellyfin yet - "
                             "press Sync with Jellyfin in Admin.")
-    params = {"PlayCommand": "PlayNow", "ItemIds": jf_id}
+    # an album is one item holding tracks, and Jellyfin queues only the first
+    # of them unless the tracks are named; a film keeps its single id
+    item_ids = [jf_id]
+    if kind == "music":
+        tracks = album_tracks(base, key, jf_id)
+        if tracks:
+            item_ids = tracks
+    params = {"PlayCommand": "PlayNow", "ItemIds": ",".join(item_ids)}
     if media_source_id:
-        params["MediaSourceIds"] = [media_source_id]
+        # urlencode() would send a Python list repr here, which Jellyfin
+        # ignores - a plain string is what the query binder expects
+        params["MediaSourceIds"] = media_source_id
     _call(base, key, "/Sessions/%s/Playing" % urllib.parse.quote(session_id),
           params=params, method="POST", timeout=20)
     return "Sent to Jellyfin"
+
+
+def album_tracks(base, key, album_id):
+    """The track ids of one album, in disc and track order.
+
+    Playing an Album item starts only its first track on most clients, which is
+    why an album left the queue after one song. Naming the tracks one by one is
+    what makes the whole album actually play.
+    """
+    try:
+        data = _call(base, key, "/Items", params={
+            "ParentId": album_id, "Recursive": "true",
+            "IncludeItemTypes": "Audio",
+            "SortBy": "ParentIndexNumber,IndexNumber",
+            "Limit": "300"})
+    except JellyfinError:
+        return []
+    return [item.get("Id") for item in (data or {}).get("Items", [])
+            if item.get("Id")]
+
+
+def active_sessions(con=None):
+    """Every Jellyfin client with something on, best first.
+
+    A household can have two players going at once - a phone casting to the TV
+    makes two sessions, and two rooms make two more - so this returns all of
+    them instead of a single guess. "Best" is a session that is playing rather
+    than paused, and the most recently active after that.
+    """
+    base, key = config(con)
+    if not key:
+        return []
+    try:
+        rows = _call(base, key, "/Sessions", timeout=15) or []
+    except JellyfinError:
+        return []
+    found = []
+    for row in rows:
+        item = row.get("NowPlayingItem") or {}
+        if not item.get("Id"):
+            continue
+        state = row.get("PlayState") or {}
+        artists = item.get("Artists") or []
+        found.append({
+            "session": row.get("Id") or "",
+            # short and specific: the box, and whose Jellyfin user it is
+            "device": " \u00b7 ".join(
+                part for part in ((row.get("DeviceName")
+                                   or row.get("Client") or "Jellyfin app"),
+                                  row.get("UserName")) if part),
+            "client": row.get("Client") or "",
+            "user": row.get("UserName") or "",
+            "name": item.get("Name") or "",
+            "kind": (item.get("Type") or "").lower(),
+            "album": item.get("Album") or "",
+            "artist": item.get("AlbumArtist") or (artists[0] if artists else ""),
+            "series": item.get("SeriesName") or "",
+            "episode": item.get("IndexNumber"),
+            "season": item.get("ParentIndexNumber"),
+            "item_id": item.get("Id") or "",
+            "album_id": item.get("AlbumId") or "",
+            "parent_id": item.get("ParentId") or "",
+            "series_id": item.get("SeriesId") or "",
+            "paused": bool(state.get("IsPaused")),
+            "position": int((state.get("PositionTicks") or 0) // 10000000),
+            "duration": int((item.get("RunTimeTicks") or 0) // 10000000),
+            "at": row.get("LastActivityDate") or "",
+        })
+    found.sort(key=lambda item: (0 if item["paused"] else 1, item["at"]),
+               reverse=True)
+    return found
+
+
+def now_playing(con=None, session=None):
+    """What the pinned player should show: the session asked for, else the best.
+
+    A session that has gone (someone pressed stop on the TV) falls back to the
+    best remaining one, and the bar picks up that id from the reply - so a
+    switched-to player that disappears does not leave the bar dead.
+    """
+    found = active_sessions(con)
+    if session:
+        for item in found:
+            if item["session"] == session:
+                return item
+    return found[0] if found else None
+
+
+CONTROLS = {"pause": "/Playing/Pause",
+            "resume": "/Playing/Unpause",
+            "stop": "/Playing/Stop",
+            "next": "/Playing/NextTrack",
+            "previous": "/Playing/PreviousTrack",
+            "forward": "/Playing/FastForward",
+            "rewind": "/Playing/Rewind"}
+
+
+def control(con, session_id, action):
+    """Pause, resume or stop what a client is playing. Returns a message."""
+    base, key = config(con)
+    path = CONTROLS.get(action)
+    if not path:
+        raise JellyfinError("Unknown playback control: %s" % (action,))
+    if not session_id:
+        raise JellyfinError("Nothing is playing on Jellyfin.")
+    _call(base, key,
+          "/Sessions/%s%s" % (urllib.parse.quote(session_id), path),
+          method="POST", timeout=15)
+    return "Jellyfin: %s sent" % action
+
 
 
 def link_for_title(con, title_id):
@@ -513,8 +709,16 @@ def status(con):
     base, key = config(con)
     kinds = dict(con.execute("SELECT jf_kind, COUNT(*) FROM jellyfin_links"
                              " GROUP BY jf_kind").fetchall())
+    found = [dict(row) for row in con.execute(
+        "SELECT id, label, url, api_key, is_active FROM jellyfin_servers"
+        " ORDER BY id").fetchall()]
+    routes = con.execute("SELECT COUNT(*) FROM digital_sources"
+                         " WHERE provider = 'jellyfin'").fetchone()[0]
     return {"url": base,
-            "configured": bool(key),
+            "configured": bool(key) or any(
+                row["is_active"] for row in found),
+            "servers": found,
+            "routes": routes,
             "linked": con.execute("SELECT COUNT(*) FROM jellyfin_links").fetchone()[0],
             "copies": con.execute("SELECT COUNT(*) FROM items").fetchone()[0],
             "kinds": kinds,

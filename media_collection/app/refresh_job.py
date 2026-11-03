@@ -21,11 +21,20 @@ def status():
     return dict(STATE)
 
 
-def start(db_path, force=False, pause=0.4):
+def start(db_path, force=False, pause=0.4, limit=None):
+    """Look up the titles that are missing metadata, in the background.
+
+    `limit` bounds a run: the add-on refreshes a handful on every start (the
+    button does the whole catalogue), because a shelf can easily hold hundreds
+    of titles that no lookup will ever fill and repeating that sweep on each
+    restart would keep Wikipedia busy for nothing.
+    """
     with _LOCK:
         if STATE["running"]:
             return False
         targets = _targets(db_path, force)
+        if limit is not None:
+            targets = targets[:limit]
         if not targets:
             return False
         STATE.update(running=True, force=force, done=0, total=len(targets),

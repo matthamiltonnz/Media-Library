@@ -566,3 +566,263 @@ def musicbrainz_artist_by_id(mbid):
         "year": int(begin) if begin.isdigit() else None,
         "kind": (found.get("type") or "").lower(),
     }
+
+UPC_ROOT = "https://api.upcitemdb.com/prod/trial/lookup"
+
+
+def musicbrainz_barcode(upc):
+    """The album MusicBrainz files under this barcode, if any.
+
+    A CD or LP barcode is a `release` field there, so one search answers
+    "what is this" with the album, the artist, the year and the release id
+    the music refresh already understands.
+    """
+    params = urllib.parse.urlencode({"query": "barcode:%s" % upc,
+                                     "fmt": "json", "limit": 5})
+    time.sleep(MB_PAUSE)
+    payload = _get(MB_ROOT + "/release?" + params)
+    for release in payload.get("releases") or []:
+        # the search is fuzzy, so a hit only counts when the release really
+        # carries this barcode - placeholder codes like 0000000000000 are
+        # surprisingly common and would otherwise win every unknown scan
+        if re.sub(r"\D", "", release.get("barcode") or "") != upc:
+            continue
+        credit = release.get("artist-credit") or []
+        artist = "".join((part.get("name") or "") +
+                         (part.get("joinphrase") or "")
+                         for part in credit).strip()
+        artist_mbid = ""
+        for part in credit:
+            artist_mbid = ((part.get("artist") or {}).get("id") or "")
+            if artist_mbid:
+                break
+        date = release.get("date") or ""
+        return {
+            "source": "MusicBrainz",
+            "kind": "music",
+            "title": release.get("title") or "",
+            "artist": artist,
+            "artist_mbid": artist_mbid,
+            "musicbrainz_id": release.get("id") or "",
+            "release_group": ((release.get("release-group") or {})
+                              .get("id") or ""),
+            "date": date,
+            "year": int(date[:4]) if date[:4].isdigit() else None,
+        }
+    return None
+
+
+def upc_lookup(upc):
+    """What a case barcode belongs to: MusicBrainz, then a product database.
+
+    Returns (match, note). The note says which service let us down, so the
+    page can be honest about a barcode it could not resolve instead of
+    silently filling nothing.
+    """
+    if len(set(upc)) == 1:
+        return None, "That barcode is a placeholder, not a real one."
+    notes = []
+    try:
+        match = musicbrainz_barcode(upc)
+    except Throttle:
+        match = None
+        notes.append("MusicBrainz is rate-limiting us - try again shortly.")
+    except Exception as exc:                   # offline, blocked, unknown
+        match = None
+        notes.append("MusicBrainz: %s." % exc)
+    if match:
+        return match, " ".join(notes)
+    try:
+        payload = _get(UPC_ROOT + "?" +
+                       urllib.parse.urlencode({"upc": upc}))
+    except urllib.error.HTTPError as exc:
+        # a 400 is "no such product", not a failure worth shouting about
+        notes.append("UPCitemdb has no product for that code."
+                     if exc.code == 400 else "UPCitemdb: %s." % exc)
+        return None, " ".join(notes)
+    except Exception as exc:
+        notes.append("UPCitemdb: %s." % exc)
+        return None, " ".join(notes)
+    if payload.get("code") and payload.get("code") != "OK":
+        notes.append("UPCitemdb said %s." % payload.get("code"))
+    for item in payload.get("items") or []:
+        title = (item.get("title") or "").strip()
+        if not title:
+            continue
+        return {
+            "source": "UPCitemdb",
+            "kind": "",
+            "title": title,
+            "artist": (item.get("brand") or "").strip(),
+            "category": (item.get("category") or "").strip(),
+            "year": None,
+        }, " ".join(notes)
+    return None, " ".join(notes)
+
+
+# -- acts --------------------------------------------------------------------
+#
+# MusicBrainz knows an act's id, country and start year and little else: the
+# only "biography" it offers is a disambiguation line ("Group"), which is what
+# used to sit in artists.overview. A real biography, a portrait and somewhere
+# to read more therefore come from Wikipedia.
+
+MUSIC_ROLES = ("band", "group", "duo", "trio", "singer", "songwriter",
+               "musician", "rapper", "composer", "record producer",
+               "disc jockey", "guitarist", "drummer", "vocalist", "pianist",
+               "bassist", "orchestra", "choir", "rock band", "pop group",
+               "jazz", "hip hop", "heavy metal", "country music", "ensemble")
+
+
+def _summary_or_empty(title):
+    """wikipedia_summary, but a page that does not exist is just empty."""
+    try:
+        return wikipedia_summary(title) or {}
+    except Exception:
+        return {}
+
+
+def _about_music(summary):
+    """Is that article about an act, or about a place, a word, a film?"""
+    text = ((summary.get("description") or "") + " "
+            + (summary.get("overview") or "")[:400]).lower()
+    if ("may refer to" in text or "can refer to" in text
+            or "referred to by the same term" in text
+            or "disambiguation" in text):
+        return False
+    return any(role in text for role in MUSIC_ROLES)
+
+
+def wikipedia_artist_name(name):
+    """The en.wikipedia article for an act: the plain title, else a search hit.
+
+    Most acts have an article under their own name ("Bon Jovi", "Billy Joel"),
+    so that is tried first, then the two usual disambiguated forms. Wikipedia's
+    own search comes last and its hits are checked twice - the page title has
+    to be the act's name, and the article has to read like it is about music.
+    """
+    wanted = _key(name)
+    for title in (name, name + " (band)", name + " (musician)"):
+        summary = _summary_or_empty(title)
+        if (summary.get("overview") or "").strip() and _about_music(summary):
+            return title
+    try:
+        data = _get("https://en.wikipedia.org/w/rest.php/v1/search/page?"
+                    + urllib.parse.urlencode({"q": name, "limit": "6"}))
+    except Exception:
+        return None
+    for page in (data or {}).get("pages", []):
+        candidate = page.get("title") or ""
+        if _key(candidate.split("(")[0].strip()) != wanted:
+            continue
+        summary = _summary_or_empty(candidate)
+        if (summary.get("overview") or "").strip() and _about_music(summary):
+            return candidate
+    return None
+
+
+def wikidata_qid(page_title):
+    """The Wikidata item behind an en.wikipedia article, or None."""
+    try:
+        data = _get("https://en.wikipedia.org/w/api.php?action=query"
+                    "&format=json&prop=pageprops&titles="
+                    + urllib.parse.quote(page_title))
+    except Exception:
+        return None
+    pages = ((data or {}).get("query") or {}).get("pages") or {}
+    for page in pages.values():
+        qid = (page.get("pageprops") or {}).get("wikibase_item")
+        if qid:
+            return qid
+    return None
+
+
+def musicbrainz_url_rels(mbid):
+    """{relation type: [url, ...]} for an act: wikidata, discogs, allmusic...
+
+    MusicBrainz keeps the "official" links out, and the wikidata one is the key
+    to the right article - which is how "Air" stops resolving to the gas.
+    """
+    if not mbid:
+        return {}
+    try:
+        data = _get("%s/artist/%s?inc=url-rels&fmt=json" % (MB_ROOT, mbid)) or {}
+    except Exception:
+        return {}
+    time.sleep(MB_PAUSE)                    # MusicBrainz asks for one a second
+    found = {}
+    for rel in data.get("relations") or []:
+        url = ((rel.get("url") or {}).get("resource") or "").strip()
+        kind = (rel.get("type") or "").strip().lower()
+        if url and kind:
+            found.setdefault(kind, []).append(url)
+    return found
+
+
+def _qid_from_url(url):
+    match = re.search(r"/(Q\d+)", url or "")
+    return match.group(1) if match else None
+
+
+def artist_bio(name, mbid=None):
+    """{overview, image_url, wiki_url, links} for an act, or None.
+
+    The MusicBrainz id is tried first: an act with an id has a Wikidata item,
+    and that item names its English article - which is the difference between
+    "Air" the gas and "Air (French band)". Only an act with no id (or no links
+    on MusicBrainz) falls back to searching Wikipedia by name.
+
+    `links` is where else the act can be read about: MusicBrainz keeps rels for
+    Discogs, AllMusic, Last.fm, IMDb and the official site, and those are used
+    when they exist instead of guessing at search pages.
+    """
+    rels = musicbrainz_url_rels(mbid)
+    title = None
+    qid = None
+    for url in rels.get("wikidata", []):
+        qid = _qid_from_url(url)
+        if qid:
+            title = enwiki_title(qid)
+        if title:
+            break
+    if not title:
+        for url in rels.get("wikipedia", []):
+            title = urllib.parse.unquote(url.rsplit("/", 1)[-1]).replace("_", " ")
+            break
+    if title:                               # an id said so; it must have text
+        summary = _summary_or_empty(title)
+        if not (summary.get("overview") or "").strip():
+            title = None
+    if not title:
+        title = wikipedia_artist_name(name)
+    if not title:
+        return None
+    summary = _summary_or_empty(title)
+    overview = (summary.get("overview") or "").strip()
+    if not overview:
+        return None
+    article = ("https://en.wikipedia.org/wiki/"
+               + urllib.parse.quote(title.replace(" ", "_")))
+    if not qid:
+        qid = wikidata_qid(title)
+    links = [{"label": "Wikipedia", "url": article}]
+    if qid:
+        links.append({"label": "Wikidata",
+                      "url": "https://www.wikidata.org/wiki/" + qid})
+    if mbid:
+        links.append({"label": "MusicBrainz",
+                      "url": "https://musicbrainz.org/artist/" + mbid})
+    for kind, label in (("discogs", "Discogs"), ("allmusic", "AllMusic"),
+                        ("last.fm", "Last.fm"), ("imdb", "IMDb"),
+                        ("official homepage", "Official site")):
+        urls = rels.get(kind) or []
+        if urls:
+            links.append({"label": label, "url": urls[0]})
+    if not rels.get("discogs"):
+        links.append({"label": "Discogs",
+                      "url": "https://www.discogs.com/search/?type=artist&q="
+                             + urllib.parse.quote(name)})
+    return {"overview": overview,
+            "image_url": summary.get("poster_url"),
+            "wiki_url": article,
+            "links": links[:6]}

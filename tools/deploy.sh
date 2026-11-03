@@ -17,6 +17,17 @@ VERSION=$(tar xzOf "$TGZ" media_collection/config.yaml \
           | sed -n 's/^version: *//p' | tr -d '"')
 echo "packaged media_collection $VERSION"
 
+# `ha apps update` is a no-op when the add-on already runs that number, and a
+# deploy then "succeeds" without touching /app - so refuse a repeat up front.
+RUNNING=$(ssh -o BatchMode=yes "$HOST" \
+  'export SUPERVISOR_TOKEN=$(cat /run/s6/container_environment/HASSIO_TOKEN);
+   ha apps info local_media_collection | sed -n "s/^version: *//p"')
+if [ "$RUNNING" = "$VERSION" ]; then
+  echo "REFUSED - the box already runs $VERSION;" \
+       "bump media_collection/config.yaml first" >&2
+  exit 1
+fi
+
 # scp/sftp is refused by the SSH add-on; stream the tarball over the same
 # connection instead.
 ssh -o BatchMode=yes "$HOST" 'cat > /tmp/mc.tgz' < "$TGZ"
@@ -28,13 +39,26 @@ ssh -o BatchMode=yes "$HOST" '
   ha store reload >/dev/null 2>&1 || true
   ha apps update local_media_collection >/dev/null 2>&1 || true
 '
-sleep 20
-INSTALLED=$(ssh -o BatchMode=yes "$HOST" \
-  'export SUPERVISOR_TOKEN=$(cat /run/s6/container_environment/HASSIO_TOKEN);
-   ha apps info local_media_collection | sed -n "s/^version_latest: *//p"')
-echo "version_latest: ${INSTALLED:-unknown}"
+# `ha apps update` returns as soon as the job is queued and `version_latest`
+# moves before the image is built, so poll the *installed* version instead -
+# the 0.23.75 deploy reported success while the 0.23.74 container was still
+# the one answering. A local build takes minutes, hence the long wait (0.23.79
+# needed a manual `ha apps update` after the 2-minute window ran out).
+INSTALLED=""
+tries=0
+while [ "$tries" -lt 90 ]; do
+  INSTALLED=$(ssh -o BatchMode=yes "$HOST" \
+    'export SUPERVISOR_TOKEN=$(cat /run/s6/container_environment/HASSIO_TOKEN);
+     ha apps info local_media_collection | sed -n "s/^version: *//p"')
+  if [ "$INSTALLED" = "$VERSION" ]; then
+    break
+  fi
+  tries=$((tries + 1))
+  sleep 4
+done
+echo "installed: ${INSTALLED:-unknown} (wanted $VERSION)"
 if [ "$INSTALLED" != "$VERSION" ]; then
-  echo "MISMATCH - the add-on did not pick up $VERSION" >&2
+  echo "MISMATCH - the add-on is still running ${INSTALLED:-nothing}" >&2
   exit 1
 fi
 echo "deployed $VERSION"
