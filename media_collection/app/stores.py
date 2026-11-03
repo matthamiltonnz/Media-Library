@@ -199,18 +199,32 @@ def add_target(con, name, kind, ha_entity_id="", app_name="",
 
 
 def attached(con, store_id):
-    """The players a shop can be opened on."""
+    """The players a shop can be opened on, each with the app to launch there."""
     return _dicts(
         con,
-        "SELECT t.* FROM store_targets st"
+        "SELECT t.*, st.app AS app FROM store_targets st"
         "  JOIN playback_targets t ON t.id = st.target_id"
         " WHERE st.store_id = ? ORDER BY t.name COLLATE NOCASE",
         (store_id,))
 
 
-def attach(con, store_id, target_id, commit=False):
+def link_app(con, store_id, target_id):
+    """The app to launch for one (shop, player) pair, or None if not attached."""
+    rows = _dicts(con, "SELECT app FROM store_targets"
+                        " WHERE store_id = ? AND target_id = ?",
+                  (store_id, target_id))
+    if not rows:
+        return None
+    return rows[0]["app"] or ""
+
+
+def attach(con, store_id, target_id, app="", commit=False):
     con.execute("INSERT OR IGNORE INTO store_targets (store_id, target_id)"
                 " VALUES (?, ?)", (store_id, target_id))
+    if (app or "").strip():
+        con.execute("UPDATE store_targets SET app = ?"
+                    " WHERE store_id = ? AND target_id = ?",
+                    (app.strip(), store_id, target_id))
     if commit:
         con.commit()
 
@@ -239,6 +253,11 @@ def playable_stores(con, keys):
         players = attached(con, store["id"])
         if not players:
             continue
+        for player in players:
+            # the app on the link first, then whatever the shop or the player
+            # itself calls it - a link made before 0029 has only the latter
+            player["app"] = (player.get("app") or store["app_name"]
+                             or player.get("app_name") or "")
         seen.add(key)
         found.append((store, players, store["app_name"] or ""))
     return found

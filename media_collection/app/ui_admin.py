@@ -280,8 +280,10 @@ def _stores_block(base, store_rows, targets, entities=()):
             "</form>"
             '<form method="post" action="%sstores/%d/attach">'
             '<p><select name="target_id">%s</select> '
+            '<input name="app" placeholder="Apple TV or com.example.app">'
             '<button type="submit">Add player</button>'
-            ' <span class="muted">a player this shop opens on.</span></p>'
+            ' <span class="muted">the app this shop opens on that player - a'
+            " name it lists, or an Android package.</span></p>"
             "</form></details></td></tr>"
             % (html.escape(row["label"]), html.escape(base), row["id"],
                html.escape(row["label"], quote=True),
@@ -290,13 +292,15 @@ def _stores_block(base, store_rows, targets, entities=()):
         for player in opened:
             rows.append(
                 '<tr class="edit"><td colspan="4">'
-                '<span class="muted">%s &middot; %s &middot; %s</span> '
+                '<span class="muted">%s &middot; %s &middot; %s &middot; %s'
+                "</span> "
                 '<form method="post" style="display:inline"'
                 ' action="%sstores/%d/detach/%d">'
                 '<button type="submit" class="danger">Remove</button></form>'
                 "</td></tr>"
                 % (html.escape(player["name"]), html.escape(player["kind"]),
                    html.escape(player["ha_entity_id"] or "-"),
+                   html.escape(player.get("app") or "-"),
                    html.escape(base), row["id"], player["id"]))
 
     table = ('<table class="grid"><tr><th>Store</th><th>Kind</th>'
@@ -347,15 +351,13 @@ def _stores_block(base, store_rows, targets, entities=()):
         '<label>Entity<select name="ha_entity_id">%s</select></label>'
         '<label>Name<input name="name" placeholder="blank to use its own">'
         "</label>"
-        '<label>App<input name="app_name" placeholder="Apple TV"></label>'
         '<label>Option (an input_select)<input name="input_source"'
         ' placeholder="Blu-ray"></label>'
         "</div>"
         '<p><button type="submit">Add</button>'
-        ' <span class="muted">a media_player wakes and opens the app - its name'
-        " as the device lists it (Apple TV) or an Android package"
-        ' (com.linkplay.wiimtv); a remote wakes the device; an input_select'
-        " fires an automation; a script runs."
+        ' <span class="muted">a media_player wakes and opens the app named on'
+        " the shop; a remote wakes the device; an input_select fires an"
+        " automation; a script runs."
         "</span></p></form></details>"
         % (html.escape(base), "".join(entity_options)))
 

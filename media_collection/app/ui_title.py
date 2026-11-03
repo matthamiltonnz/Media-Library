@@ -183,7 +183,7 @@ def _store_plays(base, row, shops):
                 '<button type="submit">%s</button></form>'
                 % (_text(base), row["id"], _text(store["key"]), player["id"],
                    _text(player.get("name") or player["ha_entity_id"] or "")))
-            named = (player.get("app_name") or "").strip()
+            named = (player.get("app") or "").strip()
             if "." in named:            # a package id reads badly on the page
                 named = ""
             apps.add(_text(named) or _text(app or "") or _text(store["label"]))

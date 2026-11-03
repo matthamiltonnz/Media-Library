@@ -1965,3 +1965,39 @@ the TV): `com.linkplay.wiimtv` -> `turn_on` + `play_media
 {"media_content_type": "app", "media_content_id": "com.linkplay.wiimtv"}`;
 `Apple TV` -> `turn_on` + `select_source {"source": "Apple TV"}`.
 
+
+## The app is per shop *and* player (0.23.112)
+
+One device serves several shops - the bedroom Android TV shows a different
+package for the Apple TV app, Apple Music and Google TV - so a single app on the
+player could not work once a second shop was attached to it.
+
+- `store_targets` gained `app`. The link carries the app now:
+  `stores.attach(con, store_id, target_id, app)`, `stores.attached()` returns
+  `st.app AS app`, and `stores.link_app()` is what the play handler reads (None
+  means "not attached", which it refuses).
+- `playable_stores()` resolves each player's app as *link -> store -> player*,
+  so links made before 0029 (which have only `playback_targets.app_name`) keep
+  working, and `playback_targets.app_name` stays as the last fallback.
+- The admin's *Add a player* form lost its App box; the **attach** form in each
+  shop's edit row gained one, and the attached-player line shows it:
+  "Bedroom TV · media_player · media_player.bedroom · com.apple.android.music".
+- Seeded two digital shops whose libraries are Android TV apps: `applemusic`
+  (Apple Music) and `googletv` (Google TV - Play Movies & TV was folded into it,
+  package `com.google.android.videos`).
+
+Packages worth knowing (verify with `adb shell pm list packages`, or the app's
+Play Store URL `?id=`): Apple TV `com.apple.atve.androidtv.appletv`, Apple Music
+`com.apple.android.music`, Google TV `com.google.android.videos`, YouTube
+`com.google.android.youtube`, Prime Video `com.amazon.amazonvideo.livingroom`,
+Netflix `com.netflix.ninja`, Disney+ `com.disney.disneyplus`, Spotify
+`com.spotify.tv.android`, Wiim `com.linkplay.wiimtv`.
+
+Verified on a scratch DB: four links on two players - appletv -> Lounge
+("Apple TV") and -> Bedroom (`com.apple.atve.androidtv.appletv`), applemusic ->
+Bedroom (`com.apple.android.music`), googletv -> Bedroom
+(`com.google.android.videos`); a digital copy bought at "apple music" resolves to
+the `applemusic` row, its Play sheet says "On Apple Music" and "Wakes the player
+and opens Apple Music", and posting it answers "Could not wake Bedroom TV:
+<urlopen error timed out>" off the box.
+

@@ -2007,7 +2007,7 @@ class Handler(BaseHTTPRequestHandler):
                 picked = field(form, "target_id")
                 if picked.isdigit():
                     stores.attach(con, int(match.group(1)), int(picked),
-                                  commit=True)
+                                  field(form, "app"), commit=True)
                 return self.respond(303, "", extra={
                     "Location": (base or "/") + "admin"})
 
@@ -2240,10 +2240,14 @@ class Handler(BaseHTTPRequestHandler):
                         con, viewer, base, title_id,
                         error="That store has no device to open it on - set one"
                               " in Admin, under Stores.")
-                app = row["app_name"] or device.get("app_name") or ""
+                app = stores.link_app(con, row["id"], device["id"])
+                if app is None:
+                    return self.title_page(
+                        con, viewer, base, title_id,
+                        error="That player is not attached to %s - add it in"
+                              " Admin, under Stores." % row["label"])
                 try:
-                    summary = playback.open_on(
-                        device, row["app_name"] or device.get("app_name") or "")
+                    summary = playback.open_on(device, app)
                 except Exception as exc:
                     return self.title_page(
                         con, viewer, base, title_id,
