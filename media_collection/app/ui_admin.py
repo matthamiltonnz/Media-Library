@@ -216,6 +216,7 @@ def _device_options(targets, chosen=""):
 
 SHOP_KINDS = (("digital", "digital shop"), ("retail", "retail shop"))
 PLAYER_KINDS = (("media_player", "media_player (turn on + app)"),
+                ("remote", "remote (turn the device on)"),
                 ("input_select", "input_select (fires an automation)"),
                 ("script", "script"), ("automation", "automation"))
 
@@ -240,7 +241,7 @@ def _player_options(rows):
     return "".join(out)
 
 
-def _stores_block(base, store_rows, targets, players=()):
+def _stores_block(base, store_rows, targets, entities=()):
     """The shops, and the players each one can be opened on.
 
     A store is a digital shop (Apple TV, iTunes, Bandcamp) or a retail one (a
@@ -257,25 +258,23 @@ def _stores_block(base, store_rows, targets, players=()):
                  else ' <span class="muted">(retired)</span>')
         rows.append(
             '<tr><td>%s%s <span class="muted">%s</span></td><td>%s</td>'
-            "<td>%s</td><td>%s</td>"
+            "<td>%s</td>"
             '<td><form method="post" action="%sstores/%d/delete">'
             '<button type="submit" class="danger">Remove</button>'
             "</form></td></tr>"
             % (html.escape(row["label"]), state, html.escape(row["key"]),
-               html.escape(row["kind"]), html.escape(row["app_name"] or ""),
+               html.escape(row["kind"]),
                names or '<span class="muted">-</span>',
                html.escape(base), row["id"]))
         attached = [player["id"] for player in opened]
         spare = [target for target in targets if target["id"] not in attached]
         rows.append(
-            '<tr class="edit"><td colspan="5"><details>'
+            '<tr class="edit"><td colspan="4"><details>'
             "<summary>Edit %s</summary>"
             '<form method="post" action="%sstores/%d">'
             '<div class="grid">'
             '<label>Label<input name="label" value="%s" required></label>'
             '<label>Kind<select name="kind">%s</select></label>'
-            '<label>App<input name="app_name" value="%s"'
-            ' placeholder="Apple TV"></label>'
             "</div>"
             '<p><button type="submit">Save</button></p>'
             "</form>"
@@ -287,11 +286,10 @@ def _stores_block(base, store_rows, targets, players=()):
             % (html.escape(row["label"]), html.escape(base), row["id"],
                html.escape(row["label"], quote=True),
                _kind_options(row["kind"]),
-               html.escape(row["app_name"] or "", quote=True),
                html.escape(base), row["id"], _player_options(spare)))
         for player in opened:
             rows.append(
-                '<tr class="edit"><td colspan="5">'
+                '<tr class="edit"><td colspan="4">'
                 '<span class="muted">%s &middot; %s &middot; %s</span> '
                 '<form method="post" style="display:inline"'
                 ' action="%sstores/%d/detach/%d">'
@@ -301,7 +299,7 @@ def _stores_block(base, store_rows, targets, players=()):
                    html.escape(player["ha_entity_id"] or "-"),
                    html.escape(base), row["id"], player["id"]))
 
-    table = ('<table class="grid"><tr><th>Store</th><th>Kind</th><th>App</th>'
+    table = ('<table class="grid"><tr><th>Store</th><th>Kind</th>'
              "<th>Opens on</th><th></th></tr>%s</table>" % "".join(rows))
     add = (
         '<details class="add"><summary>Add a store</summary>'
@@ -310,7 +308,6 @@ def _stores_block(base, store_rows, targets, players=()):
         '<label>Label<input name="label" placeholder="JB Hi-Fi" required>'
         "</label>"
         '<label>Kind<select name="kind">%s</select></label>'
-        '<label>App<input name="app_name" placeholder="blank for none"></label>'
         "</div>"
         '<p><button type="submit">Add</button>'
         ' <span class="muted">digital for a shop you download from, retail for a'
@@ -334,31 +331,31 @@ def _stores_block(base, store_rows, targets, players=()):
                     " on.</p>")
 
     entity_options = ['<option value="">-</option>']
-    for player in players or ():
-        label = player["name"]
-        if player.get("integration"):
-            label += " \u00b7 %s" % player["integration"]
-        if player.get("sources"):
-            label += " \u00b7 apps: %s" % ", ".join(player["sources"][:4])
+    for entity in entities or ():
+        label = "%s \u00b7 %s" % (entity["name"], entity["domain"])
+        if entity.get("integration"):
+            label += " \u00b7 %s" % entity["integration"]
+        if entity.get("sources"):
+            label += " \u00b7 apps: %s" % ", ".join(entity["sources"][:4])
         entity_options.append('<option value="%s">%s</option>'
-                              % (html.escape(player["entity_id"], quote=True),
+                              % (html.escape(entity["entity_id"], quote=True),
                                  html.escape(label)))
     add_device = (
         '<details class="add"><summary>Add a player</summary>'
         '<form method="post" action="%sstores/device">'
         '<div class="grid">'
-        '<label>Name<input name="name" placeholder="Lounge Apple TV" required>'
-        "</label>"
         '<label>Entity<select name="ha_entity_id">%s</select></label>'
-        '<label>Kind<select name="kind">%s</select></label>'
-        '<label>Input or option<input name="input_source"'
-        ' placeholder="for an input_select"></label>'
+        '<label>Name<input name="name" placeholder="blank to use its own">'
+        "</label>"
+        '<label>App<input name="app_name" placeholder="Apple TV"></label>'
+        '<label>Option (an input_select)<input name="input_source"'
+        ' placeholder="Blu-ray"></label>'
         "</div>"
         '<p><button type="submit">Add</button>'
-        ' <span class="muted">the players listed come from Home Assistant, with'
-        " the apps each one reports.</span></p></form></details>"
-        % (html.escape(base), "".join(entity_options),
-           _player_kind_options("media_player")))
+        ' <span class="muted">a media_player wakes and opens the app; a remote'
+        " wakes the device; an input_select fires an automation; a script runs."
+        "</span></p></form></details>"
+        % (html.escape(base), "".join(entity_options)))
 
     return ('<p class="sub">A store is where a copy came from; a store with a'
             " player also opens on it.</p>"
@@ -367,7 +364,7 @@ def _stores_block(base, store_rows, targets, players=()):
 
 def render(base, viewer, stats, message=None, refresh=None, duplicates=0,
            roots=(), jellyfin=None, scan_message="", players=(), chosen=None,
-           jobs=None, store_rows=(), targets=(), confirm=""):
+           jobs=None, store_rows=(), targets=(), entities=(), confirm=""):
     jobs = jobs or {}
     parts = []
     if confirm:
@@ -409,7 +406,7 @@ def render(base, viewer, stats, message=None, refresh=None, duplicates=0,
         metadata += _artists_block(base)
     parts.append(_panel("Metadata", metadata))
 
-    parts.append(_panel("Stores", _stores_block(base, store_rows, targets, players)))
+    parts.append(_panel("Stores", _stores_block(base, store_rows, targets, entities)))
 
     if players:
         parts.append(_panel("Players", _players_block(base, players, chosen)))

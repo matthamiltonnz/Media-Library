@@ -66,6 +66,56 @@ def _call(path, method="GET", payload=None, timeout=10):
     return json.loads(body) if body.strip() else {}
 
 
+PLAYER_DOMAINS = ("media_player", "remote", "input_select", "script",
+                  "automation")
+
+
+def entities(refresh=False):
+    """Every entity a store could be opened on, for the admin picker.
+
+    Wider than players(): a shop's player is not always a media_player. An
+    Android/Google TV is often a `remote` (and its app launch is a script), a
+    disc player is an `input_select` that fires an automation, and either can be
+    a script. Each entry carries its integration, so the list can say which one
+    is the Apple TV and which is a Chromecast.
+    """
+    if not token():
+        return []
+    try:
+        states = _call("/states")
+    except Exception as exc:
+        print("playback: could not list entities:", exc, file=sys.stderr)
+        return []
+    registry = integrations()
+    found = []
+    for state in states:
+        entity_id = state.get("entity_id") or ""
+        if entity_id.split(".", 1)[0] not in PLAYER_DOMAINS:
+            continue
+        if (state.get("state") or "") in ("unavailable", "unknown"):
+            continue
+        attributes = state.get("attributes") or {}
+        found.append({
+            "entity_id": entity_id,
+            "name": attributes.get("friendly_name") or entity_id,
+            "state": state.get("state") or "",
+            "domain": entity_id.split(".", 1)[0],
+            "integration": registry.get(entity_id, ""),
+            "sources": [str(app) for app in
+                        (attributes.get("source_list") or [])],
+        })
+    found.sort(key=lambda item: item["name"].lower())
+    return found
+
+
+def entity_name(entity_id):
+    """The friendly name of one entity, for a player added without a name."""
+    for entity in entities():
+        if entity["entity_id"] == entity_id:
+            return entity["name"]
+    return entity_id
+
+
 def players(refresh=False):
     """[{'entity_id', 'name', 'state', 'device_class'}] for usable media_players.
 
@@ -275,6 +325,10 @@ def open_on(target, app_name="", timeout=8):
         _call("/services/automation/trigger", "POST", {"entity_id": entity_id},
               timeout=timeout)
         return "Triggered %s." % label
+    if kind == "remote" or domain == "remote":
+        _call("/services/remote/turn_on", "POST", {"entity_id": entity_id},
+              timeout=timeout)
+        return "Woke %s." % label
     if kind == "input_select" or domain == "input_select":
         option = (target.get("input_source") or "").strip()
         if not option:

@@ -1917,3 +1917,27 @@ reporting the Apple TV app in its `source_list`, so it is the only player that
 should be attached to an `appletv` store. Off the box (no supervisor) the
 admin page still renders and the hint is simply absent.
 
+
+## The app belongs to the player (0.23.110)
+
+- `stores.app_name` is gone from the panel (the column stays, unused): an App
+  box on the *store* beside a list of players that each carried their own app
+  read as the same thing twice. `playback_targets.app_name` is now the one place
+  an app is named, the *Add a player* form has the field, and `_store_plays()`
+  heads the section with the store's label ("On Apple TV") and says "Wakes the
+  player and opens <app>".
+- The player picker offers **entities**, not just players: `playback.entities()`
+  lists `media_player`, `remote`, `input_select`, `script` and `automation` -
+  43 on the live box (19 media_player, 12 remote, 9 script, 2 automation, 1
+  input_select) - each labelled with its domain and integration. The player's
+  `kind` is taken from the entity's domain, so the Kind select is gone.
+- `playback.open_on()` gained the `remote` branch (`remote.turn_on`), which is
+  what wakes an Android/Google TV.
+- Why a Chromecast shows no apps: the `cast` integration publishes no
+  `source_list` (only the `app_name` it is running), so it cannot be told "open
+  app X" through `media_player.select_source`. It is still a target for casting
+  a *file*, through the media-folder path. An `androidtv_remote` media_player
+  publishes no apps either, but its `remote` can wake the device, and
+  `androidtv_remote.launch_app` wrapped in a script opens an app there - which
+  is why scripts are in the picker at all.
+

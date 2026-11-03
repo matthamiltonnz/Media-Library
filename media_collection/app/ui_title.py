@@ -163,17 +163,18 @@ def _store_plays(base, row, shops):
     `shops` is [(store_row, [player rows], app_name)] from
     stores.playable_stores(). A shop is not one device - the Apple TV app runs
     on the Apple TV, an Android TV and a phone - so every attached player gets
-    its own button, and each posts the store *and* the player.
+    its own button, and each posts the store *and* the player. The app lives on
+    the player now, since that is what actually gets launched.
 
-    The button wakes that player and opens the app; a purchased title cannot be
+    The button wakes that player and opens the app; a bought title cannot be
     deep-linked, so the sheet says so rather than pretending otherwise.
     """
     if not shops:
         return ""
     parts = []
     for store, players, app in shops:
-        app_name = _text(app or store["label"])
         buttons = []
+        apps = set()
         for player in players:
             buttons.append(
                 '<form method="post" action="%stitle/%s/store">'
@@ -182,13 +183,16 @@ def _store_plays(base, row, shops):
                 '<button type="submit">%s</button></form>'
                 % (_text(base), row["id"], _text(store["key"]), player["id"],
                    _text(player.get("name") or player["ha_entity_id"] or "")))
+            apps.add(_text(player.get("app_name") or "") or _text(app or ""))
+        wanted = apps.pop() if len(apps) == 1 else ""
         parts.append(
             '<section class="store-play">'
             '<h3>On %s</h3>'
             '<div class="players">%s</div>'
-            '<p class="muted">Wakes the player and opens %s &#8212; pick the '
-            'title there.</p></section>'
-            % (app_name, "".join(buttons), app_name))
+            '<p class="muted">%s &#8212; pick the title there.</p></section>'
+            % (_text(store["label"]), "".join(buttons),
+               ("Wakes the player and opens %s" % wanted) if wanted
+               else "Wakes the player"))
     return "\n".join(parts)
 
 

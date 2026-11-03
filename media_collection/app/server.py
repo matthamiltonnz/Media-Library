@@ -1525,6 +1525,7 @@ class Handler(BaseHTTPRequestHandler):
                                 " ORDER BY medium, label").fetchall(),
                     jellyfin.status(con), scan.summary(),
                     players=playback.players(),
+                    entities=playback.entities(),
                     chosen=playback.chosen(con),
                     jobs={"scan": scan.status(),
                           "artists": artists.status(),
@@ -1988,12 +1989,15 @@ class Handler(BaseHTTPRequestHandler):
                     "Location": (base or "/") + "admin"})
 
             if route.rstrip("/").endswith("/stores/device"):
-                name = field(form, "name")
+                entity = field(form, "ha_entity_id")
+                domain = entity.split(".", 1)[0] if "." in entity else ""
+                name = field(form, "name") or (
+                    playback.entity_name(entity) if entity else "")
                 if name:
                     stores.add_target(con, name,
-                                      field(form, "kind") or "media_player",
-                                      field(form, "ha_entity_id"),
-                                      field(form, "app_name"),
+                                      domain or field(form, "kind")
+                                      or "media_player",
+                                      entity, field(form, "app_name"),
                                       field(form, "input_source"), commit=True)
                 return self.respond(303, "", extra={
                     "Location": (base or "/") + "admin"})
