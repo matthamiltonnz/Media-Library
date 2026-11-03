@@ -339,16 +339,38 @@ def open_on(target, app_name="", timeout=8):
 
     _call("/services/media_player/turn_on", "POST", {"entity_id": entity_id},
           timeout=timeout)
-    source = (app_name or target.get("input_source") or "").strip()
-    if not source:
+    app = (app_name or target.get("input_source") or "").strip()
+    if not app:
         return "Woke the %s." % label
+    if _is_app_id(app):
+        # Android TV and Fire TV launch an app by package id through play_media
+        # and publish no source_list at all - select_source cannot work there.
+        try:
+            _call("/services/media_player/play_media", "POST",
+                  {"entity_id": entity_id, "media_content_type": "app",
+                   "media_content_id": app}, timeout=timeout)
+        except Exception as exc:
+            return ("Woke the %s, but could not start %s (%s)."
+                    % (label, app, exc))
+        return "Woke the %s and started %s." % (label, app)
     try:
         _call("/services/media_player/select_source", "POST",
-              {"entity_id": entity_id, "source": source}, timeout=timeout)
+              {"entity_id": entity_id, "source": app}, timeout=timeout)
     except Exception as exc:
         return ("Woke the %s, but could not open %s (%s) - that device may not "
-                "list its apps." % (label, source, exc))
-    return "Woke the %s and opened %s." % (label, source)
+                "list its apps." % (label, app, exc))
+    return "Woke the %s and opened %s." % (label, app)
+
+
+def _is_app_id(text):
+    """Whether an app is named by package id or by the name the device lists.
+
+    `com.linkplay.wiimtv` is an Android package: Android TV and Fire TV launch
+    it with media_player.play_media (media_content_type "app") and publish no
+    source_list, so select_source cannot reach it. "Apple TV" is a tvOS app name,
+    which those devices do list and take through select_source.
+    """
+    return "." in text and " " not in text
 
 
 WS_HOST = "supervisor"

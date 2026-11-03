@@ -1941,3 +1941,27 @@ admin page still renders and the hint is simply absent.
   `androidtv_remote.launch_app` wrapped in a script opens an app there - which
   is why scripts are in the picker at all.
 
+
+## An Android app is a package id (0.23.111)
+
+The `androidtv_remote` media_player publishes no `source_list`, but it **can**
+launch an app - `media_player.play_media` with `media_content_type: "app"` and
+`media_content_id: "<package>"`. The household's own working call for the Wiim
+app is `com.linkplay.wiimtv`, which is what `open_on()` now does when the app
+looks like a package.
+
+- a dotted, space-free value (`com.linkplay.wiimtv`) is an **Android package**:
+  `media_player.play_media`, content type `app`, content id the package;
+- anything else (`Apple TV`) is a **name the device lists**: it goes through
+  `media_player.select_source`, which is how tvOS apps are opened.
+
+`_is_app_id()` is that test, and the *Add a player* hint names both forms so the
+field is discoverable. `_store_plays()` still prints "opens Apple TV" when the
+app is a package while the store is labelled Apple TV - a package id reads badly
+on the page.
+
+Verified on the deployed container with `_call` stubbed out (nothing launched on
+the TV): `com.linkplay.wiimtv` -> `turn_on` + `play_media
+{"media_content_type": "app", "media_content_id": "com.linkplay.wiimtv"}`;
+`Apple TV` -> `turn_on` + `select_source {"source": "Apple TV"}`.
+

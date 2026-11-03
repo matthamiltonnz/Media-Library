@@ -352,8 +352,10 @@ def _stores_block(base, store_rows, targets, entities=()):
         ' placeholder="Blu-ray"></label>'
         "</div>"
         '<p><button type="submit">Add</button>'
-        ' <span class="muted">a media_player wakes and opens the app; a remote'
-        " wakes the device; an input_select fires an automation; a script runs."
+        ' <span class="muted">a media_player wakes and opens the app - its name'
+        " as the device lists it (Apple TV) or an Android package"
+        ' (com.linkplay.wiimtv); a remote wakes the device; an input_select'
+        " fires an automation; a script runs."
         "</span></p></form></details>"
         % (html.escape(base), "".join(entity_options)))
 
