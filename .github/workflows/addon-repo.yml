@@ -1,0 +1,32 @@
+name: Add-on repository
+
+# Guards the things that make the repository installable from someone else's
+# Home Assistant: the descriptor files, the base images in build.yaml (a tag
+# that does not exist quietly breaks the add-on for that architecture only),
+# the store artwork and the one-click install links in the README.
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Check the add-on manifests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Check repository.yaml, config.yaml, build.yaml and artwork
+        run: python3 tools/check_addon_repo.py

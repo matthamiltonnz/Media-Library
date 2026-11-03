@@ -535,13 +535,41 @@ Every copy has one owner; `visibility = shared` (default) is visible to every
 active HA user, `private` only to its owner. Ingress passes the HA user id, so the
 add-on auto-creates an owner row per family member — no separate logins.
 
-## Install (local add-on)
+## Install
 
-Copy this folder to `/addons/media_collection`, then Settings → Add-ons → Add-on
-store → ⋮ → **Reload**, and install **Media Collection** under *Local add-ons*.
-Bump `version` in `config.yaml` for each change — the Supervisor only rebuilds
-when it changes. For a GitHub repo instead, replace `CHANGEME` in
-`repository.yaml`, `config.yaml` and `build.yaml`.
+Two ways in, both ending with **Media Collection** in the sidebar.
+
+### From the repository (recommended)
+
+1. Settings → Add-ons → Add-on store → ⋮ → **Repositories**
+2. Add `https://github.com/matthamiltonnz/Media-Library` and close the dialog
+3. The store reloads; **Media Collection** now sits under *Media Library Add-ons*
+4. Open it, press **Install**, then **Start**
+
+The *Add repository to Home Assistant* badge in the README does the first two
+steps for you.
+
+The Supervisor builds the image on your own machine, from a Home Assistant base
+image (`build.yaml` names the one for each architecture) plus Alpine's `python3`
+and `sqlite`. No prebuilt image is published, so the first install needs
+internet and takes a few minutes - longer on a Pi. Run
+`python3 tools/check_addon_repo.py` before a release: it checks the descriptor
+files, that every base image tag really exists in the registry, and that the
+store artwork is the size Home Assistant expects.
+
+`/media` is mounted read-only (`media:ro`) so the add-on can find ripped files;
+the catalogue itself is `/data/media.db` inside the add-on.
+
+### From a local folder (development)
+
+Copy `media_collection/` to `/addons/media_collection`, then Settings → Add-ons →
+Add-on store → ⋮ → **Reload**, and install **Media Collection** under *Local
+add-ons*. Bump `version` in `config.yaml` for each change - the Supervisor only
+rebuilds when it changes.
+
+Both routes use the slug `media_collection`, so a machine should have one or the
+other: remove the local copy before installing from the repository, or the store
+lists two add-ons with the same slug.
 
 ## Data, backup, schema changes
 

@@ -6,7 +6,7 @@ Entry point `media_collection/app/server.py`; schema in
 `media_collection/migrations/*.sql` applied by `migrate.sh`.
 
 Version lives in `media_collection/config.yaml` and is displayed on the page
-header. Current: **0.23.98**.
+header. Current: **0.23.99**.
 
 ## Live deployment
 
@@ -1501,4 +1501,63 @@ first pass did, in `extra` (the filter string the kind and owner chips carry).
 The visible effect on the live shelf is nil: there are no `provider='rip'` rows
 (981 `jellyfin`, 167 `itunes`), so both fragments matched nothing - the home page
 reads 636 titles · 1220 copies either side of the change.
+
+
+## The repository is a public add-on repository (0.23.99)
+
+It already was, in structure: `repository.yaml` at the root and the add-on in
+`media_collection/` is exactly what Settings -> Add-ons -> Add-on store ->
+Repositories expects. What was missing was everything around it that a stranger
+touches.
+
+- `README.md` carries the two My Home Assistant badges -
+  `supervisor_add_addon_repository?repository_url=…` (add the repository) and
+  `supervisor_app?app=media_collection&repository_url=…` (open the add-on) - and
+  the Install section now says what the machine needs: Home Assistant OS or
+  Supervised (Container cannot install add-ons), amd64/aarch64/armv7/armhf/i386,
+  internet for the first build, and that **no prebuilt image is published**, so
+  the Supervisor builds on your own machine. `supervisor_addon` is a legacy slug
+  that my.home-assistant.io maps to `supervisor_app` with `addon` -> `app`; both
+  still answer, the new one is what the badge is called now.
+- `media_collection/icon.png` (128x128) and `logo.png` (250x100) were missing, so
+  the store and the dashboard showed a blank tile. `tools/make_icons.py` draws
+  them - film strip, green play mark, dark plate - with 4x4 supersampling and a
+  hand-written PNG writer, no library. Re-run it rather than editing the binary.
+- `media_collection/translations/en.yaml` names and explains the two options, so
+  the Configuration tab reads "Default visibility" instead of `default_visibility`.
+  The Supervisor reads these from the add-on folder, not the image - the
+  Dockerfile copies only `app/`, `config.yaml`, `migrations/`, `migrate.sh`,
+  `run.sh`.
+- `repository.yaml`'s maintainer was `<matt@example.com>`; it is the GitHub
+  noreply address now, so the descriptor has no placeholder in it.
+- `tools/check_addon_repo.py` (run by `.github/workflows/addon-repo.yml` on every
+  push to `main` and every pull request) checks the descriptor keys, the config
+  the Supervisor requires, that `build.yaml` builds every architecture `arch`
+  offers and that each base image tag **really exists in ghcr.io**, the artwork
+  sizes, and that the README still carries both install links pointing at
+  `repository.yaml`'s url. It has its own tiny YAML reader so it needs no
+  `pip install` - `python3 tools/check_addon_repo.py [--offline]`.
+
+Trap hit writing this, and it is this file's own warning about truncated reads:
+`head -6 build.yaml | cut -c1-50` printed `aarch64-base:3.2`, `3.2` is a 404 at
+ghcr.io, and the line was edited to `:3.21` — but it **already said `3.21`**;
+the `cut` had eaten the last character. The edit produced `:3.211`, which the new
+checker flagged immediately (`aarch64-base:3.211 does not exist`). Nothing was
+ever wrong with the ARM base image: the box is `x86_64`, so it had always built
+from `amd64-base:3.21`. Read whole values before "fixing" them; truncating for
+readability is only safe for text you are not about to edit.
+
+Verified: checker exits 0 with all five base-image tags confirmed;
+`deploy.sh` packaged and installed **0.23.99** (`installed: 0.23.99`), the
+container came back `started` and `/health` answered `{"status": "ok"}`;
+`/addons/media_collection` now holds `icon.png`, `logo.png` and `translations/`.
+Both badge redirects answer 200, and `raw.githubusercontent.com/…/main/`
+serves `repository.yaml` and `media_collection/config.yaml`, so the address in
+the README is one Home Assistant can actually add.
+
+Still open: nothing prebuilds an image, so every install compiles on the user's
+box. Adding `image: ghcr.io/<owner>/media-collection-{arch}` plus a
+`home-assistant/builder` workflow would fix that, but only once the workflow
+really publishes - a config that points at an image that is not there is worse
+than a build.
 
