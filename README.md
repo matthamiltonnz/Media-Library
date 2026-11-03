@@ -1,9 +1,9 @@
 # Media Library — Home Assistant add-on
 
 A household catalogue of physical and digital media (Blu-ray, 4K, 3D, DVD, iTunes,
-ripped files, CDs, vinyl) with per-owner copies, shared visibility, CSV import and
-export, keyless metadata, and playback-source records for files mounted into Home
-Assistant or held by a Jellyfin server.
+CDs, vinyl) with per-owner copies, shared visibility, CSV import and export, keyless
+metadata, and playable digital backups of what you own — ripped files mounted into
+Home Assistant or held by a Jellyfin server, matched to the titles you add.
 
 Runs as a Home Assistant add-on (ingress), backed by one SQLite file in `/data`.
 
@@ -35,10 +35,12 @@ Full documentation: [media_collection/DOCS.md](media_collection/DOCS.md).
   list, plus an owner filter for *Everyone* or a single person, with titles/copies
   counts broken down by format, search, list and poster views, and the admin page
   tucked away at the foot of the catalogue.
-- **Playback sources** — record that a copy is a ripped file in a folder mounted into
-  Home Assistant (root + path), or a Jellyfin/Kodi/iTunes item, ready for routing
-  later. A ripped music tree (`Owner's Music/Artist/Album`) is scanned on every
-  start, turning each album folder into a CD copy with a rip source.
+- **Playback sources** — a ripped copy is a playable digital backup of media you
+  already own, never a title of its own: it becomes another copy of a title in the
+  collection and records the media root plus the path inside a folder mounted into
+  Home Assistant (or the Jellyfin/Kodi/iTunes item). A ripped music tree
+  (`Owner's Music/Artist/Album`) is matched on every start, so an album folder
+  becomes the playable copy of an album you already catalogued.
 - **Housekeeping** — automatic schema migrations, duplicate-title folding, and a
   repair pass that survives interrupted upgrades.
 

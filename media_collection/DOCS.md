@@ -199,11 +199,12 @@ the catalogue** returns to the same kind, owner, search and format.
 
 ## Ripped files are copies too
 
-A file found in a media folder becomes its own copy of the title, badged **Ripped file ·
-whoever owns the disc**, so a library of nothing but files still fills the shelf and
-a disc keeps its own row untouched. Old scans had hung the file off whichever copy
-came first, which hid it; the scan now moves those onto their own copy
-(`repoint_rips`) on every run.
+A ripped file is a playable digital backup of media you own, so it becomes its own
+copy of a title already in the collection — badged **Ripped file · whoever owns the
+disc** — and never a title of its own: the scan only matches files against titles
+that already have a copy. A disc keeps its own row untouched. Old scans had hung the
+file off whichever copy came first, which hid it; the scan now moves those onto their
+own copy (`repoint_rips`) on every run.
 
 Titles whose only copies are files used to be hidden from the catalogue, with a
 link under the tallies to bring them back; that switch was only ever there while
