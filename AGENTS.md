@@ -1887,3 +1887,33 @@ kind dispatched to the right service (`turn_on`+`select_source`,
 `select_option`, `script.turn_on`, `automation.trigger`). Live: 5 stores, 0
 links, 169 `appletv` rows, 0 retail-linked copies - nothing to migrate twice.
 
+
+## A player's integration, in the picker (0.23.109)
+
+The Stores panel's *Add a player* list now names each media_player's
+**integration** beside it - "Apple TV · apple_tv · apps: AnimeLab, App Store,
+Arcade, …", "Bedroom TV · androidtv_remote" - which is how you tell which device
+can actually open a given shop's app.
+
+- Which integration owns an entity lives in the **entity registry**, and the
+  REST API does not expose it at all: `config/entity_registry/list` is
+  websocket only. `playback.integrations()` therefore speaks just enough of the
+  protocol - upgrade handshake, `auth`, one `config/entity_registry/list` - on
+  `ws://supervisor/core/websocket` with `socket`, `struct` and `base64`, and no
+  dependency (`homeassistant_api: true` gives the token; the add-on maps only
+  `media:ro`, so `/config/.storage/core.entity_registry` is not readable).
+- It is cached for ten minutes in `_registry`, which `players()` reads to stamp
+  `integration` on every player (alongside `sources` and `can_select`).
+- Fail-soft: no supervisor, a refused upgrade, a missing token - any failure
+  prints one line to stderr and returns `{}`, remembered for the same ten
+  minutes, so the picker loses the hint and nothing else.
+- Framing: client frames must be **masked**, server frames are not, and
+  `_ws_recv()` joins continuation frames until FIN - the registry answer is
+  megabytes and arrives fragmented.
+
+Verified live: 2606 registry entries; 18 players each labelled (`cast`,
+`music_assistant`, `apple_tv`, `androidtv_remote`); the Apple TV is the only one
+reporting the Apple TV app in its `source_list`, so it is the only player that
+should be attached to an `appletv` store. Off the box (no supervisor) the
+admin page still renders and the hint is simply absent.
+

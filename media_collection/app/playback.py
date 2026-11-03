@@ -4,8 +4,11 @@ The add-on can only see the same NAS folders Home Assistant serves as the `local
 media source, so a rip is handed to HA as a `media-source://` URI rather than a URL:
 HA resolves it and passes whatever the target player understands (cast, DLNA, etc.).
 """
+import base64
 import json
 import os
+import socket
+import struct
 import sys
 import time
 import urllib.error
@@ -80,6 +83,7 @@ def players(refresh=False):
         print("playback: could not list players:", exc, file=sys.stderr)
         return _cache["players"]
     found = []
+    registry = integrations()       # {entity_id: integration}, cached
     for state in states:
         entity_id = state.get("entity_id") or ""
         if not entity_id.startswith("media_player."):
@@ -97,7 +101,8 @@ def players(refresh=False):
                                   (attributes.get("source_list") or [])],
                       "can_select": bool(
                           (attributes.get("supported_features") or 0)
-                          & SELECT_SOURCE)})
+                          & SELECT_SOURCE),
+                      "integration": registry.get(entity_id, "")})
     found.sort(key=lambda item: item["name"].lower())
     _cache.update(at=time.time(), players=found)
     return found
@@ -290,3 +295,112 @@ def open_on(target, app_name="", timeout=8):
         return ("Woke the %s, but could not open %s (%s) - that device may not "
                 "list its apps." % (label, source, exc))
     return "Woke the %s and opened %s." % (label, source)
+
+
+WS_HOST = "supervisor"
+WS_PORT = 80
+WS_PATH = "/core/websocket"
+REGISTRY_SECONDS = 600
+_registry = {"at": 0.0, "map": {}}
+
+
+def _ws_read(sock, count):
+    chunks = []
+    while count:
+        chunk = sock.recv(count)
+        if not chunk:
+            raise RuntimeError("Home Assistant closed the websocket")
+        chunks.append(chunk)
+        count -= len(chunk)
+    return b"".join(chunks)
+
+
+def _ws_send(sock, payload):
+    data = payload.encode("utf-8")
+    mask = os.urandom(4)
+    header = bytearray([0x81])                  # text message, FIN set
+    length = len(data)
+    if length < 126:
+        header.append(0x80 | length)
+    elif length < 1 << 16:
+        header.append(0x80 | 126)
+        header += struct.pack("!H", length)
+    else:
+        header.append(0x80 | 127)
+        header += struct.pack("!Q", length)
+    sock.sendall(bytes(header) + mask +
+                 bytes(byte ^ mask[i % 4] for i, byte in enumerate(data)))
+
+
+def _ws_recv(sock):
+    """One websocket message, joining fragments."""
+    message = b""
+    while True:
+        first, second = _ws_read(sock, 2)
+        length = second & 0x7F
+        if length == 126:
+            length = struct.unpack("!H", _ws_read(sock, 2))[0]
+        elif length == 127:
+            length = struct.unpack("!Q", _ws_read(sock, 8))[0]
+        mask = _ws_read(sock, 4) if second & 0x80 else b""
+        payload = _ws_read(sock, length) if length else b""
+        if mask:
+            payload = bytes(byte ^ mask[i % 4]
+                            for i, byte in enumerate(payload))
+        message += payload
+        if first & 0x80:
+            return message
+
+
+def integrations(refresh=False):
+    """{entity_id: integration} for every entity Home Assistant knows.
+
+    The REST API does not expose the entity registry - `config/entity_registry
+    /list` is websocket only - so this speaks just enough of the protocol to ask
+    that one question. It is what tells the Stores panel that a player is the
+    `apple_tv` integration rather than a Chromecast or a `cast` group.
+
+    Any failure returns {} and is remembered for REGISTRY_SECONDS: a missing
+    hint must never take the admin page down.
+    """
+    if not refresh and time.time() - _registry["at"] < REGISTRY_SECONDS:
+        return _registry["map"]
+    found = {}
+    sock = None
+    try:
+        sock = socket.create_connection((WS_HOST, WS_PORT), timeout=20)
+        key = base64.b64encode(os.urandom(16)).decode()
+        sock.sendall((
+            "GET %s HTTP/1.1\r\nHost: %s\r\nUpgrade: websocket\r\n"
+            "Connection: Upgrade\r\nSec-WebSocket-Key: %s\r\n"
+            "Sec-WebSocket-Version: 13\r\nAuthorization: Bearer %s\r\n\r\n"
+            % (WS_PATH, WS_HOST, key, token())).encode("utf-8"))
+        head = b""
+        while b"\r\n\r\n" not in head:
+            head += _ws_read(sock, 1)
+        if b" 101 " not in head.split(b"\r\n")[0]:
+            raise RuntimeError(head.split(b"\r\n")[0].decode("latin-1"))
+        _ws_recv(sock)                                    # auth_required
+        _ws_send(sock, json.dumps({"type": "auth",
+                                   "access_token": token()}))
+        _ws_recv(sock)                                    # auth_ok
+        _ws_send(sock, json.dumps({"id": 1,
+                                   "type": "config/entity_registry/list"}))
+        answer = json.loads(_ws_recv(sock).decode("utf-8"))
+        for entry in answer.get("result") or []:
+            entity_id = entry.get("entity_id") or ""
+            if entity_id:
+                found[entity_id] = entry.get("platform") or ""
+    except Exception as exc:
+        print("playback: could not read the entity registry:", exc,
+              file=sys.stderr)
+        found = {}
+    finally:
+        if sock is not None:
+            try:
+                sock.close()
+            except OSError:
+                pass
+    _registry.update({"at": time.time(), "map": found})
+    return found
+

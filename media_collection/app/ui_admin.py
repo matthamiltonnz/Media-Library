@@ -336,8 +336,10 @@ def _stores_block(base, store_rows, targets, players=()):
     entity_options = ['<option value="">-</option>']
     for player in players or ():
         label = player["name"]
+        if player.get("integration"):
+            label += " \u00b7 %s" % player["integration"]
         if player.get("sources"):
-            label += " (apps: %s)" % ", ".join(player["sources"][:4])
+            label += " \u00b7 apps: %s" % ", ".join(player["sources"][:4])
         entity_options.append('<option value="%s">%s</option>'
                               % (html.escape(player["entity_id"], quote=True),
                                  html.escape(label)))
