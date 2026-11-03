@@ -1636,3 +1636,45 @@ Verified on a `VACUUM INTO` copy: owner=7 -> 158 titles · 183 copies and
 owner=7&format=uhd_4k -> 136 · 161, matching that pill exactly; unfiltered
 unchanged at 636 · 754 and "4K Blu-ray · Digital".
 
+
+## The walk was missing a whole library (0.23.102)
+
+Jeanine's 16 albums had **no** Jellyfin route, and never would have: `_index()`
+listed the library with `/Items?Recursive=true&IncludeItemTypes=…&UserId=<admin>`,
+and that account cannot see the `Jeanine's Music` folder, so those albums were
+never in the index at all. Nothing about the name matching was wrong - a
+`searchTerm` query (which passes no UserId) finds `Cross Road: The Best of Bon
+Jovi` under `/media/QNAP/Music/Jeanine's Music/…` while the walk returned 0 of
+her 16 albums.
+
+Nor is either mode a superset of the other, which is why the old comment ("a
+user id matters … without one Jellyfin lists a subset") was half right:
+
+| type | with UserId | without |
+|---|---|---|
+| Movie | 886 | 658 |
+| Episode | 4525 | 4525 |
+| Audio | 10450 | 10799 |
+| MusicAlbum | 836 | 853 |
+
+`_everywhere(base, key, include, fields)` unions the two listings, deduped by
+item id, and the five walks in `_index` use it. The union indexes 1018 movies,
+4525 episodes, 10799 audio and 853 albums.
+
+Measured on a `VACUUM INTO` copy of the live database: `sync_links(con, server=row)`
+only **writes the links** - the materialise/expand/editions/dedupe steps live in
+the outer `sync_links(con)` branch, so a dry run must call `sync_links(con, log)`
+with no server, or run `materialise()` afterwards. Doing that, the copy gained
+17 items, 16 of them Jeanine's albums (`_name_match` now misses 0 of her 16
+titles, having missed all 16 before).
+
+Live, after 0.23.102: 981 Jellyfin routes -> **998**, items 2283 -> 2300, a
+second sync changes nothing (998 / 2300 again), and the catalogue's music tally
+stays 542 titles · 547 copies - a route is not a copy, see *Files are not
+counted*. Diffing the set of titles that hold a route against a copy taken
+before the change gives exactly 17 titles: Jeanine's 16 (568-599) plus
+`Minecraft - Volume Alpha` (#600), which Jellyfin holds under
+`/media/QNAP/Music/Justin's Music/C418/…` - a second library the admin account
+cannot see. Her Bon Jovi album page now carries a **Play** button and a
+*Jellyfin matches* row.
+

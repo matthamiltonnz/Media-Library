@@ -169,6 +169,29 @@ def _user_id(base, key):
     return chosen
 
 
+def _everywhere(base, key, include, fields="Path"):
+    """Every item of a type, from both the user-scoped and the bare listing.
+
+    The two `/Items` calls each withhold things the other returns: on this
+    server the user-scoped walk found 886 movies against 658 without a user,
+    but it also returned 0 of the 16 albums in the "Jeanine's Music" library,
+    which the bare call lists - so a library that the admin account cannot see
+    silently lost every route on it. Union both, deduped by id.
+    """
+    modes = [_user_id(base, key)]
+    if modes[0]:
+        modes.append("")
+    seen = set()
+    for user_id in modes:
+        for item in _walk(base, key, include, fields, user_id):
+            jf_id = item.get("Id")
+            if jf_id in seen:
+                continue
+            seen.add(jf_id)
+            yield item
+
+
+
 
 def _norm(text):
     """Loose key: accents, punctuation and a leading 'the ' do not matter."""
@@ -194,9 +217,8 @@ def _index(base, key):
     """Lookup tables built from what Jellyfin already knows about."""
     by_path, by_dir, by_name, details = {}, {}, {}, {}
     counts = {"movie": 0, "episode": 0, "audio": 0, "album": 0, "season": 0}
-    user_id = _user_id(base, key)
 
-    for item in _walk(base, key, "Movie", "Path,ProductionYear", user_id):
+    for item in _everywhere(base, key, "Movie", "Path,ProductionYear"):
         jf_id, path = item.get("Id"), _key(item.get("Path"))
         counts["movie"] += 1
         details[jf_id] = (item.get("Name") or "", path)
@@ -210,7 +232,7 @@ def _index(base, key):
         by_name.setdefault(("movie", compact, movie_year), (jf_id, "movie"))
         by_name.setdefault(("movie", compact, 0), (jf_id, "movie"))
 
-    for item in _walk(base, key, "Episode", "Path,SeasonId,SeriesId", user_id):
+    for item in _everywhere(base, key, "Episode", "Path,SeasonId,SeriesId"):
         jf_id, path = item.get("Id"), _key(item.get("Path"))
         counts["episode"] += 1
         details.setdefault(jf_id, (item.get("SeriesName") or item.get("Name") or "", path))
@@ -222,14 +244,14 @@ def _index(base, key):
             by_dir.setdefault(os.path.dirname(os.path.dirname(path)), (series, "series"))
             details.setdefault(series, (item.get("SeriesName") or "", ""))
 
-    for item in _walk(base, key, "Audio", "Path,AlbumId", user_id):
+    for item in _everywhere(base, key, "Audio", "Path,AlbumId"):
         path = _key(item.get("Path"))
         counts["audio"] += 1
         album = item.get("AlbumId")
         if path and album:
             by_dir.setdefault(os.path.dirname(path), (album, "album"))
 
-    for item in _walk(base, key, "MusicAlbum", "AlbumArtist,Path", user_id):
+    for item in _everywhere(base, key, "MusicAlbum", "AlbumArtist,Path"):
         jf_id = item.get("Id")
         counts["album"] += 1
         artist = item.get("AlbumArtist") or ""
@@ -243,7 +265,7 @@ def _index(base, key):
         elif claimed[0] != jf_id:
             by_name[bare] = None        # ambiguous: do not match on it
 
-    for item in _walk(base, key, "Season", "SeriesName,IndexNumber", user_id):
+    for item in _everywhere(base, key, "Season", "SeriesName,IndexNumber"):
         jf_id = item.get("Id")
         counts["season"] += 1
         series = item.get("SeriesName") or ""
