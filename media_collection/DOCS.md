@@ -199,7 +199,7 @@ the catalogue** returns to the same kind, owner, search and format.
 
 ## Ripped files are copies too
 
-A file found on the NAS becomes its own copy of the title, badged **Ripped file ·
+A file found in a media folder becomes its own copy of the title, badged **Ripped file ·
 whoever owns the disc**, so a library of nothing but files still fills the shelf and
 a disc keeps its own row untouched. Old scans had hung the file off whichever copy
 came first, which hid it; the scan now moves those onto their own copy
@@ -271,11 +271,11 @@ An album sends its **tracks**, not just its album id: Jellyfin's
 most clients, so `album_tracks()` lists the album's audio items in disc and
 track order and names them all. A film keeps its single id.
 
-## Playback sources (rips on the NAS)
+## Playback sources (rips in a media folder)
 
 Each copy can record where it can be played from: open a title → **Playback
-sources**. Pick the copy, the provider (*Ripped file (NAS)*, Jellyfin, Kodi, iTunes,
-Apple TV) and the **NAS root** plus the path inside it.
+sources**. Pick the copy, the provider (*Ripped file*, Jellyfin, Kodi, iTunes,
+Apple TV) and the **media root** plus the path inside it.
 
 Roots are rows, not config — Admin → **Media roots** lists them, and every row is
 editable in place (label and path) with **Save**, alongside **Remove**; a new
@@ -415,7 +415,7 @@ old number, the image was not rebuilt — use ⋮ → **Rebuild**, not Restart.
 ## Importing a Blu-ray.com export is gone
 
 The add-on no longer ingests a Blu-ray.com CSV. Media is taken from the
-QNAP folders by the film, music and TV scans, and owned copies are added
+mounted media folders by the film, music and TV scans, and owned copies are added
 by hand from a title page or the add-on panel.
 
 ---
