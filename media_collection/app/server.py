@@ -30,6 +30,7 @@ import ui_artists
 import ui_admin
 import ui_title
 import sorting
+import stores
 
 PORT = int(os.environ.get("PORT", "8099"))
 DB_PATH = os.environ.get("DB_PATH", "/data/media.db")
@@ -37,8 +38,8 @@ OPTIONS_PATH = "/data/options.json"
 
 FORMATS = ["bluray_3d", "bluray", "uhd_4k", "dvd", "digital", "ripped", "cd", "vinyl", "sacd",
            "cassette", "vhs", "other"]
-# A digital copy either came from one of these stores or is a ripped file.
-PURCHASE_STORES = ("itunes", "other")  # appletv folded into itunes: one Apple TV
+# A digital copy's store is a row in `stores` (see stores.py); a ripped file
+# has none.
 
 FORMAT_LABELS = {
     "bluray_3d": "3D Blu-ray",
@@ -481,7 +482,7 @@ $format_options
         </select>
       </label>
       <label>Owner<select name="owner_id">$owner_options</select></label>
-      <label>Store<select name="store">$store_options</select></label>
+      <label>Store$store_options</label>
       <label>Visibility
         <select name="visibility">
           <option value="shared">Shared with family</option>
@@ -961,11 +962,14 @@ def render_index(con, viewer, base, error=None, query="",
                 " selected" if row["id"] == viewer["id"] else "")
             for row in owner_rows),
         # no store is the default: a disc was not bought from an online
-        # shop, so adding one must not record a purchase it never had
-        store_options=(('<option value="">-</option>' + "".join(
-            '<option value="{0}">{1}</option>'.format(s,
-                                                      ui_title.STORE_LABELS[s])
-            for s in PURCHASE_STORES))),
+        # shop, so adding one must not record a purchase it never had. A
+        # datalist lets a shop nobody has used yet be typed in - the save
+        # turns it into a row, so it is on the list from then on.
+        store_options=('<input name="store" list="store-choices" value="" '
+                       'placeholder="-"><datalist id="store-choices">%s'
+                       '</datalist>'
+                       % "".join('<option value="%s"></option>' % html.escape(name)
+                                 for _key, name in stores.choices(con))),
     )
 
 
@@ -1170,8 +1174,8 @@ def add_item(con, viewer, form):
                  field(form, "acquired_on") or None,
                  field(form, "notes") or None),
             )
-            store = field(form, "store")
-            if fmt == "digital" and store in PURCHASE_STORES:
+            store = stores.resolve(con, field(form, "store"))
+            if fmt == "digital" and store:
                 con.execute("INSERT INTO digital_sources (item_id, provider)"
                             " VALUES (?, ?)", (cursor.lastrowid, store))
     except sqlite3.IntegrityError as exc:
@@ -1495,6 +1499,8 @@ class Handler(BaseHTTPRequestHandler):
                           "artists": artists.status(),
                           "jellyfin": jellyfin.progress(),
                           "clean": clean_job.status()},
+                    store_rows=stores.load(con),
+                    targets=stores.targets(con),
                     confirm=confirm)
                 return self.respond(200, page)
 
@@ -1700,6 +1706,7 @@ class Handler(BaseHTTPRequestHandler):
             users=con.execute("SELECT id, display_name FROM users"
                               " ORDER BY display_name").fetchall(),
             viewer_id=viewer["id"], tab=tab, back=back,
+            stores=stores.load(con), shops=stores.playable_stores(con, digital),
             back_label=("\u2190 Back to the artist"
                         if (back or "").startswith("artist/")
                         else "\u2190 Back to the catalogue")))
@@ -1940,6 +1947,49 @@ class Handler(BaseHTTPRequestHandler):
                     "Location": base + "admin?players="
                     + quote("Player list saved.")})
 
+            match = re.search(r"/stores/device/(\d+)/delete/?$", route)
+            if match:
+                con.execute("DELETE FROM playback_targets WHERE id = ?",
+                            (int(match.group(1)),))
+                con.commit()
+                return self.respond(303, "", extra={
+                    "Location": (base or "/") + "admin"})
+
+            if route.rstrip("/").endswith("/stores/device"):
+                name = field(form, "name")
+                if name:
+                    stores.add_target(con, name,
+                                      field(form, "kind") or "apple_tv",
+                                      field(form, "ha_entity_id"),
+                                      field(form, "app_name"), commit=True)
+                return self.respond(303, "", extra={
+                    "Location": (base or "/") + "admin"})
+
+            match = re.search(r"/stores/(\d+)/delete/?$", route)
+            if match:
+                stores.remove(con, int(match.group(1)), commit=True)
+                return self.respond(303, "", extra={
+                    "Location": (base or "/") + "admin"})
+
+            match = re.search(r"/stores/(\d+)/?$", route)
+            if match:
+                picked = field(form, "target_id")
+                stores.update(con, int(match.group(1)),
+                              label_text=field(form, "label"),
+                              target_id=int(picked) if picked.isdigit() else "",
+                              app_name=field(form, "app_name"), commit=True)
+                return self.respond(303, "", extra={
+                    "Location": (base or "/") + "admin"})
+
+            if route.rstrip("/").endswith("/stores"):
+                picked = field(form, "target_id")
+                stores.add(con, field(form, "label"),
+                           target_id=int(picked) if picked.isdigit() else None,
+                           app_name=field(form, "app_name"), commit=True)
+                return self.respond(303, "", extra={
+                    "Location": (base or "/") + "admin"})
+
+
             if route.rstrip("/").endswith("/jellyfin/server"):
                 label = field(form, "label") or "Jellyfin"
                 url = field(form, "url").rstrip("/")
@@ -2128,6 +2178,29 @@ class Handler(BaseHTTPRequestHandler):
                 playback.remember_player(con, entity_id)
                 return self.title_page(con, viewer, base, title_id, summary=message)
 
+            match = re.search(r"/title/(\d+)/store/?$", route)
+            if match:
+                title_id = int(match.group(1))
+                row = stores.by_key(con).get(field(form, "store"))
+                device = stores.target(con, row["target_id"]) if row else None
+                if not (row and device and (device.get("ha_entity_id") or "").strip()):
+                    return self.title_page(
+                        con, viewer, base, title_id,
+                        error="That store has no device to open it on - set one"
+                              " in Admin, under Stores.")
+                app = row["app_name"] or device.get("app_name") or ""
+                try:
+                    summary = playback.open_on(device["ha_entity_id"], app,
+                                               device.get("name") or row["label"])
+                except Exception as exc:
+                    return self.title_page(
+                        con, viewer, base, title_id,
+                        error="Could not wake %s: %s"
+                              % (device.get("name") or row["label"], exc))
+                return self.title_page(con, viewer, base, title_id,
+                                       summary=summary)
+
+
             match = re.search(r"/title/(\d+)/jellyfin/?$", route)
             if match:
                 title_id = int(match.group(1))
@@ -2244,16 +2317,15 @@ class Handler(BaseHTTPRequestHandler):
                     con.rollback()
                     return self.title_page(con, viewer, base, item["title_id"],
                                            error="That barcode is already on another copy.")
-                store = field(form, "store")
-                if store in PURCHASE_STORES or not store:
-                    # a purchase has one store; rips and Jellyfin keep theirs
-                    con.execute("DELETE FROM digital_sources WHERE item_id = ?"
-                                " AND provider NOT IN ('rip', 'jellyfin')",
-                                (item_id,))
-                    if store in PURCHASE_STORES:
-                        con.execute("INSERT INTO digital_sources (item_id,"
-                                    " provider) VALUES (?, ?)",
-                                    (item_id, store))
+                store = stores.resolve(con, field(form, "store"))
+                # a purchase has one store; rips and Jellyfin keep their own
+                con.execute("DELETE FROM digital_sources WHERE item_id = ?"
+                            " AND provider NOT IN ('rip', 'jellyfin')",
+                            (item_id,))
+                if store:
+                    con.execute("INSERT INTO digital_sources (item_id,"
+                                " provider) VALUES (?, ?)",
+                                (item_id, store))
                 con.commit()
                 return self.title_page(con, viewer, base, item["title_id"],
                                        summary="Copy updated.")

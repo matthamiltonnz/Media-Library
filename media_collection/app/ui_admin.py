@@ -201,9 +201,122 @@ def _roots_block(base, roots):
 """ % (table, html.escape(base))
 
 
+DEVICE_KINDS = ("apple_tv", "kodi", "jellyfin", "bluray_player")
+
+
+def _device_options(targets, chosen=""):
+    out = ['<option value="">-</option>']
+    for row in targets:
+        out.append('<option value="%s"%s>%s</option>'
+                   % (row["id"],
+                      " selected" if str(row["id"]) == str(chosen or "") else "",
+                      html.escape(row["name"])))
+    return "".join(out)
+
+
+def _stores_block(base, store_rows, targets, players=()):
+    """What each shop is called, and which device opens it.
+
+    A store with a device is what puts "On the Apple TV" in a title's Play
+    sheet: the button wakes that media_player and selects the app. A store with
+    no device is only a label on a copy line.
+    """
+    rows = []
+    for row in store_rows:
+        device = next((t for t in targets if t["id"] == row["target_id"]), None)
+        opens = (html.escape(device["name"]) if device
+                 else '<span class="muted">-</span>')
+        state = ("" if row["is_active"]
+                 else ' <span class="muted">(retired)</span>')
+        rows.append(
+            '<tr><td>%s%s <span class="muted">%s</span></td><td>%s</td>'
+            "<td>%s</td><td>%s</td>"
+            '<td><form method="post" action="%sstores/%d/delete">'
+            '<button type="submit" class="danger">Remove</button>'
+            "</form></td></tr>"
+            % (html.escape(row["label"]), state, html.escape(row["key"]),
+               html.escape(row["kind"]), opens,
+               html.escape(row["app_name"] or ""), html.escape(base), row["id"]))
+        rows.append(
+            '<tr class="edit"><td colspan="5"><details>'
+            "<summary>Edit %s</summary>"
+            '<form method="post" action="%sstores/%d">'
+            '<div class="grid">'
+            '<label>Label<input name="label" value="%s" required></label>'
+            '<label>Opens on<select name="target_id">%s</select></label>'
+            '<label>App<input name="app_name" value="%s"'
+            ' placeholder="Apple TV"></label>'
+            "</div>"
+            '<p><button type="submit">Save</button></p>'
+            "</form></details></td></tr>"
+            % (html.escape(row["label"]), html.escape(base), row["id"],
+               html.escape(row["label"], quote=True),
+               _device_options(targets, row["target_id"]),
+               html.escape(row["app_name"] or "", quote=True)))
+
+    table = ('<table class="grid"><tr><th>Store</th><th>Kind</th><th>Opens on</th>'
+             "<th>App</th><th></th></tr>%s</table>" % "".join(rows))
+    add = (
+        '<details class="add"><summary>Add a store</summary>'
+        '<form method="post" action="%sstores">'
+        '<div class="grid">'
+        '<label>Label<input name="label" placeholder="Bandcamp" required></label>'
+        '<label>Opens on<select name="target_id">%s</select></label>'
+        '<label>App<input name="app_name" placeholder="leave blank for none">'
+        "</label>"
+        "</div>"
+        '<p><button type="submit">Add</button>'
+        ' <span class="muted">a store with no device is only a label on a copy'
+        " line.</span></p></form></details>"
+        % (html.escape(base), _device_options(targets)))
+
+    devices = []
+    for row in targets:
+        devices.append(
+            '<tr><td>%s <span class="muted">%s</span></td><td>%s</td><td>%s</td>'
+            '<td><form method="post" action="%sstores/device/%d/delete">'
+            '<button type="submit" class="danger">Remove</button></form></td></tr>'
+            % (html.escape(row["name"]), html.escape(row["kind"]),
+               html.escape(row["ha_entity_id"] or ""),
+               html.escape(row["app_name"] or ""),
+               html.escape(base), row["id"]))
+    device_table = ('<table class="grid"><tr><th>Device</th><th>Kind</th>'
+                    "<th>Entity</th><th>App</th><th></th></tr>%s</table>"
+                    % "".join(devices) if devices else
+                    '<p class="muted">No devices yet - add the one to open a '
+                    "store on.</p>")
+    entity_options = ['<option value="">-</option>']
+    for player in players or ():
+        entity_options.append('<option value="%s">%s</option>'
+                              % (html.escape(player["entity_id"], quote=True),
+                                 html.escape(player["name"])))
+    add_device = (
+        '<details class="add"><summary>Add a device</summary>'
+        '<form method="post" action="%sstores/device">'
+        '<div class="grid">'
+        '<label>Name<input name="name" placeholder="Lounge Apple TV" required>'
+        "</label>"
+        '<label>Kind<select name="kind">%s</select></label>'
+        '<label>Home Assistant player<select name="ha_entity_id">%s</select>'
+        "</label>"
+        '<label>App<input name="app_name" placeholder="Apple TV"></label>'
+        "</div>"
+        '<p><button type="submit">Add</button>'
+        ' <span class="muted">the players listed come from Home Assistant.</span>'
+        "</p></form></details>"
+        % (html.escape(base),
+           "".join('<option value="%s">%s</option>' % (kind, kind)
+                   for kind in DEVICE_KINDS),
+           "".join(entity_options)))
+
+    return ("<p class=\"sub\">A store is where a digital copy came from; a store"
+            " with a device also opens on it.</p>"
+            + table + add + "<h3>Devices</h3>" + device_table + add_device)
+
+
 def render(base, viewer, stats, message=None, refresh=None, duplicates=0,
            roots=(), jellyfin=None, scan_message="", players=(), chosen=None,
-           jobs=None, confirm=""):
+           jobs=None, store_rows=(), targets=(), confirm=""):
     jobs = jobs or {}
     parts = []
     if confirm:
@@ -244,6 +357,8 @@ def render(base, viewer, stats, message=None, refresh=None, duplicates=0,
         # numbers only mean something while the fill is actually running
         metadata += _artists_block(base)
     parts.append(_panel("Metadata", metadata))
+
+    parts.append(_panel("Stores", _stores_block(base, store_rows, targets, players)))
 
     if players:
         parts.append(_panel("Players", _players_block(base, players, chosen)))

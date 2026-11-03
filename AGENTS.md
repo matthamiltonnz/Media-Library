@@ -1781,3 +1781,61 @@ sorts before a word. It is used by `library_rows`, `render_index`'s card query,
 - Cost: sorting 636 cards through a Python comparator is ~0.10 s per render
   (the whole grid page), the list view 0.06 s, the act list 0.004 s.
 
+
+## Stores are data, and a store can open on a device (0.23.107)
+
+A store was a hardcoded pair of keys in `server.py` (`PURCHASE_STORES = ("itunes",
+"other")`) with labels in `ui_title.STORE_LABELS`, duplicated in two files, and
+"iTunes" and "Apple TV" were folded into one key that rendered as "Apple TV".
+Both are shops *and* places to play from, so the record now carries both.
+
+- `migrations/0026_stores.sql` adds `stores(id, key, label, kind, target_id,
+  app_name, is_active)`. `key` is what `digital_sources.provider` holds;
+  `kind='store'` rows are offered in the pickers, `kind='system'` rows (jellyfin,
+  rip) are keys the app writes itself. `target_id` points at a row of
+  `playback_targets` - which has been in the schema since 0002, unused, with
+  exactly the columns this needs (name, ha_entity_id, input_source, app_name).
+- The migration also moves the 167 existing `itunes` rows to `appletv`: every
+  one of them is a film bought in the Apple TV app, so `itunes` is free to mean
+  the music store.
+- `app/stores.py` is the whole model: `load/by_key/label/choices/resolve/add/
+  update/remove`, plus `targets/target/add_target` for the devices and
+  `playable_stores(con, digital)` for the Play sheet.
+- **Free text widens the list**: the pickers are `<input list="store-choices">`
+  with a `<datalist>`, not a `<select>`, and `stores.resolve()` matches a typed
+  key *or* label case-insensitively before creating a row ("apple tv" ->
+  `appletv`, no duplicate). Both forms (the catalogue's add dialog and the copy
+  editor) go through it, for every format now, not only `digital`.
+- `migrations/0027_store_keys.sql` rebuilds `digital_sources` **without** its
+  `CHECK (provider IN ('rip','jellyfin','kodi','itunes','appletv','other'))`,
+  which is what made a typed store fail with "CHECK constraint failed". SQLite
+  cannot drop a constraint, so the table is recreated with the same columns,
+  FKs and UNIQUE, and the view plus both indexes are put back. Watch the view:
+  its last line is `LEFT JOIN media_roots r ON r.id = d.root_id`, which a
+  truncated read misses - the first rebuild shipped a view without it and every
+  query died on "no such column: r.label".
+
+The Play sheet gained one `<section>` per store that names a device:
+`jellyfin.playable_stores()` feeds `_play_block(base, row, ..., shops=[])` and
+`ui_title._store_plays()` draws it. `POST /title/<id>/store` calls
+`playback.open_on(entity_id, app, name)` - `media_player.turn_on` then
+`media_player.select_source` - and answers with "Woke the Lounge Apple TV and
+opened Apple TV." A purchased title cannot be deep-linked, so the sheet says to
+pick the title on the device rather than pretending it queued something, and a
+device that will not list its apps only warns (the wake-up still happened).
+
+Trap: `_play_block` has **two** early returns, and the first one -
+`if not playable and not jellyfin_ready: return (hint, "")` - fires for a title
+with no file and no Jellyfin route, which is exactly the case a store-only copy
+is. It needs `and not shops` too, or the button and the whole sheet never
+appear while the store section silently does nothing.
+
+Checked on a copy of the live database: 1148 rows preserved through the rebuild,
+167 moved to `appletv`, `PRAGMA integrity_check` ok, the view answers 1148 rows,
+`/admin` renders the Stores panel (5 rows, add + edit + remove forms) and
+`/title/1` still renders. On a scratch DB: a copy added with the store typed as
+"Bandcamp" lands as provider `bandcamp` and a new row appears in the pickers;
+"apple tv" reuses `appletv`; with that store pointed at a device the Play sheet
+shows "On the Lounge Apple TV" and "Open Apple TV", and the POST answers
+"Could not wake Lounge Apple TV: <urlopen error timed out>" off the box.
+

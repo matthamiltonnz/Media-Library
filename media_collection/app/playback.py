@@ -228,3 +228,30 @@ def remember_player(con, entity_id):
         con.commit()
     except Exception:
         pass
+
+
+def open_on(entity_id, app_name="", name="", timeout=8):
+    """Wake a device and open an app on it - a store with a playback target.
+
+    A bought title cannot be deep-linked (the Apple TV app has no public URL
+    for "play the film I own"), so this does the part that can be automated and
+    says so: turn the device on, select the app, and let the viewer pick the
+    title there. Returns the sentence for the page.
+
+    Turning the device on raises on failure - a box that is off the network is
+    worth reporting. A device that cannot list its apps only warns, because the
+    wake-up still happened.
+    """
+    label = name or entity_id
+    _call("/services/media_player/turn_on", "POST", {"entity_id": entity_id},
+          timeout=timeout)
+    if not app_name:
+        return "Woke the %s." % label
+    try:
+        _call("/services/media_player/select_source", "POST",
+              {"entity_id": entity_id, "source": app_name}, timeout=timeout)
+    except Exception as exc:
+        return ("Woke the %s, but could not open %s (%s) - that device may not "
+                "list its apps." % (label, app_name, exc))
+    return "Woke the %s and opened %s." % (label, app_name)
+

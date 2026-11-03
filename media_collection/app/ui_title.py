@@ -14,7 +14,22 @@ STORE_LABELS = {
     "jellyfin": "Jellyfin",
     "other": "other store",
 }
-PURCHASE_STORES = ("itunes", "other")
+def _adopt(store_rows):
+    """Take the store list from the database for this render.
+
+    `render()` is handed the rows because ui_title has no connection; every
+    caller in the app shares one database, so a module-level mapping is the
+    same for every request. Keys with no row keep the fallback wording above.
+    """
+    if not store_rows:
+        return
+    STORE_LABELS.update({row["key"]: row["label"] for row in store_rows})
+    del STORE_CHOICES[:]
+    STORE_CHOICES.extend((row["key"], row["label"]) for row in store_rows
+                         if row["kind"] == "store" and row["is_active"])
+
+
+STORE_CHOICES = []
 
 
 def _text(value):
@@ -130,15 +145,44 @@ def _badges(items, digital, labels, base=None, title_id=None):
     return "".join(badges)
 
 
+def _store_plays(base, row, shops):
+    """One section per store that names a device to open it on.
+
+    `shops` is [(store_row, target_row, app_name)] from stores.playable_stores().
+    The button wakes the device and opens the app - a purchased title cannot be
+    deep-linked, so the sheet says so rather than pretending otherwise.
+    """
+    if not shops:
+        return ""
+    parts = []
+    for store, device, app in shops:
+        device_name = _text(device.get("name") or "")
+        app_name = _text(app or store["label"])
+        parts.append(
+            '<section class="store-play">\n'
+            '  <h3>On the %s</h3>\n'
+            '  <form method="post" action="%stitle/%s/store">\n'
+            '    <input type="hidden" name="store" value="%s">\n'
+            '    <button type="submit">Open %s</button>\n'
+            '  </form>\n'
+            '  <p class="muted">Wakes the %s and opens %s &#8212; pick the '
+            'title there.</p>\n'
+            '</section>' % (device_name, _text(base), row["id"],
+                             _text(store["key"]), app_name, device_name,
+                             app_name))
+    return "\n".join(parts)
+
+
 def _play_block(base, row, items, digital, players, last_player,
-                jellyfin_link, jellyfin_configured, sessions, labels):
+                jellyfin_link, jellyfin_configured, sessions, labels,
+                shops=()):
     """Badges plus one Play button; the button opens every way to play."""
     playable = [source for source in digital
                 if (source["provider"] == "rip" and source["path"]
                     and source["root_path"])
                 or source["provider"] == "jellyfin"]
     jellyfin_ready = bool(jellyfin_link and jellyfin_configured)
-    if not playable and not jellyfin_ready:
+    if not playable and not jellyfin_ready and not shops:
         return ('<p class="muted">No file to play yet - rip the disc to'
                 ' a media folder and the scan picks it up by itself.</p>', "")
 
@@ -235,7 +279,7 @@ def _play_block(base, row, items, digital, players, last_player,
                     '<p class="muted">No Jellyfin app is open at the moment -'
                     ' start it on the device you want and press Play again.</p>')
 
-    if not shelf and not jellyfin:
+    if not shelf and not jellyfin and not shops:
         return ("", "")     # nothing to play: no button, no sheet
 
     # The caller puts the button at the top of the page; the sheet is a
@@ -246,8 +290,9 @@ def _play_block(base, row, items, digital, players, last_player,
   <h2>Play %s</h2>
   %s
   %s
+  %s
   <form method="dialog"><p><button type="submit">Close</button></p></form>
-</dialog>""" % (_text(row["name"]), shelf, jellyfin))
+</dialog>""" % (_text(row["name"]), shelf, jellyfin, _store_plays(base, row, shops)))
     return button, sheet
 
 
@@ -259,19 +304,19 @@ def _format_options(formats, labels, chosen):
 
 
 def _store_options(chosen):
-    # the empty option is "no store" - a disc was not bought from a shop
-    # online, so it must not claim to be either a purchase or "not a
-    # purchase"; a NULL/empty store simply renders as a dash
-    options = ['<option value=""%s>-</option>'
-               % ("" if chosen else " selected")]
-    for store in PURCHASE_STORES:
-        # `chosen` arrives as the label the copy line prints ("Apple TV")
-        options.append('<option value="%s"%s>%s</option>'
-                       % (store,
-                          " selected" if chosen in (store, STORE_LABELS[store])
-                          else "",
-                          _text(STORE_LABELS[store])))
-    return "".join(options)
+    """The store picker: a list you can pick from and type into.
+
+    A datalist rather than a select, because a shop nobody has used yet must
+    not need a code change - whatever is typed is matched against the store
+    list on save and becomes a new row when it is not there. Blank means no
+    store at all: a disc was not bought from a shop, so it must claim neither
+    a purchase nor "not a purchase".
+    """
+    options = "".join('<option value="%s"></option>' % _text(name)
+                      for _key, name in STORE_CHOICES)
+    return ('<input name="store" list="store-choices" value="%s" '
+            'placeholder="-"><datalist id="store-choices">%s</datalist>'
+            % (_text(chosen or ""), options))
 
 
 def _copy_fields(item, formats, labels, store):
@@ -279,7 +324,7 @@ def _copy_fields(item, formats, labels, store):
     return """
   <div class="grid">
     <label>Format<select name="format">%s</select></label>
-    <label>Store<select name="store">%s</select></label>
+    <label>Store%s</label>
     <label>Edition<input name="edition" value="%s" placeholder="Extended"></label>
     <label>Region<input name="region" value="%s" placeholder="B"></label>
     <label>Location<input name="location" value="%s" placeholder="Shelf 2"></label>
@@ -551,8 +596,9 @@ def render(base, row, items, digital, formats, labels, summary=None, error=None,
            ripped_root="", roots=(), owner=None, players=(), last_player=None,
            jellyfin_link=None, jellyfin_sessions=(),
            jellyfin_configured=False, tab="about", users=(), viewer_id=None,
-           back=None,
+           back=None, stores=None, shops=(),
            back_label="\u2190 Back to the catalogue"):
+    _adopt(stores)
     parts = []
     if summary:
         parts.append('<p class="banner good">%s</p>' % _text(summary))
@@ -577,7 +623,7 @@ def render(base, row, items, digital, formats, labels, summary=None, error=None,
     # starting a film meant scrolling past every copy of it first.
     play_button, play_sheet = _play_block(
         base, row, items, digital, players, last_player, jellyfin_link,
-        jellyfin_configured, jellyfin_sessions, labels)
+        jellyfin_configured, jellyfin_sessions, labels, shops=shops)
     if play_button:
         parts.append(play_button)
     links = _links(row)
