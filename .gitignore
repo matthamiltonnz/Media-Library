@@ -5,6 +5,9 @@ __pycache__/
 *.db-shm
 .DS_Store
 
+# per-machine editor state; Media Collection.code-workspace is tracked on purpose
+.vscode/
+
 # personal data: never publish a household collection
 media_collection/seed/*.db
 media_collection/seed/*.csv
