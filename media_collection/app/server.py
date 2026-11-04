@@ -99,19 +99,22 @@ CASE_LABEL = {CASE_CLASS["uhd_4k"]: "4K Ultra HD",
               CASE_CLASS["dvd"]: "DVD"}
 
 
-def case_band(kind, formats):
+def case_band(kind, formats, shops=""):
     """The words printed across the top of the case, or '' for a case without one."""
     case = case_class(kind, formats)
     for name, label in CASE_LABEL.items():
         if name in case:
             return '<span class="band">%s</span>' % html.escape(label)
     if case.startswith("case-digital"):
-        # a file has no printed band, but the white one keeps the shelf aligned
+        # a file has no printed band, but the white one keeps the shelf
+        # aligned - and it can say where the copy came from ("Apple Music"),
+        # which is more use on the shelf than the word "Digital".
         have = set(filter(None, (formats or "").split(",")))
         for fmt in ("digital", "ripped"):
             if fmt in have:
+                label = (shops or "").replace(",", " \u00b7 ")
                 return ('<span class="band plain">%s</span>'
-                        % html.escape(FORMAT_LABELS.get(fmt, fmt)))
+                        % html.escape(label or FORMAT_LABELS.get(fmt, fmt)))
     return ""
 
 
@@ -911,7 +914,12 @@ def render_index(con, viewer, base, error=None, query="",
             " (SELECT group_concat(DISTINCT ai.format) FROM items ai"
             "   WHERE ai.title_id = t.id"
             "     AND (ai.visibility = 'shared' OR ai.owner_id = ?)"
-            + fmt_owner + ") AS formats"
+            + fmt_owner + ") AS formats,"
+            " (SELECT group_concat(DISTINCT st.label) FROM items si"
+            "    JOIN digital_sources sd ON sd.item_id = si.id"
+            "    JOIN stores st ON st.key = sd.provider"
+            "   WHERE si.title_id = t.id AND si.format = 'digital'"
+            "     AND st.kind <> 'system') AS shops"
             " FROM titles t JOIN items i ON i.title_id = t.id"
             " WHERE " + clause +
             " GROUP BY t.id ORDER BY COALESCE(NULLIF(t.sort_name, ''), t.name)"
@@ -924,7 +932,8 @@ def render_index(con, viewer, base, error=None, query="",
                 base, card["id"],
                 '<div class="thumb %s">%s%s</div>' % (
                     case_class(card["kind"], shown_formats(card["formats"], picked)),
-                    case_band(card["kind"], shown_formats(card["formats"], picked)),
+                    case_band(card["kind"], shown_formats(card["formats"], picked),
+                              card["shops"]),
                     '<img src="%s" alt="" loading="lazy">' % html.escape(
                         ui.pick_cover(base, card["jf_id"], card["poster_url"],
                                       card["art_source"]))

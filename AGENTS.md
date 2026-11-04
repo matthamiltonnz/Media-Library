@@ -2372,3 +2372,26 @@ deploy the startup sync gave the four Ed Sheeran albums their own items -
 `"−" → 808768ff73`, `"×" → 9bdd3296f9`, `"÷" → f7d1f51cda`, `"+" → f0c230d3b7`
 - with the totals unchanged (1014 jellyfin routes, 2332 items, 35 ids shared by
 more than one copy, all as before).
+## The case band says the store (0.23.125)
+
+The white band across the top of a digital card read **"Digital"** on all 143
+Apple TV films and every album. It now names the shop the copy came from -
+"Apple TV", "Apple Music", "YouTube Music" - which is the one fact the shelf was
+withholding.
+
+- `case_band(kind, formats, shops="")` prints the shops for a `digital` (or
+  `ripped`) case and falls back to the format label when there is none, so a
+  copy whose store row was removed still reads "Digital".
+- The catalogue's card query gained a `shops` column: a subquery over
+  `items`/`digital_sources`/`stores` with `si.format = 'digital'` and
+  `st.kind <> 'system'` (Jellyfin and ripped-file keys are not shops). It takes
+  **no placeholder** on purpose - the card query's parameters are read in
+  statement order and an extra one would shift the viewer id that
+  `visible_clause`'s caller supplies.
+- Several shops on one title are joined with ` · `: "Apple TV · Google TV".
+- Discs are untouched: `CASE_LABEL` still wins, so a Blu-ray reads "Blu-ray".
+
+Verified on a scratch DB (a band reading "Apple TV app" for a digital copy, and
+"Digital" once its provider was pointed at a key with no store row) and live:
+the films page is 636 cards with 143 "Apple TV" bands replacing "Digital", the
+music page shows "YouTube Music" ×10 and "Apple Music" ×4.
