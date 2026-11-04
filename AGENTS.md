@@ -2165,3 +2165,12 @@ prefilled, saving `TVNZ+` updated the one link in place (still one row) and
 answered `303 → /admin#stores`, and clearing the box emptied it. Live: 4 shops
 (Apple Music, Apple TV, Google TV, YouTube Music), both `appletv` links carry
 an app box, prefilled `TV` and `com.apple.atve.androidtv.appletv`.
+## Detach sits on the right (0.23.118)
+
+In the store dialog each attached player is a `.linkrow`: a flex row where the
+app form takes the width (`flex: 1 1 auto`, its input `max-width: 22rem`) and
+the Detach form is pinned to the far right (`flex: 0 0 auto`,
+`justify-content: space-between`). Both buttons used to stack at the left edge,
+which read as two unrelated controls. The rules live in `ui.py` beside the
+`.panel` block, and `.linkrow form { margin: 0 }` cancels `.panel form`'s top
+margin so the two sit on one line.

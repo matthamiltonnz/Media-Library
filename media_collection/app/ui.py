@@ -184,6 +184,12 @@ SHELL = """<!doctype html>
   .panel td.actions form { margin: 0; display: inline; }
   .panel td.actions button { margin-left: .3rem; }
   .panel .warn { color: #e8837a; font-size: .88rem; }
+  /* a store's player row: the app box takes the width, Detach sits right */
+  .linkrow { display: flex; align-items: center; gap: .4rem;
+             justify-content: space-between; margin: .2rem 0 .7rem; }
+  .linkrow form { margin: 0; flex: 0 0 auto; }
+  .linkrow form:first-child { flex: 1 1 auto; }
+  .linkrow form:first-child input { width: 100%; max-width: 22rem; }
   .panel details summary { cursor: pointer; font-size: .85rem; opacity: .85; }
   .panel tr.edit td { border-top: 0; padding-top: 0; }
   /* "Add a server" / "Add a root": a button that opens the form under it */
