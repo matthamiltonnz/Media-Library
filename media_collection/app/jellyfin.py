@@ -203,11 +203,20 @@ def _everywhere(base, key, include, fields="Path"):
 
 
 def _norm(text):
-    """Loose key: accents, punctuation and a leading 'the ' do not matter."""
-    text = unicodedata.normalize("NFKD", text or "").encode("ascii", "ignore").decode()
-    text = re.sub(r"[^a-z0-9 ]+", " ", text.lower())
-    text = re.sub(r"\s+", " ", text).strip()
-    return text[4:] if text.startswith("the ") else text
+    """Loose key: accents, punctuation and a leading 'the ' do not matter.
+
+    A name made *only* of symbols does matter, though: "+", "×", "÷", "−" and
+    "=" all folded to the empty string, so Ed Sheeran's symbol albums shared
+    one key and the first one registered answered for the rest - a title named
+    "+" was handed the "−" item and could not be linked to the right one.
+    """
+    source = unicodedata.normalize("NFKD", text or "")
+    folded = source.encode("ascii", "ignore").decode()
+    loose = re.sub(r"[^a-z0-9 ]+", " ", folded.lower())
+    loose = re.sub(r"\s+", " ", loose).strip()
+    if not loose:
+        loose = re.sub(r"\s+", "", source).lower()
+    return loose[4:] if loose.startswith("the ") else loose
 
 
 def _key(path):
@@ -1101,6 +1110,31 @@ def _drop_copy(con, item_id, source_id):
 
 
 
+def _artist_albums(base, key, term, limit=40):
+    """Albums by every artist whose name matches a term.
+
+    Jellyfin's `searchTerm` looks at item *names*, so "ed sheeran" finds no
+    albums at all - the artist is a separate field - and an album called "+"
+    is unreachable by typing either the act or the title. Asking the artists
+    endpoint first and then listing their albums is what makes such a title
+    linkable by hand.
+    """
+    artists = _call(base, key, "/Artists", method="GET",
+                    params={"searchTerm": term, "limit": "3",
+                            "Fields": "ItemCount"}) or {}
+    ids = [item.get("Id") for item in artists.get("Items") or []
+           if item.get("Id")]
+    found = []
+    for artist_id in ids[:2]:
+        albums = _call(base, key, "/Items", method="GET",
+                       params={"ArtistIds": artist_id, "recursive": "true",
+                               "limit": str(limit),
+                               "IncludeItemTypes": "MusicAlbum",
+                               "Fields": "Path,ProductionYear,AlbumArtist"})
+        found.extend((albums or {}).get("Items") or [])
+    return found
+
+
 def search_items(con, term, limit=20):
     """Jellyfin items matching a term, for picking a match by hand."""
     base, key = config(con)
@@ -1108,8 +1142,14 @@ def search_items(con, term, limit=20):
         "searchTerm": term, "recursive": "true", "limit": str(limit),
         "IncludeItemTypes": "Movie,MusicAlbum,Series,Episode",
         "Fields": "Path,ProductionYear"})
+    items = list((found or {}).get("Items") or [])
+    seen = {item.get("Id") for item in items}
+    for item in _artist_albums(base, key, term, limit):
+        if item.get("Id") not in seen:
+            seen.add(item.get("Id"))
+            items.append(item)
     rows = []
-    for item in (found or {}).get("Items") or []:
+    for item in items[:limit]:
         rows.append({
             "id": item.get("Id") or "",
             "name": item.get("Name") or "",

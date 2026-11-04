@@ -2339,3 +2339,36 @@ With USB debugging switched on, from inside the HA container:
   3-line socket script rather than trusting the toggle.
 - The app list in the integration's *Configure applications list* option is the
   quickest way to answer "is app X installed on that set?" without ADB.
+## Symbol-named albums shared one key (0.23.124)
+
+"+" showed in Jellyfin but would not link to its title, and "×" and "÷" sat with
+no route at all. `_norm()` - the loose key behind every match - stripped
+punctuation:
+
+```python
+re.sub(r"[^a-z0-9 ]+", " ", text.lower())
+```
+
+so "+", "×", "÷", "−" and "=" **all folded to the empty string**. Every
+symbol-named album registered the same key and `setdefault` kept the first, so
+`_name_match("+", …)` was handed the "−" item - which was already on the "-"
+title - and the synchroniser created nothing. The manual link page could not
+help either: Jellyfin's `searchTerm` matches item **names**, not artists, so
+"Ed Sheeran" returned zero albums and the title "+" cannot be typed into the
+box in a way that finds it.
+
+- `_norm()` keeps the name when the loose form would be empty
+  (`if not loose: loose = re.sub(r"\s+", "", source).lower()`), so "+" and "−"
+  stay different while ordinary names keep their accent/punctuation folding.
+- `jellyfin._artist_albums()` asks `/Artists?searchTerm=…` and lists each hit's
+  albums (`/Items?ArtistIds=…&IncludeItemTypes=MusicAlbum`); `search_items()`
+  appends them after the name hits, deduped by id. That is what makes a
+  symbol-named album reachable by hand.
+
+Verified on a `VACUUM INTO` copy before deploying: `_name_match("+", 2011,
+"music", "Ed Sheeran")` returned `f0c230d3…` (the real "+"), and clearing the
+title's route then re-running `sync_links()` put the same id back. After the
+deploy the startup sync gave the four Ed Sheeran albums their own items -
+`"−" → 808768ff73`, `"×" → 9bdd3296f9`, `"÷" → f7d1f51cda`, `"+" → f0c230d3b7`
+- with the totals unchanged (1014 jellyfin routes, 2332 items, 35 ids shared by
+more than one copy, all as before).
