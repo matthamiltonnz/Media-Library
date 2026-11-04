@@ -2321,3 +2321,21 @@ enabled so the entity reports `app_id`:
 - `App ID`/`App name` attributes are only populated once the integration option
   **Enable IME** is ticked - without it both read empty and a launch cannot be
   confirmed either way.
+
+### Probing the bedroom TV for ADB (2026-11-04)
+
+With USB debugging switched on, from inside the HA container:
+
+- `192.168.234.172:5555` -> **connection refused** (111). Classic ADB is not
+  listening, so "Add integration → Android TV" cannot connect.
+- mDNS shows the set advertising `_adb-tls-connect._tcp` at
+  **192.168.234.172:39731**, and that port accepts a TCP connection but sends
+  no plaintext banner - it wants a **TLS** handshake (Android 11+ wireless
+  debugging). HA's `androidtv` integration drives `adb-shell`, which speaks
+  plain ADB and has no pairing/TLS support, so it cannot use that port either.
+- `_androidtvremote2._tcp` (port 6466) is the remote service we already use.
+- Next lever is a **power cycle** of the set with USB debugging on - on many
+  Google TV models that is what starts the 5555 listener. Re-probe with a
+  3-line socket script rather than trusting the toggle.
+- The app list in the integration's *Configure applications list* option is the
+  quickest way to answer "is app X installed on that set?" without ADB.
