@@ -2249,3 +2249,25 @@ saw a U+2212 MINUS SIGN at all.
   over `app/*.py` should come back empty.
 - Verified live after the fix: `content: "+ "` on a closed section,
   `content: "\u2212 "` on an open one, and zero U+0091 anywhere in the page.
+## Adding a title now says so (0.23.122)
+
+*Add title* inserted the row and then spent seconds looking its metadata up
+(Wikipedia, Wikidata, MusicBrainz) with the page answering nothing. It looked
+stalled, so the button got clicked again - which is how *Let the music play*
+became three titles.
+
+- `PAGE`'s add form carries `onsubmit="adding(this)"`. `adding(form)` shows
+  `<p class="sub" id="add-status" hidden>` ("Adding the title and looking up its
+  metadata - this can take a few seconds."), relabels the button "Adding...",
+  and disables it **one tick later** - a submit handler that disables its own
+  button can cancel the submission in some browsers, so the disable is deferred
+  with `setTimeout(..., 0)`. `PAGE` is a `string.Template`: no `$` in that JS.
+- The duplicate guard alone did not stop three clicks, because three requests
+  could each pass `_title_row()` before the first row was committed. `ADD_LOCK`
+  (a module-level `threading.Lock()`) now wraps the `add_item()` call in the
+  `/items` branch, so adds are serialised.
+
+Verified on a scratch DB with three concurrent POSTs of one new title:
+`[409, 200, 409]` and exactly **one** title row - previously that race produced
+three. The JS was run in node against a stub DOM: the note is shown and the
+button reads "Adding..." immediately, and is disabled after a tick.

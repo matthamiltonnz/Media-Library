@@ -12,6 +12,7 @@ import json
 import os
 import re
 import sqlite3
+import threading
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from string import Template
@@ -35,6 +36,12 @@ import stores
 PORT = int(os.environ.get("PORT", "8099"))
 DB_PATH = os.environ.get("DB_PATH", "/data/media.db")
 OPTIONS_PATH = "/data/options.json"
+
+# One add at a time. A POST that starts a title then spends seconds looking
+# its metadata up holds this, so three impatient clicks cannot each pass the
+# duplicate check before the first row is committed - which is how *Let the
+# music play* arrived three times.
+ADD_LOCK = threading.Lock()
 
 FORMATS = ["bluray_3d", "bluray", "uhd_4k", "dvd", "digital", "ripped", "cd", "vinyl", "sacd",
            "cassette", "vhs", "other"]
@@ -474,7 +481,8 @@ $library
 
 <dialog id="addcopy">
 <h2>Add a title</h2>
-<form class="add" method="post" action="${base}items">
+<form class="add" method="post" action="${base}items"
+      onsubmit="adding(this)">
   <fieldset>
     <legend>The title</legend>
     <div class="grid">
@@ -529,6 +537,8 @@ $format_options
     </div>
     <p class="sub" id="upc-said" hidden></p>
   </fieldset>
+  <p class="sub" id="add-status" hidden>Adding the title and looking up its
+    metadata - this can take a few seconds.</p>
   <p class="actions">
     <label class="check"><input type="checkbox" name="fetch_metadata" value="1"
       checked>
@@ -553,6 +563,19 @@ $format_options
 // film and TV, the MusicBrainz trio for music. `hidden` rather than a class,
 // so an unticked field is never submitted empty-handed by the browser's
 // own validation either.
+// A new title is inserted and then looked up (Wikipedia, Wikidata, or
+// MusicBrainz), which takes seconds while the page sits there answering
+// nothing - so say so and stop the button taking a second click. The disable
+// is deferred: a submit handler that disables its own button can cancel the
+// submission in some browsers.
+function adding(form) {
+  var note = document.getElementById('add-status');
+  if (note) { note.hidden = false; }
+  var button = form.querySelector('button[type="submit"]');
+  if (!button) { return; }
+  button.textContent = 'Adding...';
+  setTimeout(function () { button.disabled = true; }, 0);
+}
 function addKind(kind) {
   var dlg = document.getElementById('addcopy');
   if (!dlg) { return; }
@@ -2498,7 +2521,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.respond(303, "", extra={"Location": base})
 
             if route.rstrip("/").endswith("/items"):
-                error, title_id, clash = add_item(con, viewer, form)
+                with ADD_LOCK:
+                    error, title_id, clash = add_item(con, viewer, form)
                 if error:
                     return self.respond(400, render_index(con, viewer, base, error=error))
                 if clash:
