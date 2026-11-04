@@ -352,7 +352,7 @@ def open_on(target, app_name="", timeout=8):
         except Exception as exc:
             return ("Woke the %s, but could not start %s (%s)."
                     % (label, app, exc))
-        return "Woke the %s and started %s." % (label, app)
+        return "Woke the %s and asked it to open %s." % (label, app)
     try:
         _call("/services/media_player/select_source", "POST",
               {"entity_id": entity_id, "source": app}, timeout=timeout)

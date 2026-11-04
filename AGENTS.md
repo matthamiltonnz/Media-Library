@@ -2193,3 +2193,39 @@ was on screen.
   as well as in `.linkrow`, so the app box and Detach stay on one line even if
   a stylesheet rule goes missing. `.linkrow form:first-child input` still caps
   the box at 22rem.
+## An Android TV that refuses the app link (0.23.120)
+
+Pressing *Play* on an Apple TV title and choosing **Bedroom TV** said "Woke the
+Bedroom TV and started com.apple.atve.androidtv.appletv" and nothing happened.
+The message was true to what was sent and wrong about what occurred.
+
+- `playback.open_on()` sends `media_player.turn_on`, then `play_media` with
+  `media_content_type: "app"` and the package as `media_content_id`. Home
+  Assistant's `androidtv_remote` integration turns that into
+  `remote_app_link_launch_request { app_link: "market://launch?id=<package>" }`.
+- This set answers that with an error, for **every** package tried - the Apple
+  TV app, Wiim and YouTube alike:
+
+  ```
+  ERROR (MainThread) [androidtvremote2] Received an error from the device:
+    value: true message { remote_app_link_launch_request {
+      app_link: "market://launch?id=com.google.android.youtube" } }
+  ```
+
+  HA logs it and still returns 200, so nothing reaches the page. That is why
+  it reads as "did nothing". `ha core logs | grep androidtvremote2` is the only
+  place the refusal is visible; the entity's `app_id`/`app_name` stay empty
+  either way, so they cannot be used to confirm a launch.
+- The fix is the **Android TV (ADB)** integration, whose `play_media` with
+  `app` runs `am start` instead of a market:// intent. Add it for the set,
+  then attach *that* player to the store (the app string is unchanged). The
+  `androidtv_remote` player stays useful for wake/remote commands.
+- `_link_app()` now receives the whole entity row, not just its `sources`, and
+  warns on a package aimed at an `androidtv_remote` player: "… can only launch
+  an app with market://launch; this set answers that with an error … add the
+  Android TV (ADB) integration for the set and attach its player here."
+- `open_on()` says "asked it to open <package>" rather than "started" - it can
+  only report the call, not the app appearing.
+
+The tvOS path is unaffected: that is a `select_source` with the name the Apple
+TV lists ("TV"), not a package.

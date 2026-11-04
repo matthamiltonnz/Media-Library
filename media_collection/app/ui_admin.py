@@ -277,22 +277,34 @@ def _app_options(sources=None):
     return "".join(options[:160])
 
 
-def _link_app(row, player, sources):
+def _link_app(row, player, entities):
     """The app a (store, player) link opens, and a word if it cannot work.
 
     The link wins, then the store's own app, then the player's - the order
     `stores.playable_stores()` resolves them in, so this shows what pressing
     Play would actually send. A plain name only works on a player that lists
-    it (`select_source`); an Android TV publishes no app list and needs the
-    package (`play_media`), which is what the warning says.
+    it (`select_source`); a package goes through `play_media`, which an
+    Android TV may refuse (see the androidtv_remote note below).
     """
     app = (player.get("app") or row.get("app_name")
            or player.get("app_name") or "").strip()
     entity = (player.get("ha_entity_id") or "").strip()
-    listed = sources.get(entity)
-    if not app or listed is None:
+    info = (entities or {}).get(entity)
+    if not app or not info:
         return app, ""
+    listed = info.get("sources") or []
+    integration = (info.get("integration") or "").lower()
     if "." in app and " " not in app:
+        if integration == "androidtv_remote":
+            # Home Assistant sends `market://launch?id=<package>` for this,
+            # and the bedroom TV answers "error" for every package (YouTube
+            # too, per HA's own log) - so the click looks like it worked.
+            return app, ("%s is driven by androidtv_remote, which can only"
+                         " launch an app with market://launch; this set answers"
+                         " that with an error (Home Assistant's log shows it,"
+                         " this page cannot). Add the Android TV (ADB)"
+                         " integration for the set and attach its player here."
+                         % entity)
         return app, ""
     if app in listed:
         return app, ""
@@ -303,10 +315,10 @@ def _link_app(row, player, sources):
                  " package instead" % entity)
 
 
-def _store_dialog(base, row, opened, targets, sources=None):
+def _store_dialog(base, row, opened, targets, entities=None):
     """The edit sheet for one store: its own fields, and its players."""
 
-    sources = sources or {}
+    entities = entities or {}
     attached = [player["id"] for player in opened]
     spare = [target for target in targets if target["id"] not in attached]
     options = "".join(
@@ -315,7 +327,7 @@ def _store_dialog(base, row, opened, targets, sources=None):
            html.escape(target["kind"])) for target in spare)
     players = []
     for player in opened:
-        app, trouble = _link_app(row, player, sources)
+        app, trouble = _link_app(row, player, entities)
         players.append(
             '<p>%s <span class="muted">%s &middot; %s</span></p>'
             '<div class="linkrow" style="display:flex;align-items:center;'
@@ -421,6 +433,7 @@ def _stores_block(base, store_rows, targets, entities=()):
     shops = [row for row in store_rows if row["kind"] != "system"]
     sources = {entity["entity_id"]: entity.get("sources") or []
                for entity in entities or ()}
+    info = {entity["entity_id"]: entity for entity in entities or ()}
     shops_of = {}
     for row in shops:
         for player in row.get("players") or []:
@@ -446,7 +459,7 @@ def _stores_block(base, store_rows, targets, entities=()):
                html.escape(row["kind"]),
                names or '<span class="muted">-</span>',
                row["id"], html.escape(base), row["id"]))
-        dialogs.append(_store_dialog(base, row, opened, targets, sources))
+        dialogs.append(_store_dialog(base, row, opened, targets, info))
 
     table = ('<table class="grid"><tr><th>Store</th><th>Kind</th>'
              "<th>Opens on</th><th></th></tr>%s</table>"
