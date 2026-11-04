@@ -197,12 +197,34 @@ def store_keys(con, digital, items):
 
 # ------------------------------------------------------------------ users ----
 
+def short_name(text):
+    """The name to show for a person: their first name.
+
+    Home Assistant hands over a full name ("Matt Hamilton") while the seeded
+    household members are already just "Jeanine" and "Mitchell", so the owner
+    chips read unevenly. The two pseudo-users are not people and keep their
+    label.
+    """
+    text = (text or "").strip()
+    if not text or text in ("Ripped files", "Local user"):
+        return text
+    return text.split()[0]
+
+
 def ensure_user(con, username, display_name):
     """Create the row on first sight, so a new HA user needs no admin step."""
+    display_name = short_name(display_name)
     con.execute(
         "INSERT OR IGNORE INTO users (username, display_name) VALUES (?, ?)",
         (username, display_name),
     )
+    if display_name:
+        # Home Assistant is the source for the name: a person renamed there
+        # ("Matt" -> "Matthew") is picked up on their next request. INSERT OR
+        # IGNORE alone would leave the first name it ever saw.
+        con.execute("UPDATE users SET display_name = ?"
+                    " WHERE lower(username) = lower(?) AND display_name <> ?",
+                    (display_name, username, display_name))
     con.commit()
     return con.execute(
         "SELECT id, display_name FROM users WHERE lower(username) = lower(?)",

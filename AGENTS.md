@@ -2462,3 +2462,28 @@ is HTTPS: that is why "open it in a browser" did not help.
 Verified: `http://192.168.234.3:8099/health` 200 from the Mac; the same port
 answering `https` with a valid (self-signed, for the test) certificate; and the
 live log line naming the certificates it rejected and why.
+## Owners are Home Assistant users, shown by first name (0.23.131)
+
+`viewer_for()` reads the `X-Remote-User-Display-Name` header that ingress sets
+from the person signed in, and `ensure_user()` creates a `ha-<hash of the HA
+user id>` row on first sight - so the owners *are* Home Assistant users. The
+rest predate that: `music-jeanine` / `-justin` / `-mitchell` came from the music
+import, `rips` is the account every Jellyfin and file copy belongs to, and
+`local` is what a browser without Home Assistant in front of it becomes.
+
+They read unevenly because Home Assistant hands over a full name ("Matt
+Hamilton") while the seeded members are already just "Jeanine":
+
+- `short_name()` keeps the first word and is applied in `ensure_user()`, so a
+  new person arrives as "Jane" rather than "Jane Smith".
+- `migrations/0033_owner_first_names.sql` shortened what was already stored.
+- `ensure_user()` now also **updates** the name when it differs: an `INSERT OR
+  IGNORE` alone would have kept the first name it ever saw, so renaming someone
+  in Home Assistant would never have reached the shelf.
+- The two pseudo-users keep their label ("Ripped files", "Local user") - they
+  are not people, and `short_name()` returns them unchanged.
+
+Every surface reads `users.display_name` (owner chips, the copy editor's Owner
+select, the copy line, `/artists`), so nothing else had to change.
+Verified live: users 2-8 read `Matt, Local user, Jeanine, Justin, Mitchell,
+Ripped files`; the music page renders "Matt" twice and "Matt Hamilton" nowhere.
