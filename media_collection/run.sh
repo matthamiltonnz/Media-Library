@@ -54,5 +54,17 @@ fi
 DB_PATH="$DB" python3 "$APP/dedupe.py" "$DB" || echo "dedupe step skipped"
 
 
+# Direct LAN access can answer https as well as http on this port (the first
+# byte of a connection decides which), which is what a barcode scanner needs:
+# the browser only hands out the camera to a secure origin. The server picks a
+# certificate at startup, in this order - MC_TLS_CERT/MC_TLS_KEY, Home
+# Assistant's /ssl, /data/tls, then Nginx Proxy Manager's live certificate -
+# and prefers one that has not expired. It logs which one it serves.
+if [ -n "${MC_TLS_CERT:-}" ] && [ -n "${MC_TLS_KEY:-}" ]; then
+    echo "tls: ${MC_TLS_CERT} (set by hand)"
+else
+    echo "tls: auto - https is offered when a certificate is found"
+fi
+
 echo "starting media collection on :${PORT:-8099} (db=${DB})"
 exec python3 "$APP/server.py"

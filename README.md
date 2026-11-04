@@ -82,6 +82,45 @@ Full documentation: [media_collection/DOCS.md](media_collection/DOCS.md).
 - **Housekeeping** — automatic schema migrations, duplicate-title folding, and a
   repair pass that survives interrupted upgrades.
 
+## Reaching it directly (a TV app, Kodi, the barcode scanner)
+
+The add-on publishes its port, so the catalogue answers on the LAN without Home
+Assistant in front of it:
+
+| URL | What it is |
+| --- | --- |
+| `http://<home-assistant>:8099/` | the catalogue, plain HTTP, no login |
+| `https://<home-assistant>:8099/` | the same, when a certificate is found |
+
+Home Assistant's own panel keeps working: ingress talks plain HTTP to the same
+port, so the server looks at the first byte of each connection and speaks TLS
+only to a client that opens with a TLS handshake.
+
+**The barcode scanner needs HTTPS.** Browsers only hand out the camera to a
+secure origin, so a plain `http://` page cannot scan — and inside Home
+Assistant the panel is framed, which withholds the camera even when Home
+Assistant itself is on HTTPS. Open the catalogue over HTTPS (or `localhost`)
+and press *Scan* there.
+
+Three ways to get a certificate, in order of preference:
+
+1. **Put it behind Nginx Proxy Manager** (or Caddy, or the reverse proxy you
+   already run). Add a proxy host for e.g. `media.example.com` pointing at
+   `http://<home-assistant>:8099` and let it issue the Let's Encrypt
+   certificate. Renewal is then automatic and nothing has to be copied.
+2. **Drop a certificate into the add-on**: `/data/tls/fullchain.pem` plus
+   `/data/tls/privkey.pem` — on Home Assistant OS that is
+   `/mnt/data/supervisor/addons/data/local_media_collection/tls/`. The server
+   picks the unexpired certificate whose name matches the one requested, so a
+   renewed certificate only needs the files replaced and the add-on restarted.
+3. **Point it at one you already have**: `MC_TLS_CERT` and `MC_TLS_KEY` in the
+   add-on environment, or leave the certificate in `/ssl` for Home Assistant
+   (the add-on reads `/ssl` read-only).
+
+An **expired** certificate is never served — the add-on logs `https: no
+unexpired certificate found …` and stays on plain HTTP, because a browser
+warning page would block the camera as surely as HTTP does.
+
 ## Repository layout
 
 ```

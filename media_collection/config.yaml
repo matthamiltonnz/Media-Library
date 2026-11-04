@@ -1,5 +1,5 @@
 name: Media Collection
-version: "0.23.126"
+version: "0.23.130"
 slug: media_collection
 description: >-
   Shared family media catalogue. Every disc has one owner, and every shared copy
@@ -17,8 +17,22 @@ boot: auto
 ingress: true
 ingress_port: 8099
 homeassistant_api: true
+# A published port makes the catalogue reachable on the LAN without Home
+# Assistant in the way - which a TV app or Kodi needs, and which is what makes
+# the barcode scanner usable: the browser will not hand out the camera to a
+# plain http:// origin that is not localhost. Drop a certificate in
+# /data/tls/fullchain.pem + privkey.pem (see the README) and run.sh serves it
+# over HTTPS too.
+ports:
+  8099/tcp: 8099
+ports_description:
+  8099/tcp: Direct web access (catalogue, no Home Assistant login)
 map:
   - media:ro
+  # read Home Assistant's own certificate, so the published port can answer
+  # https://home.<domain>:8099 with a certificate phones already trust - which
+  # is what a barcode scanner needs (the camera is only given to a secure page)
+  - ssl:ro
 panel_icon: mdi:movie-open
 panel_title: Media Collection
 panel_admin: false

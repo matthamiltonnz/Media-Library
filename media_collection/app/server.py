@@ -6,13 +6,17 @@ page behind Home Assistant ingress; the HA user making the request becomes the
 collection owner via the X-Remote-User-* headers the Supervisor forwards.
 """
 import csv
+import glob
 import html
 import io
 import json
 import os
 import re
 import sqlite3
+import socket
+import ssl
 import threading
+import time
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from string import Template
@@ -561,7 +565,10 @@ $format_options
 <dialog id="scanner">
 <h2>Scan a barcode</h2>
 <video id="scan-video" playsinline muted></video>
-<p class="sub" id="scan-said">Point the camera at the barcode on the case.</p>
+<p class="sub" id="scan-said">Point the camera at the barcode on the case.
+  Camera access needs a secure page: open the catalogue over https (or on
+  localhost). Inside Home Assistant the panel is framed, and the browser
+  withholds the camera from a framed page.</p>
 <p class="actions">
   <button type="button" onclick="stopScan()">Cancel</button>
 </p>
@@ -654,8 +661,12 @@ function startScan() {
   var video = document.getElementById('scan-video');
   if (!dlg || !said || !video) { return; }
   if (!scanSupported()) {
-    said.textContent = 'This browser cannot read barcodes. Type the digits, '
-      + 'or open the page in Chrome on a phone.';
+    said.textContent = window.isSecureContext === false
+      ? 'The camera is only offered to a secure page. Open the catalogue over '
+        + 'https - the add-on serves it directly on port 8099 once a '
+        + 'certificate is in place - then press Scan again.'
+      : 'This browser cannot read barcodes. Type the digits, '
+        + 'or open the page in Chrome on a phone.';
     dlg.showModal();
     return;
   }
@@ -2563,6 +2574,123 @@ class Handler(BaseHTTPRequestHandler):
             con.close()
 
 
+def _tls_pairs():
+    """Every certificate/key pair this box could serve, best guess first."""
+    pairs = []
+    explicit = (os.environ.get("MC_TLS_CERT", ""),
+                os.environ.get("MC_TLS_KEY", ""))
+    if all(explicit) and os.path.exists(explicit[0]) and os.path.exists(
+            explicit[1]):
+        pairs.append(explicit)
+    for cert, key in (("/ssl/fullchain.pem", "/ssl/privkey.pem"),
+                      ("/data/tls/fullchain.pem", "/data/tls/privkey.pem")):
+        if os.path.exists(cert) and os.path.exists(key):
+            pairs.append((cert, key))
+    # Nginx Proxy Manager keeps the certificates it renews here, one folder per
+    # proxy host; /ssl/fullchain.pem is often an older copy left behind by an
+    # earlier setup (on this box it expired in 2023), so it must not win by
+    # being first.
+    for pattern in ("/ssl/nginxproxymanager/letsencrypt/live/*/fullchain.pem",
+                    "/ssl/nginxproxymanager/live/*/fullchain.pem"):
+        for cert in sorted(glob.glob(pattern)):
+            key = os.path.join(os.path.dirname(cert), "privkey.pem")
+            if os.path.exists(key):
+                pairs.append((cert, key))
+    return pairs
+
+
+def _cert_expiry(path):
+    """Seconds since the epoch this certificate expires, or 0 if unreadable."""
+    try:
+        info = ssl._ssl._test_decode_cert(path)
+        return ssl.cert_time_to_seconds(info["notAfter"])
+    except Exception:
+        return 0
+
+
+def _tls_hosts(cert):
+    """The DNS names a certificate claims, lowercased."""
+    try:
+        info = ssl._ssl._test_decode_cert(cert)
+    except Exception:
+        return []
+    names = [value.lower() for kind, value in info.get("subjectAltName", ())
+             if kind == "DNS"]
+    for rdn in info.get("subject", ()):
+        for field, value in rdn:
+            if field == "commonName":
+                names.append(value.lower())
+    return names
+
+
+def _tls_context():
+    """A TLS context that serves the right certificate for the name asked for.
+
+    The box can hold several: Home Assistant's own, Nginx Proxy Manager's per
+    proxy host, and any dropped in /data/tls. Only unexpired ones are offered -
+    serving an expired certificate is worse than serving plain HTTP, because
+    the browser stops with a warning instead of the page - and the SNI name in
+    the handshake picks the certificate whose subjectAltName matches, so
+    https://home.<domain>:8099 gets the one browsers already trust for it.
+    """
+    now = time.time()
+    pairs = [(cert, key) for cert, key in _tls_pairs()
+             if _cert_expiry(cert) > now]
+    if not pairs:
+        seen = ", ".join(os.path.basename(os.path.dirname(cert)) or cert
+                         for cert, _key in _tls_pairs())
+        log("https: no unexpired certificate found (%s) - serving http only;"
+            " point a proxy at this port or drop one in /data/tls"
+            % (seen or "none"))
+        return None
+    by_name = {}
+    for cert, key in sorted(pairs, key=lambda pair: _cert_expiry(pair[0])):
+        for host in _tls_hosts(cert):
+            by_name[host] = (cert, key)      # newest wins per name
+    best = max(pairs, key=lambda pair: _cert_expiry(pair[0]))
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.load_cert_chain(*best)
+
+    def _switch(sock, name, ctx):
+        pair = by_name.get((name or "").lower())
+        if pair and pair != best:
+            try:
+                ctx.load_cert_chain(*pair)
+            except Exception:
+                pass
+
+    context.set_servername_callback(_switch)
+    return context
+
+
+class DualServer(ThreadingHTTPServer):
+    """One port, two protocols: HTTPS for the LAN, HTTP for the ingress.
+
+    With no certificate configured this is the plain server. The peek costs one
+    byte and only happens when TLS is set up, so a LAN https:// page and Home
+    Assistant's own http:// proxy can share :8099 - ingress cannot be told to
+    speak TLS.
+    """
+
+    def __init__(self, address, handler, ssl_context=None):
+        self.ssl_context = ssl_context
+        super().__init__(address, handler)
+
+    def get_request(self):
+        sock, addr = self.socket.accept()
+        if self.ssl_context is None:
+            return sock, addr
+        sock.settimeout(2)
+        try:
+            first = sock.recv(1, socket.MSG_PEEK)
+        except OSError:
+            first = b""
+        sock.settimeout(None)
+        if first == b"\x16":               # a TLS ClientHello
+            return self.ssl_context.wrap_socket(sock, server_side=True), addr
+        return sock, addr
+
+
 def main():
     if not os.path.exists(DB_PATH):
         raise SystemExit("database missing at %s - run migrate.sh first" % DB_PATH)
@@ -2580,7 +2708,17 @@ def main():
     # titles that arrived without metadata (an import, a bare add) get
     # looked up too; with nothing missing this is a single query
     refresh_job.start(DB_PATH, limit=60)
-    ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
+    # Direct LAN access wants HTTPS - a barcode scanner is only handed the
+    # camera on a secure origin - while Home Assistant's ingress proxy and the
+    # watchdog still knock with plain HTTP on the same port, so the first byte
+    # of each connection decides which one it is.
+    context = _tls_context()
+    if context:
+        names = sorted({host for cert, _key in _tls_pairs()
+                        for host in _tls_hosts(cert)})
+        log("TLS on: :%d answers https (names: %s), http for the ingress"
+            % (PORT, ", ".join(names[:4])))
+    DualServer(("0.0.0.0", PORT), Handler, context).serve_forever()
 
 
 if __name__ == "__main__":

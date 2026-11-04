@@ -2428,3 +2428,37 @@ player and gets it ready - put the disc in", and pressing it posted
 four shops, the format table lists 3D Blu-ray, 4K Blu-ray, Blu-ray, Cassette,
 CD, DVD, Other, VHS, Vinyl and SACD, and the store datalist on a title page is
 unchanged.
+## Direct LAN access, and why the scanner needs HTTPS (0.23.130)
+
+The add-on publishes `8099/tcp: 8099` (`config.yaml`), so the catalogue answers
+on the LAN without Home Assistant in front of it - which a TV app or Kodi needs,
+and which the barcode scanner needs too, because browsers only hand out the
+camera to a secure origin (`https://` or `localhost`). Inside Home Assistant the
+panel is an *iframe*, so the camera is refused even when Home Assistant itself
+is HTTPS: that is why "open it in a browser" did not help.
+
+- `DualServer(ThreadingHTTPServer)` peeks one byte of each connection
+  (`socket.MSG_PEEK`): `0x16` is a TLS ClientHello and gets wrapped, anything
+  else is HTTP. One port therefore serves both, so ingress and the watchdog
+  (plain HTTP) keep working while a LAN client gets `https://`.
+- `_tls_pairs()` collects candidates: `MC_TLS_CERT`/`MC_TLS_KEY`, `/ssl`
+  (mapped `ssl:ro`), `/data/tls`, and Nginx Proxy Manager's `live/*/fullchain`
+  (both the `letsencrypt/live` and `live` layouts). `_tls_context()` keeps only
+  **unexpired** ones and picks per SNI name, so several hostnames can share the
+  port.
+- An expired certificate is never served: the log says `https: no unexpired
+  certificate found (ssl, npm-3, …) - serving http only`, because a browser
+  warning page blocks the camera as effectively as plain HTTP. On this box every
+  certificate under `/ssl` expired in 2024 - NPM serves a current one from its
+  own container data, which the add-on cannot see.
+- Preferred route is therefore the reverse proxy the household already runs: an
+  NPM proxy host for `media.<domain>` → `http://<ha>:8099`, renewals automatic.
+  `/data/tls/fullchain.pem` + `privkey.pem` is the manual fallback (host path
+  `/mnt/data/supervisor/addons/data/local_media_collection/tls/`).
+- The scanner dialog now distinguishes the two failures: a non-secure page says
+  to open the catalogue over https, a secure page in a browser without
+  `BarcodeDetector` says to type the digits or use Chrome on a phone.
+
+Verified: `http://192.168.234.3:8099/health` 200 from the Mac; the same port
+answering `https` with a valid (self-signed, for the test) certificate; and the
+live log line naming the certificates it rejected and why.
