@@ -316,15 +316,21 @@ def _store_dialog(base, row, opened, targets, sources=None):
     for player in opened:
         app, trouble = _link_app(row, player, sources)
         players.append(
-            '<p>%s <span class="muted">%s &middot; %s &middot; %s</span> '
+            '<p>%s <span class="muted">%s &middot; %s</span></p>'
+            '<p><form method="post" action="%sstores/%d/link/%d">'
+            '<input name="app" value="%s" list="app-choices" size="28"'
+            ' placeholder="Apple TV or com.example.app">'
+            ' <button type="submit">Save app</button></form>'
             '<form method="post" style="display:inline"'
             ' action="%sstores/%d/detach/%d">'
-            '<button type="submit" class="danger">Detach</button></form>%s</p>'
+            '<button type="submit" class="danger">Detach</button></form></p>'
+            "%s"
             % (html.escape(player["name"]), html.escape(player["kind"]),
                html.escape(player["ha_entity_id"] or "-"),
-               html.escape(app or "no app - it only wakes"),
                html.escape(base), row["id"], player["id"],
-               trouble and '<br><span class="warn">%s</span>'
+               html.escape(app, quote=True),
+               html.escape(base), row["id"], player["id"],
+               trouble and '<p><span class="warn">%s</span></p>'
                % html.escape(trouble) or ""))
     players = "".join(players)
     hint = stores.suggested_app(row["label"])

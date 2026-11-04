@@ -2044,6 +2044,14 @@ class Handler(BaseHTTPRequestHandler):
                 return self.respond(303, "", extra={
                     "Location": (base or "/") + "admin#stores"})
 
+            match = re.search(r"/stores/(\d+)/link/(\d+)$", route.rstrip("/"))
+            if match:
+                stores.set_link_app(con, int(match.group(1)),
+                                    int(match.group(2)),
+                                    field(form, "app"), commit=True)
+                return self.respond(303, "", extra={
+                    "Location": (base or "/") + "admin#stores"})
+
             match = re.search(r"/stores/(\d+)/attach/?$", route)
             if match:
                 picked = field(form, "target_id")

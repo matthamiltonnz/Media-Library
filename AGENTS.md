@@ -2137,3 +2137,31 @@ Live check after the fix: the only repeated name left is `greatest hits` (music,
 2004), four titles belonging to **Queen, Robbie Williams, Simply Red and Tom
 Jones** - different acts, not duplicates, and `_same_act()` keeps them apart on
 purpose.
+## Editing a store-player link, and YouTube Music (0.23.117)
+
+Attaching a player set its app once and the only way to change it was Detach and
+attach again. Each attached player in the store dialog is now an **app box with
+its own Save button**, beside Detach:
+
+- `POST /stores/<id>/link/<target>` → `stores.set_link_app()`. It exists
+  because `attach()` only writes a **non-empty** app, so it cannot take one
+  away; `set_link_app` writes whatever it is given and `""` on purpose means
+  "wake the player and open nothing".
+- The box is prefilled with the *resolved* app (`_link_app()`: link → store →
+  player), so a value coming from a fallback is visible, and saving it pins it
+  to the link.
+- Both forms in a row are siblings, never nested - an app form and a detach
+  form inside one `<form>` would make the second button submit the first.
+
+`migrations/0031_youtube_music.sql` seeds `youtubemusic` ("YouTube Music",
+digital): Google Play Music shut down in 2020 and its library moved there, so
+a downloaded file that came from it belongs to the successor. `APP_CHOICES`
+gained `com.google.android.apps.youtube.music`. A literal "Google Play Music"
+row is still one *Add a store* away when the provenance matters more than the
+successor does - any typed label becomes a row (`stores.resolve()`).
+
+Verified on a scratch DB: the dialog rendered `/stores/2/link/1` with the app
+prefilled, saving `TVNZ+` updated the one link in place (still one row) and
+answered `303 → /admin#stores`, and clearing the box emptied it. Live: 4 shops
+(Apple Music, Apple TV, Google TV, YouTube Music), both `appletv` links carry
+an app box, prefilled `TV` and `com.apple.atve.androidtv.appletv`.

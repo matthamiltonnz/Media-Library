@@ -41,6 +41,7 @@ APP_CHOICES = (
     ("Apple Music", "com.apple.android.music"),
     ("Google TV", "com.google.android.videos"),
     ("YouTube", "com.google.android.youtube"),
+    ("YouTube Music", "com.google.android.apps.youtube.music"),
     ("Prime Video", "com.amazon.amazonvideo.livingroom"),
     ("Netflix", "com.netflix.ninja"),
     ("Disney+", "com.disney.disneyplus"),
@@ -280,6 +281,21 @@ def attach(con, store_id, target_id, app="", commit=False):
                     (app.strip(), store_id, target_id))
     if commit:
         con.commit()
+
+
+def set_link_app(con, store_id, target_id, app, commit=False):
+    """Set the app one store opens on one player - or take it away.
+
+    `attach()` only writes a non-empty app, so it cannot clear one; this writes
+    whatever it is given, and an empty string means "wake the player and open
+    nothing", which is a real state for a store with no app on that device.
+    """
+    cur = con.execute(
+        "UPDATE store_targets SET app = ? WHERE store_id = ? AND target_id = ?",
+        ((app or "").strip(), int(store_id), int(target_id)))
+    if commit:
+        con.commit()
+    return cur.rowcount > 0
 
 
 def detach(con, store_id, target_id, commit=False):
