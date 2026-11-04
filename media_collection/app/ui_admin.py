@@ -1,5 +1,6 @@
 """Library admin: import, export, maintenance. Kept off the catalogue page."""
 import html
+import os
 import time
 
 import stores
@@ -317,7 +318,8 @@ def _store_dialog(base, row, opened, targets, sources=None):
         app, trouble = _link_app(row, player, sources)
         players.append(
             '<p>%s <span class="muted">%s &middot; %s</span></p>'
-            '<div class="linkrow">'
+            '<div class="linkrow" style="display:flex;align-items:center;'
+            'gap:.5rem;justify-content:space-between">'
             '<form method="post" action="%sstores/%d/link/%d">'
             '<input name="app" value="%s" list="app-choices" size="28"'
             ' placeholder="Apple TV or com.example.app">'
@@ -534,6 +536,21 @@ def _stores_block(base, store_rows, targets, entities=()):
             + add_device)
 
 
+def _build_stamp():
+    """When the code behind this page was last written.
+
+    There is no version number in the image (config.yaml stays with the
+    Supervisor), and "I still see the old page" has cost several rounds: a
+    stamp that changes on every deploy answers it in one look.
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    newest = 0.0
+    for name in os.listdir(here):
+        if name.endswith(".py"):
+            newest = max(newest, os.path.getmtime(os.path.join(here, name)))
+    return time.strftime("%Y-%m-%d %H:%M", time.localtime(newest)) if newest else ""
+
+
 def render(base, viewer, stats, message=None, refresh=None, duplicates=0,
            roots=(), jellyfin=None, scan_message="", players=(), chosen=None,
            jobs=None, store_rows=(), targets=(), entities=(), confirm=""):
@@ -606,6 +623,12 @@ def render(base, viewer, stats, message=None, refresh=None, duplicates=0,
         parts.append('<p class="sub" id="progress">Working&hellip;</p>\n'
                      "<script>setTimeout(function () { location.reload(); },"
                      " 4000);</script>")
+
+    stamp = _build_stamp()
+    if stamp:
+        parts.append('<p class="sub">Built from code edited %s. A page showing'
+                     " an older time is a page that was not reloaded.</p>"
+                     % html.escape(stamp))
 
     return ui.page(base, "Library admin", "".join(parts))
 

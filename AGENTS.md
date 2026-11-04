@@ -2174,3 +2174,22 @@ the Detach form is pinned to the far right (`flex: 0 0 auto`,
 which read as two unrelated controls. The rules live in `ui.py` beside the
 `.panel` block, and `.linkrow form { margin: 0 }` cancels `.panel form`'s top
 margin so the two sit on one line.
+## A page that looks unchanged can be an old page (0.23.119)
+
+Three rounds of "I still see the old design" ended in the same place: the
+container was serving the new HTML (`class="linkrow"` and its CSS both present
+in the rendered page) while the browser still showed a document built by the
+previous container. `Cache-Control: no-store` was already set on every
+response, so a reload always fixes it - the difficulty was proving which page
+was on screen.
+
+- The admin page now ends with **Built from code edited &lt;time&gt;** -
+  `_build_stamp()` takes the newest mtime in `app/*.py`, which moves on every
+  deploy. If the time predates the deploy, that tab is an old DOM and a reload
+  is the fix. The version number is not available inside the image
+  (`config.yaml` stays with the Supervisor), which is why this prints a time.
+- The store dialog's player row also carries its layout **inline**
+  (`display:flex;align-items:center;gap:.5rem;justify-content:space-between`)
+  as well as in `.linkrow`, so the app box and Detach stay on one line even if
+  a stylesheet rule goes missing. `.linkrow form:first-child input` still caps
+  the box at 22rem.
