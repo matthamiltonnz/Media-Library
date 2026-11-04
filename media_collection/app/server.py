@@ -1861,7 +1861,7 @@ class Handler(BaseHTTPRequestHandler):
                     con.commit()
                 except sqlite3.IntegrityError:
                     con.rollback()
-                return self.respond(303, "", extra={"Location": base + "admin"})
+                return self.respond(303, "", extra={"Location": base + "admin#roots"})
 
             match = re.search(r"/admin/roots/(\d+)/?$", route)
             if match:
@@ -1880,14 +1880,14 @@ class Handler(BaseHTTPRequestHandler):
                     return self.respond(
                         400, "Another root already uses that label or path.",
                         "text/plain; charset=utf-8")
-                return self.respond(303, "", extra={"Location": base + "admin"})
+                return self.respond(303, "", extra={"Location": base + "admin#roots"})
 
             if route.rstrip("/").endswith("/admin/clean"):
                 # a long check belongs in the background so the page can
                 # show how far it has got
                 clean_job.start(DB_PATH)
                 return self.respond(303, "", extra={
-                    "Location": (base or "/") + "admin?clean=1"})
+                    "Location": (base or "/") + "admin?clean=1#maintenance"})
 
             match = re.search(r"/admin/roots/(\d+)/delete/?$", route)
             if match:
@@ -1897,7 +1897,7 @@ class Handler(BaseHTTPRequestHandler):
                     # ask first, the way a Kodi source removal does
                     return self.respond(303, "", extra={
                         "Location": (base or "/")
-                        + "admin?confirm_root=%d" % root_id})
+                        + "admin?confirm_root=%d#roots" % root_id})
                 if choice == "keep":
                     con.execute("UPDATE digital_sources SET root_id = NULL"
                                 " WHERE root_id = ?", (root_id,))
@@ -1911,18 +1911,18 @@ class Handler(BaseHTTPRequestHandler):
                 con.commit()
                 pruned = dedupe.orphans(con)
                 return self.respond(303, "", extra={
-                    "Location": (base or "/") + "admin?pruned=%d" % pruned})
+                    "Location": (base or "/") + "admin?pruned=%d#roots" % pruned})
             if route.rstrip("/").endswith("/admin/dedupe"):
                 folded = dedupe.merge(con)
                 return self.respond(303, "", extra={
-                    "Location": base + "admin?deduped=%d" % folded})
+                    "Location": base + "admin?deduped=%d#maintenance" % folded})
 
             if route.rstrip("/").endswith("/admin/refresh"):
                 # one button, two lookups: the titles (Wikipedia/Wikidata for
                 # films and TV, MusicBrainz for albums) and the acts themselves
                 refresh_job.start(DB_PATH, force=bool(field(form, "force")))
                 artists.start(DB_PATH)
-                return self.respond(303, "", extra={"Location": base + "admin"})
+                return self.respond(303, "", extra={"Location": base + "admin#metadata"})
 
             if route.rstrip("/").endswith("/admin/players"):
                 # the admin page posts the ticked players; the route has to
@@ -1935,7 +1935,7 @@ class Handler(BaseHTTPRequestHandler):
                 playback.choose(con, picked)
                 # a relative Location resolves against /admin/players and
                 # lands on /admin/admin: go absolute
-                where = (base or "/") + "admin?players=%d" % len(picked)
+                where = (base or "/") + "admin?players=%d#players" % len(picked)
                 return self.respond(303, "", extra={"Location": where})
 
             if route.rstrip("/").endswith("/admin/scan"):
@@ -1945,9 +1945,9 @@ class Handler(BaseHTTPRequestHandler):
                     # nothing to walk: bounce back rather than start a
                     # job that can only fail
                     return self.respond(303, "", extra={
-                        "Location": base + "admin"})
+                        "Location": base + "admin#roots"})
                 scan.start(DB_PATH, repair=True)
-                return self.respond(303, "", extra={"Location": base + "admin?scan=1"})
+                return self.respond(303, "", extra={"Location": base + "admin?scan=1#roots"})
 
             if route.rstrip("/").endswith("/jellyfin/save"):
                 url = field(form, "jellyfin_url").strip()
@@ -1958,7 +1958,7 @@ class Handler(BaseHTTPRequestHandler):
                                     " VALUES (?, ?)", (name, value))
                 con.commit()
                 return self.respond(303, "", extra={
-                    "Location": base + "admin?jellyfin="
+                    "Location": base + "admin?jellyfin=#jellyfin"
                     + quote("Jellyfin settings saved - press Sync to match the copies.")})
 
             if route.rstrip("/").endswith("/admin/artists"):
@@ -1977,8 +1977,22 @@ class Handler(BaseHTTPRequestHandler):
                     playback.choose(con, picked + [name for name in saved
                                                    if name not in listed])
                 return self.respond(303, "", extra={
-                    "Location": base + "admin?players="
+                    "Location": base + "admin?players=#players"
                     + quote("Player list saved.")})
+
+            match = re.search(r"/stores/device/(\d+)/?$", route.rstrip("/"))
+            if match:
+                entity = field(form, "ha_entity_id")
+                domain = entity.split(".", 1)[0] if "." in entity else ""
+                stores.update_target(
+                    con, int(match.group(1)),
+                    name=field(form, "name") or None,
+                    kind=domain or field(form, "kind") or None,
+                    ha_entity_id=entity or None,
+                    input_source=field(form, "input_source"),
+                    commit=True)
+                return self.respond(303, "", extra={
+                    "Location": (base or "/") + "admin#stores"})
 
             match = re.search(r"/stores/device/(\d+)/delete/?$", route)
             if match:
@@ -1986,7 +2000,7 @@ class Handler(BaseHTTPRequestHandler):
                             (int(match.group(1)),))
                 con.commit()
                 return self.respond(303, "", extra={
-                    "Location": (base or "/") + "admin"})
+                    "Location": (base or "/") + "admin#stores"})
 
             if route.rstrip("/").endswith("/stores/device"):
                 entity = field(form, "ha_entity_id")
@@ -2000,7 +2014,7 @@ class Handler(BaseHTTPRequestHandler):
                                       entity, field(form, "app_name"),
                                       field(form, "input_source"), commit=True)
                 return self.respond(303, "", extra={
-                    "Location": (base or "/") + "admin"})
+                    "Location": (base or "/") + "admin#stores"})
 
             match = re.search(r"/stores/(\d+)/attach/?$", route)
             if match:
@@ -2009,20 +2023,20 @@ class Handler(BaseHTTPRequestHandler):
                     stores.attach(con, int(match.group(1)), int(picked),
                                   field(form, "app"), commit=True)
                 return self.respond(303, "", extra={
-                    "Location": (base or "/") + "admin"})
+                    "Location": (base or "/") + "admin#stores"})
 
             match = re.search(r"/stores/(\d+)/detach/(\d+)/?$", route)
             if match:
                 stores.detach(con, int(match.group(1)), int(match.group(2)),
                               commit=True)
                 return self.respond(303, "", extra={
-                    "Location": (base or "/") + "admin"})
+                    "Location": (base or "/") + "admin#stores"})
 
             match = re.search(r"/stores/(\d+)/delete/?$", route)
             if match:
                 stores.remove(con, int(match.group(1)), commit=True)
                 return self.respond(303, "", extra={
-                    "Location": (base or "/") + "admin"})
+                    "Location": (base or "/") + "admin#stores"})
 
             match = re.search(r"/stores/(\d+)/?$", route)
             if match:
@@ -2031,14 +2045,14 @@ class Handler(BaseHTTPRequestHandler):
                               kind=field(form, "kind") or None,
                               app_name=field(form, "app_name"), commit=True)
                 return self.respond(303, "", extra={
-                    "Location": (base or "/") + "admin"})
+                    "Location": (base or "/") + "admin#stores"})
 
             if route.rstrip("/").endswith("/stores"):
                 stores.add(con, field(form, "label"),
                            kind=field(form, "kind") or "digital",
                            app_name=field(form, "app_name"), commit=True)
                 return self.respond(303, "", extra={
-                    "Location": (base or "/") + "admin"})
+                    "Location": (base or "/") + "admin#stores"})
 
 
             if route.rstrip("/").endswith("/jellyfin/server"):
@@ -2050,14 +2064,14 @@ class Handler(BaseHTTPRequestHandler):
                                 " VALUES (?, ?, ?)", (label, url, key))
                     con.commit()
                 return self.respond(303, "", extra={
-                    "Location": (base or "/") + "admin"})
+                    "Location": (base or "/") + "admin#jellyfin"})
 
             match = re.search(r"/jellyfin/server/(\d+)/delete/?$", route)
             if match:
                 # a server goes, and the copies only it backed go with it
                 jellyfin.forget_server(con, int(match.group(1)))
                 return self.respond(303, "", extra={
-                    "Location": (base or "/") + "admin"})
+                    "Location": (base or "/") + "admin#jellyfin"})
 
             match = re.search(r"/jellyfin/server/(\d+)$", route.rstrip("/"))
             if match:
@@ -2087,7 +2101,7 @@ class Handler(BaseHTTPRequestHandler):
                                 (name, value))
                     con.commit()
                 return self.respond(303, "", extra={
-                    "Location": (base or "/") + "admin"})
+                    "Location": (base or "/") + "admin#jellyfin"})
 
             if route.rstrip("/").endswith("/jellyfin/sync"):
                 if jellyfin.start_sync(DB_PATH):
@@ -2095,9 +2109,9 @@ class Handler(BaseHTTPRequestHandler):
                 else:
                     message = "A Jellyfin sync is already running."
                 return self.respond(303, "", extra={
-                    "Location": base + "admin?jellyfin=" + quote(message)})
+                    "Location": base + "admin?jellyfin=#jellyfin" + quote(message)})
                 return self.respond(303, "", extra={
-                    "Location": base + "admin?jellyfin=" + quote(message)})
+                    "Location": base + "admin?jellyfin=#jellyfin" + quote(message)})
 
             match = re.search(r"/title/(\d+)/art/?$", route)
             if match:

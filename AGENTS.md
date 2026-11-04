@@ -2032,3 +2032,45 @@ Verified on a scratch DB: two players, four links; the players table reads
 Google TV" and "Lounge Apple TV · media_player · media_player.lounge ·
 Apple TV", the stores' *Opens on* cells carry the same links, and each store's
 edit row still holds `label, kind, target_id, app`.
+## The stores panel: no system rows, Edit on the right, no jump to the top (0.23.114)
+
+Four things about `/admin`'s stores panel, all UX rather than model.
+
+- **It says what it is.** The panel is *Stores and platforms* and its sub note
+  says a store is a digital shop or platform a copy came from (Apple TV, Apple
+  Music, Google TV, Bandcamp) or, kind `retail`, a shop a disc was bought in.
+- **Jellyfin and ripped file are gone from the list.** Those two `stores` rows
+  are `kind = 'system'`: they are how a copy is reached, not where it came from,
+  and they are edited on the copy. `_stores_block` filters `kind != 'system'`,
+  so they are still in the table for `stores.resolve()`/`label()` and still a
+  legal `digital_sources.provider` - just not listed.
+- **Edit moved to the right.** Each row's last cell is `class="actions"`
+  (`text-align: right` in `ui.py`): an **Edit** button and the Remove form
+  side by side. The button carries `data-open="store-<id>"` and opens a
+  `<dialog class="sheet">` - emitted *after* the table by `_store_dialog()` -
+  through the shell's generic `[data-open]` handler. The dialog holds the
+  label/kind form, the attached players (each with Detach and its app) and the
+  attach form (player + app).
+- **Players can be edited.** `POST /stores/device/<id>` → `stores.update_target()`
+  writes only the fields that are not None; the dialog (`_player_dialog()`) has
+  name, entity (with a `<datalist>` of the 43 HA entities), kind and the
+  input_select option. The kind comes from the entity's domain when an entity
+  is given, else from the select - so pointing a "Bedroom TV" at
+  `media_player.x` fixes a row that says `remote`.
+- **Saving no longer jumps to the top.** `_panel(title, body, name="")` gives
+  each section an id, and every admin redirect carries a fragment:
+  `admin#jellyfin`, `#roots`, `#metadata`, `#stores`, `#players`,
+  `#maintenance`. All 24 `"admin"`/`"admin?..."` Location strings got one,
+  picked by the nearest keyword above them. Drop a panel id and that save
+  silently starts the page at the top again.
+
+`_stores_block` was rewritten whole (135 lines → 209) rather than patched: the
+old version could not be read back line by line, which is this file's own rule.
+The two dialogs are separate functions so the next change is small.
+
+`migrations/0030_retire_itunes.sql` retires the two placeholder shops: a music
+copy on `itunes` becomes `applemusic`, anything else becomes `appletv` (the
+kinds Apple divides them by), and the `itunes`/`other` store rows are deleted
+only when no `digital_sources.provider` and no `items.store_id` still names
+them. Live: 5 stores left (`applemusic, appletv, googletv, jellyfin, rip`) and
+*Love 2*'s copy moved to Apple Music with its Jellyfin route untouched.

@@ -198,6 +198,32 @@ def add_target(con, name, kind, ha_entity_id="", app_name="",
     return cur.lastrowid
 
 
+def update_target(con, target_id, name=None, kind=None, ha_entity_id=None,
+                  input_source=None, commit=False):
+    """Rename a player, repoint it at another entity, or change its option.
+
+    Only the values that are not None are written, so a form that carries a
+    field the caller does not know about cannot blank it by accident.
+    """
+    fields = []
+    args = []
+    for column, value in (("name", name), ("kind", kind),
+                          ("ha_entity_id", ha_entity_id),
+                          ("input_source", input_source)):
+        if value is None:
+            continue
+        fields.append("%s = ?" % column)
+        args.append((value or "").strip())
+    if not fields:
+        return False
+    args.append(int(target_id))
+    con.execute("UPDATE playback_targets SET %s WHERE id = ?"
+                % ", ".join(fields), tuple(args))
+    if commit:
+        con.commit()
+    return True
+
+
 def attached(con, store_id):
     """The players a shop can be opened on, each with the app to launch there."""
     return _dicts(

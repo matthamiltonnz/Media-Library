@@ -5,10 +5,15 @@ import time
 import ui
 
 
-def _panel(title, body):
-    """One block of the admin page: a heading, then its controls."""
-    return ('<section class="panel">\n<h2>%s</h2>\n%s</section>'
-            % (html.escape(title), body))
+def _panel(title, body, name=""):
+    """One block of the admin page: a heading, then its controls.
+
+    `name` gives the section an id, so a form in it can redirect back to
+    `admin#name` and land where it was rather than at the top of the page.
+    """
+    return ('<section class="panel"%s>\n<h2>%s</h2>\n%s</section>'
+            % (' id="%s"' % html.escape(name, quote=True) if name else "",
+               html.escape(title), body))
 
 
 def confirm_root(base, root, files, copies):
@@ -241,109 +246,177 @@ def _player_options(rows):
     return "".join(out)
 
 
-def _stores_block(base, store_rows, targets, entities=()):
-    """The shops, and the players each one can be opened on.
+def _store_dialog(base, row, opened, targets):
+    """The edit sheet for one store: its own fields, and its players."""
 
-    A store is a digital shop (Apple TV, iTunes, Bandcamp) or a retail one (a
-    disc bought in a shop); a player is whatever Home Assistant entity opens it
-    - a media_player, an input_select that fires an automation, a script or an
-    automation. One shop takes any number of players, because the Apple TV app
-    runs on the Apple TV, on an Android TV and on a phone as well.
+    attached = [player["id"] for player in opened]
+    spare = [target for target in targets if target["id"] not in attached]
+    options = "".join(
+        '<option value="%s">%s &middot; %s</option>'
+        % (target["id"], html.escape(target["name"]),
+           html.escape(target["kind"])) for target in spare)
+    players = "".join(
+        '<p>%s <span class="muted">%s &middot; %s &middot; %s</span> '
+        '<form method="post" style="display:inline"'
+        ' action="%sstores/%d/detach/%d">'
+        '<button type="submit" class="danger">Detach</button></form></p>'
+        % (html.escape(player["name"]), html.escape(player["kind"]),
+           html.escape(player["ha_entity_id"] or "-"),
+           html.escape(player.get("app") or "-"),
+           html.escape(base), row["id"], player["id"])
+        for player in opened)
+    return (
+        '<dialog class="sheet" id="store-%d">'
+        "<h2>Edit %s</h2>"
+        '<form method="post" action="%sstores/%d">'
+        '<div class="grid">'
+        '<label>Label<input name="label" value="%s"></label>'
+        '<label>Kind<select name="kind">%s</select></label>'
+        "</div>"
+        '<p><button type="submit">Save</button></p>'
+        "</form>"
+        "<h3>Players</h3>"
+        "%s"
+        '<form method="post" action="%sstores/%d/attach">'
+        '<p><select name="target_id">%s</select> '
+        '<input name="app" placeholder="Apple TV or com.example.app">'
+        '<button type="submit">Add player</button></p>'
+        ' <span class="muted">the app this store opens on that player - a name'
+        " it lists, or an Android package.</span>"
+        "</form>"
+        '<form method="dialog"><p><button type="submit">Close</button></p>'
+        "</form>"
+        "</dialog>"
+        % (row["id"], html.escape(row["label"]),
+           html.escape(base), row["id"],
+           html.escape(row["label"], quote=True),
+           _kind_options(row["kind"]),
+           players or '<p class="muted">No player attached yet.</p>',
+           html.escape(base), row["id"],
+           options or '<option value="">-</option>'))
+
+
+def _player_dialog(base, row, entities):
+    """The edit sheet for one player: what it is called and what it drives."""
+
+    names = "".join('<option value="%s">' % html.escape(entity["entity_id"],
+                                                         quote=True)
+                    for entity in entities or ())
+    return (
+        '<dialog class="sheet" id="player-%d">'
+        "<h2>Edit %s</h2>"
+        '<form method="post" action="%sstores/device/%d">'
+        '<div class="grid">'
+        '<label>Name<input name="name" value="%s"></label>'
+        '<label>Entity<input name="ha_entity_id" value="%s" list="ent-%d"'
+        ' placeholder="media_player.apple_tv"></label>'
+        '<label>Kind<select name="kind">%s</select></label>'
+        '<label>Option (an input_select)<input name="input_source"'
+        ' value="%s" placeholder="Blu-ray"></label>'
+        "</div>"
+        '<datalist id="ent-%d">%s</datalist>'
+        '<p><button type="submit">Save</button></p>'
+        "</form>"
+        '<form method="dialog"><p><button type="submit">Close</button></p>'
+        "</form>"
+        "</dialog>"
+        % (row["id"], html.escape(row["name"]),
+           html.escape(base), row["id"],
+           html.escape(row["name"], quote=True),
+           html.escape(row["ha_entity_id"] or "", quote=True), row["id"],
+           _player_kind_options(row["kind"]),
+           html.escape(row["input_source"] or "", quote=True),
+           row["id"], names))
+
+
+def _stores_block(base, store_rows, targets, entities=()):
+    """The stores, and the players each one can be opened on.
+
+    A store is a digital shop (Apple TV, Apple Music, Google TV, Bandcamp) or
+    - kind 'retail' - a shop a disc was bought in; a player is whatever Home
+    Assistant can wake: a media_player, an input_select that fires an
+    automation, a remote, a script. One store takes any number of players and
+    every link carries its own app, because one device serves several stores -
+    the Apple TV app on the Apple TV, the Android package on the bedroom TV.
+
+    Copies that came from Jellyfin or from a ripped file are not stores: they
+    carry their own route and are edited with the copy, so the kind 'system'
+    rows are left out of this panel.
     """
+    shops = [row for row in store_rows if row["kind"] != "system"]
+    shops_of = {}
+    for row in shops:
+        for player in row.get("players") or []:
+            shops_of.setdefault(player["id"], []).append(row["label"])
+
     rows = []
-    for row in store_rows:
+    dialogs = []
+    for row in shops:
         opened = row.get("players") or []
         names = ", ".join(html.escape(player["name"]) for player in opened)
         state = ("" if row["is_active"]
                  else ' <span class="muted">(retired)</span>')
         rows.append(
-            '<tr><td>%s%s <span class="muted">%s</span></td><td>%s</td>'
+            '<tr><td>%s%s <span class="muted">%s</span></td>'
             "<td>%s</td>"
-            '<td><form method="post" action="%sstores/%d/delete">'
+            "<td>%s</td>"
+            '<td class="actions">'
+            '<button type="button" data-open="store-%d">Edit</button> '
+            '<form method="post" action="%sstores/%d/delete">'
             '<button type="submit" class="danger">Remove</button>'
             "</form></td></tr>"
             % (html.escape(row["label"]), state, html.escape(row["key"]),
                html.escape(row["kind"]),
                names or '<span class="muted">-</span>',
-               html.escape(base), row["id"]))
-        attached = [player["id"] for player in opened]
-        spare = [target for target in targets if target["id"] not in attached]
-        rows.append(
-            '<tr class="edit"><td colspan="4"><details>'
-            "<summary>Edit %s</summary>"
-            '<form method="post" action="%sstores/%d">'
-            '<div class="grid">'
-            '<label>Label<input name="label" value="%s" required></label>'
-            '<label>Kind<select name="kind">%s</select></label>'
-            "</div>"
-            '<p><button type="submit">Save</button></p>'
-            "</form>"
-            '<form method="post" action="%sstores/%d/attach">'
-            '<p><select name="target_id">%s</select> '
-            '<input name="app" placeholder="Apple TV or com.example.app">'
-            '<button type="submit">Add player</button>'
-            ' <span class="muted">the app this shop opens on that player - a'
-            " name it lists, or an Android package.</span></p>"
-            "</form></details></td></tr>"
-            % (html.escape(row["label"]), html.escape(base), row["id"],
-               html.escape(row["label"], quote=True),
-               _kind_options(row["kind"]),
-               html.escape(base), row["id"], _player_options(spare)))
-        for player in opened:
-            rows.append(
-                '<tr class="edit"><td colspan="4">'
-                '<span class="muted">%s &middot; %s &middot; %s &middot; %s'
-                "</span> "
-                '<form method="post" style="display:inline"'
-                ' action="%sstores/%d/detach/%d">'
-                '<button type="submit" class="danger">Remove</button></form>'
-                "</td></tr>"
-                % (html.escape(player["name"]), html.escape(player["kind"]),
-                   html.escape(player["ha_entity_id"] or "-"),
-                   html.escape(player.get("app") or "-"),
-                   html.escape(base), row["id"], player["id"]))
+               row["id"], html.escape(base), row["id"]))
+        dialogs.append(_store_dialog(base, row, opened, targets))
 
     table = ('<table class="grid"><tr><th>Store</th><th>Kind</th>'
-             "<th>Opens on</th><th></th></tr>%s</table>" % "".join(rows))
+             "<th>Opens on</th><th></th></tr>%s</table>"
+             % ("".join(rows) or
+                '<tr><td colspan="4" class="muted">No store yet - press'
+                " <em>Add a store</em> below.</td></tr>"))
+
     add = (
         '<details class="add"><summary>Add a store</summary>'
         '<form method="post" action="%sstores">'
         '<div class="grid">'
-        '<label>Label<input name="label" placeholder="JB Hi-Fi" required>'
-        "</label>"
+        '<label>Label<input name="label" placeholder="Apple Music"></label>'
         '<label>Kind<select name="kind">%s</select></label>'
         "</div>"
         '<p><button type="submit">Add</button>'
-        ' <span class="muted">digital for a shop you download from, retail for a'
-        " shop you walked into.</span></p></form></details>"
+        ' <span class="muted">digital for a store you stream or download'
+        " from, retail for a shop you walked into.</span></p></form>"
+        "</details>"
         % (html.escape(base), _kind_options("digital")))
 
-    shops_of = {}
-    for row in store_rows:
-        for player in row.get("players") or []:
-            shops_of.setdefault(player["id"], []).append(row["label"])
 
     devices = []
     for row in targets:
         devices.append(
             '<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td>'
-            '<td><form method="post" action="%sstores/device/%d/delete">'
+            '<td class="actions">'
+            '<button type="button" data-open="player-%d">Edit</button> '
+            '<form method="post" action="%sstores/device/%d/delete">'
             '<button type="submit" class="danger">Remove</button>'
             "</form></td></tr>"
             % (html.escape(row["name"]), html.escape(row["kind"]),
                html.escape(row["ha_entity_id"] or ""),
                html.escape(", ".join(shops_of.get(row["id"]) or []))
                or '<span class="muted">-</span>',
-               html.escape(base), row["id"]))
+               row["id"], html.escape(base), row["id"]))
+
     device_table = ('<table class="grid"><tr><th>Player</th><th>Kind</th>'
                     "<th>Entity</th><th>Opens</th><th></th></tr>%s</table>"
                     % "".join(devices) if devices else
-                    '<p class="muted">No players yet - add the one a store opens'
-                    " on.</p>")
+                    '<p class="muted">No players yet - a player is what a'
+                    " store opens on, so add one below.</p>")
 
     entity_options = ['<option value="">-</option>']
     for entity in entities or ():
-        label = "%s \u00b7 %s" % (entity["name"], entity["domain"])
+        label = "%s \u00b7 %s" % (entity["name"], entity["entity_id"])
+        if entity.get("kind"):
+            label += " \u00b7 %s" % entity["kind"]
         if entity.get("integration"):
             label += " \u00b7 %s" % entity["integration"]
         if entity.get("sources"):
@@ -351,6 +424,7 @@ def _stores_block(base, store_rows, targets, entities=()):
         entity_options.append('<option value="%s">%s</option>'
                               % (html.escape(entity["entity_id"], quote=True),
                                  html.escape(label)))
+
     add_device = (
         '<details class="add"><summary>Add a player</summary>'
         '<form method="post" action="%sstores/device">'
@@ -363,19 +437,24 @@ def _stores_block(base, store_rows, targets, entities=()):
         "</div>"
         '<p><button type="submit">Add</button>'
         ' <span class="muted">a media_player wakes and opens the app named on'
-        " the shop; a remote wakes the device; an input_select fires an"
-        " automation; a script runs."
-        "</span></p></form></details>"
+        " the store; a remote wakes the device; an input_select fires an"
+        " automation; a script runs.</span></p></form></details>"
         % (html.escape(base), "".join(entity_options)))
 
-    return ('<p class="sub">A store is where a copy came from; a store with a'
-            " player also opens on it.</p>"
-            + table + add + "<h3>Players</h3>"
+    return ('<p class="sub">A store is a digital shop or platform a copy came'
+            " from - Apple TV, Apple Music, Google TV, Bandcamp - or, kind"
+            " <em>retail</em>, a shop a disc was bought in. Jellyfin and"
+            " ripped-file copies are not stores: they carry their own route,"
+            " so they are not listed here.</p>"
+            + table + add + "".join(dialogs)
+            + "<h3>Players</h3>"
             '<p class="sub">A player is what the app wakes. Attach one to a'
-            " shop in <em>Edit &lt;shop&gt;</em> and give it the app that shop"
-            " opens; a shop can run on several players, each with its own"
-            " app.</p>"
-            + device_table + add_device)
+            " store in <em>Edit &lt;store&gt;</em> and give it the app that"
+            " store opens; a store can run on several players, each with its"
+            " own app.</p>"
+            + device_table + "".join(_player_dialog(base, row, entities)
+                                     for row in targets)
+            + add_device)
 
 
 def render(base, viewer, stats, message=None, refresh=None, duplicates=0,
@@ -404,11 +483,13 @@ def render(base, viewer, stats, message=None, refresh=None, duplicates=0,
                                        or "reading the library"),
                            sync.get("done") or 0, sync.get("total") or 0))
         parts.append(_panel("Jellyfin",
-                            progress + _jellyfin_block(base, jellyfin)))
+                            progress + _jellyfin_block(base, jellyfin),
+                        name="jellyfin"))
 
     parts.append(_panel("Media folders",
                         _roots_block(base, roots)
-                        + _scan_block(base, scan_message, len(roots))))
+                        + _scan_block(base, scan_message, len(roots)),
+                        name="roots"))
 
     metadata = ('<p class="sub">Films and TV get plot, poster, year '
                 "and IMDb id from Wikipedia and Wikidata; albums get "
@@ -420,12 +501,15 @@ def render(base, viewer, stats, message=None, refresh=None, duplicates=0,
     if (jobs.get("artists") or {}).get("running"):
         # numbers only mean something while the fill is actually running
         metadata += _artists_block(base)
-    parts.append(_panel("Metadata", metadata))
+    parts.append(_panel("Metadata", metadata, name="metadata"))
 
-    parts.append(_panel("Stores", _stores_block(base, store_rows, targets, entities)))
+    parts.append(_panel("Stores and platforms",
+                        _stores_block(base, store_rows, targets, entities),
+                        name="stores"))
 
     if players:
-        parts.append(_panel("Players", _players_block(base, players, chosen)))
+        parts.append(_panel("Players", _players_block(base, players, chosen),
+                            name="players"))
 
     parts.append(_panel("Import and export", """
 <p class="sub">A Blu-ray.com or iTunes style CSV is staged for review first,
@@ -438,7 +522,8 @@ def render(base, viewer, stats, message=None, refresh=None, duplicates=0,
 
     parts.append(_panel("Maintenance",
                         _maintenance_block(base, duplicates)
-                        + _clean_block(base, jobs.get("clean") or {})))
+                        + _clean_block(base, jobs.get("clean") or {}),
+                        name="maintenance"))
 
     if any((job or {}).get("running") for job in jobs.values()):
         parts.append('<p class="sub" id="progress">Working&hellip;</p>\n'

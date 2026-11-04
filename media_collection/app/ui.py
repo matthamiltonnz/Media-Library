@@ -180,6 +180,9 @@ SHELL = """<!doctype html>
   .panel tbody td { border-top: 1px solid #8882; }
   .panel form { margin: .4rem 0 0; }
   .panel .grid { margin-top: .2rem; }
+  .panel table.grid td.actions { text-align: right; white-space: nowrap; }
+  .panel td.actions form { margin: 0; display: inline; }
+  .panel td.actions button { margin-left: .3rem; }
   .panel details summary { cursor: pointer; font-size: .85rem; opacity: .85; }
   .panel tr.edit td { border-top: 0; padding-top: 0; }
   /* "Add a server" / "Add a root": a button that opens the form under it */
