@@ -2074,3 +2074,36 @@ kinds Apple divides them by), and the `itunes`/`other` store rows are deleted
 only when no `digital_sources.provider` and no `items.store_id` still names
 them. Live: 5 stores left (`applemusic, appletv, googletv, jellyfin, rip`) and
 *Love 2*'s copy moved to Apple Music with its Jellyfin route untouched.
+## The app field is a list, and it says when it cannot work (0.23.115)
+
+An app is one string but two kinds of answer: an Android **package**
+(`play_media`) or a **name the player lists** (`select_source`). Nothing in the
+form said which, so "Apple TV" looked right and opened nothing.
+
+- `stores.APP_CHOICES` lists the packages we have actually launched, and
+  `_app_options(sources)` turns them into a `<datalist id="app-choices">` that
+  every app box shares (`list="app-choices"`). It also carries **every app name
+  the attached players publish** (`playback.entities()[…]["sources"]`), deduped
+  and capped at 160 entries - that half matters because tvOS lists the Apple TV
+  app as **"TV"**: `media_player.apple_tv` publishes 47 sources, "TV" and
+  "TVNZ+" among them, and no "Apple TV" at all.
+- `stores.suggested_app(label)` gives the attach form a placeholder: the Apple
+  TV store shows `com.apple.atve.androidtv.appletv`, Apple Music
+  `com.apple.android.music`, and an unknown shop keeps "Apple TV or
+  com.example.app".
+- `_link_app(row, player, sources)` resolves a link the way
+  `playable_stores()` does (link app → store app → player app) and returns a
+  **warning** when it cannot work: `media_player.x lists Netflix, Apple TV, …
+  not Apple TV`, or `media_player.x publishes no app list - give this player an
+  Android package instead`. It is rendered as `<span class="warn">` (a rule in
+  `ui.py`, `#e8837a`), under the player's line in the store dialog. A package
+  never warns; an unknown `sources` list (no Home Assistant, so no entities)
+  never warns either - silence beats a false alarm.
+- The attach form is a `<details class="add">`, so it starts collapsed and the
+  dialog is not a page of buttons; the players list above it stays visible.
+
+Live consequence worth knowing: the two `appletv` links were set to **`TV`**
+(the Apple TV, what the device lists) and **`com.apple.atve.androidtv.appletv`**
+(the bedroom Android TV). Before this, the lounge link had no app at all and
+the bedroom carried the name "Apple TV", which is why pressing Play did nothing
+and why nobody could see why.

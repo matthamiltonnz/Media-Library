@@ -32,6 +32,24 @@ FALLBACK = {
     "rip": "ripped file",
 }
 
+# The Android package behind an app, for the players that have no app list to
+# pick from (an Android TV launches an app by package id, not by name). Only
+# ids we have actually launched are listed; add more as they are confirmed -
+# `adb shell pm list packages`, or the app's Play Store page (`?id=com.…`).
+APP_CHOICES = (
+    ("Apple TV", "com.apple.atve.androidtv.appletv"),
+    ("Apple Music", "com.apple.android.music"),
+    ("Google TV", "com.google.android.videos"),
+    ("YouTube", "com.google.android.youtube"),
+    ("Prime Video", "com.amazon.amazonvideo.livingroom"),
+    ("Netflix", "com.netflix.ninja"),
+    ("Disney+", "com.disney.disneyplus"),
+    ("Spotify", "com.spotify.tv.android"),
+    ("Plex", "com.plexapp.android"),
+    ("Kodi", "org.xbmc.kodi"),
+    ("Wiim", "com.linkplay.wiimtv"),
+)
+
 _SLUG = re.compile(r"[^a-z0-9]+")
 
 
@@ -70,6 +88,15 @@ def label(store_rows, key):
     if row:
         return row["label"]
     return FALLBACK.get(key or "", key or "")
+
+
+def suggested_app(label):
+    """The package a store of this name usually runs as, when it is known."""
+    want = (label or "").strip().lower()
+    for name, package in APP_CHOICES:
+        if name.lower() == want:
+            return package
+    return ""
 
 
 def choices(con, kind="digital"):

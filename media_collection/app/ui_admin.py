@@ -2,6 +2,7 @@
 import html
 import time
 
+import stores
 import ui
 
 
@@ -246,25 +247,87 @@ def _player_options(rows):
     return "".join(out)
 
 
-def _store_dialog(base, row, opened, targets):
+def _app_options(sources=None):
+    """The datalist every app box offers.
+
+    Two kinds of answer live in one field: an Android package (`play_media`)
+    and a name a player lists (`select_source`). So it carries both - the
+    packages we know, labelled, and every app name the attached players
+    actually publish, which is the only trustworthy source for the second
+    kind (the Apple TV app is "TV" in tvOS's source list, not "Apple TV").
+    """
+    seen = set()
+    options = []
+    for name, package in stores.APP_CHOICES:
+        options.append('<option value="%s">%s &middot; Android package</option>'
+                       % (html.escape(package, quote=True), html.escape(name)))
+        seen.add(name.lower())
+    listed = {}
+    for entity, names in (sources or {}).items():
+        for name in names:
+            listed.setdefault(name, []).append(entity)
+    for name in sorted(listed):
+        if name.lower() in seen:
+            continue
+        seen.add(name.lower())
+        options.append('<option value="%s">%s &middot; listed by %s</option>'
+                       % (html.escape(name, quote=True), html.escape(name),
+                          html.escape(", ".join(listed[name][:2]))))
+    return "".join(options[:160])
+
+
+def _link_app(row, player, sources):
+    """The app a (store, player) link opens, and a word if it cannot work.
+
+    The link wins, then the store's own app, then the player's - the order
+    `stores.playable_stores()` resolves them in, so this shows what pressing
+    Play would actually send. A plain name only works on a player that lists
+    it (`select_source`); an Android TV publishes no app list and needs the
+    package (`play_media`), which is what the warning says.
+    """
+    app = (player.get("app") or row.get("app_name")
+           or player.get("app_name") or "").strip()
+    entity = (player.get("ha_entity_id") or "").strip()
+    listed = sources.get(entity)
+    if not app or listed is None:
+        return app, ""
+    if "." in app and " " not in app:
+        return app, ""
+    if app in listed:
+        return app, ""
+    if listed:
+        return app, ("%s lists %s, not %s" % (entity, ", ".join(listed[:4]),
+                                              app))
+    return app, ("%s publishes no app list - give this player an Android"
+                 " package instead" % entity)
+
+
+def _store_dialog(base, row, opened, targets, sources=None):
     """The edit sheet for one store: its own fields, and its players."""
 
+    sources = sources or {}
     attached = [player["id"] for player in opened]
     spare = [target for target in targets if target["id"] not in attached]
     options = "".join(
         '<option value="%s">%s &middot; %s</option>'
         % (target["id"], html.escape(target["name"]),
            html.escape(target["kind"])) for target in spare)
-    players = "".join(
-        '<p>%s <span class="muted">%s &middot; %s &middot; %s</span> '
-        '<form method="post" style="display:inline"'
-        ' action="%sstores/%d/detach/%d">'
-        '<button type="submit" class="danger">Detach</button></form></p>'
-        % (html.escape(player["name"]), html.escape(player["kind"]),
-           html.escape(player["ha_entity_id"] or "-"),
-           html.escape(player.get("app") or "-"),
-           html.escape(base), row["id"], player["id"])
-        for player in opened)
+    players = []
+    for player in opened:
+        app, trouble = _link_app(row, player, sources)
+        players.append(
+            '<p>%s <span class="muted">%s &middot; %s &middot; %s</span> '
+            '<form method="post" style="display:inline"'
+            ' action="%sstores/%d/detach/%d">'
+            '<button type="submit" class="danger">Detach</button></form>%s</p>'
+            % (html.escape(player["name"]), html.escape(player["kind"]),
+               html.escape(player["ha_entity_id"] or "-"),
+               html.escape(app or "no app - it only wakes"),
+               html.escape(base), row["id"], player["id"],
+               trouble and '<br><span class="warn">%s</span>'
+               % html.escape(trouble) or ""))
+    players = "".join(players)
+    hint = stores.suggested_app(row["label"])
     return (
         '<dialog class="sheet" id="store-%d">'
         "<h2>Edit %s</h2>"
@@ -277,13 +340,15 @@ def _store_dialog(base, row, opened, targets):
         "</form>"
         "<h3>Players</h3>"
         "%s"
+        '<details class="add"><summary>Add a player</summary>'
         '<form method="post" action="%sstores/%d/attach">'
-        '<p><select name="target_id">%s</select> '
-        '<input name="app" placeholder="Apple TV or com.example.app">'
-        '<button type="submit">Add player</button></p>'
-        ' <span class="muted">the app this store opens on that player - a name'
-        " it lists, or an Android package.</span>"
-        "</form>"
+        '<p><select name="target_id">%s</select>'
+        '<input name="app" list="app-choices" size="30" placeholder="%s">'
+        ' <button type="submit">Add player</button></p>'
+        ' <span class="muted">the app this store opens on that player. Pick a'
+        " package from the list for an Android TV; a tvOS/Apple player wants"
+        " the name it lists instead (Apple TV).</span>"
+        "</form></details>"
         '<form method="dialog"><p><button type="submit">Close</button></p>'
         "</form>"
         "</dialog>"
@@ -293,7 +358,8 @@ def _store_dialog(base, row, opened, targets):
            _kind_options(row["kind"]),
            players or '<p class="muted">No player attached yet.</p>',
            html.escape(base), row["id"],
-           options or '<option value="">-</option>'))
+           options or '<option value="">-</option>',
+           html.escape(hint or "Apple TV or com.example.app", quote=True)))
 
 
 def _player_dialog(base, row, entities):
@@ -344,6 +410,8 @@ def _stores_block(base, store_rows, targets, entities=()):
     rows are left out of this panel.
     """
     shops = [row for row in store_rows if row["kind"] != "system"]
+    sources = {entity["entity_id"]: entity.get("sources") or []
+               for entity in entities or ()}
     shops_of = {}
     for row in shops:
         for player in row.get("players") or []:
@@ -369,7 +437,7 @@ def _stores_block(base, store_rows, targets, entities=()):
                html.escape(row["kind"]),
                names or '<span class="muted">-</span>',
                row["id"], html.escape(base), row["id"]))
-        dialogs.append(_store_dialog(base, row, opened, targets))
+        dialogs.append(_store_dialog(base, row, opened, targets, sources))
 
     table = ('<table class="grid"><tr><th>Store</th><th>Kind</th>'
              "<th>Opens on</th><th></th></tr>%s</table>"
@@ -446,7 +514,9 @@ def _stores_block(base, store_rows, targets, entities=()):
             " <em>retail</em>, a shop a disc was bought in. Jellyfin and"
             " ripped-file copies are not stores: they carry their own route,"
             " so they are not listed here.</p>"
-            + table + add + "".join(dialogs)
+            + table + add
+            + '<datalist id="app-choices">%s</datalist>' % _app_options(sources)
+            + "".join(dialogs)
             + "<h3>Players</h3>"
             '<p class="sub">A player is what the app wakes. Attach one to a'
             " store in <em>Edit &lt;store&gt;</em> and give it the app that"
