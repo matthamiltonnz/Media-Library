@@ -2289,3 +2289,35 @@ Deploy note: the first `tools/deploy.sh` run ended
 `installed: 0.23.122 (wanted 0.23.123)` after ~4 minutes and the re-run of
 `ha apps update` completed in seconds - the script's own "MISMATCH" line is what
 caught it, which is why that check exists.
+## This Android TV refuses every app link (0.23.123 findings)
+
+Chasing "the Apple TV app did not start on the bedroom TV" on
+`media_player.bedroom_tv_2` (`androidtv_remote`, `192.168.234.172`), with IME
+enabled so the entity reports `app_id`:
+
+- `media_player.play_media` with `media_content_type: app` reaches
+  `androidtvremote2`'s `send_launch_app_command(app_link)`, which prefixes
+  `market://launch?id=` **only when the string has no URI scheme**
+  (`prefix = "" if urlparse(x).scheme else "market://launch?id="`). So a package
+  becomes a market link, while any `https://…` or `intent://…` is passed
+  through untouched.
+- The set answers `market://launch?id=…` with an error for **every** package
+  tried - `com.apple.atve.androidtv.appletv`, `com.linkplay.wiimtv`,
+  `com.google.android.youtube`, `com.google.android.youtube.tv` and
+  `com.android.vending` (the Play Store, certainly installed). Five refusals are
+  in HA's log for the last one alone, so this is not a missing app.
+- `https://tv.apple.com/` and `intent:#Intent;component=…` are **accepted with
+  no error** - and still open nothing (`app_id` stays `…tv.launcherx`, or
+  `…tv.dreamx` in ambient mode). Key commands do work: `remote.send_command
+  HOME` takes `app_id` from `…dreamx` to `…tv.launcherx`.
+- `_link_app()` therefore warns on a package aimed at an `androidtv_remote`
+  player, and `_store_plays()` adds "if nothing appears, its integration refused
+  that link - Admin → Stores says why".
+- The Android TV (ADB) integration is the only route that uses `am start`, and
+  TCP **5555 is closed** on this set (probed from the HA container:
+  `connect_ex` → 111), so "Add integration → Android TV" cannot connect until
+  **USB debugging** (not just wireless debugging) is on. Wireless debugging
+  alone is a paired, dynamic port that HA's `androidtv` flow cannot pair with.
+- `App ID`/`App name` attributes are only populated once the integration option
+  **Enable IME** is ticked - without it both read empty and a launch cannot be
+  confirmed either way.
