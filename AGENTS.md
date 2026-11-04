@@ -2229,3 +2229,23 @@ The message was true to what was sent and wrong about what occurred.
 
 The tvOS path is unaffected: that is a `select_source` with the name the Apple
 TV lists ("TV"), not a package.
+## "2 Add a store" was Python eating a CSS escape (0.23.121)
+
+The `+`/`-` prefix on an *Add …* button (`.panel details.add > summary::before`)
+read **"2 Add a store"** whenever the section was open. The rule was
+
+```css
+.panel details.add[open] > summary::before { content: "\2212 "; }
+```
+
+and that CSS lives inside ui.py's **Python** triple-quoted `SHELL`, so Python
+evaluated `\221` as the *octal* escape U+0091 and left the `2` behind: the
+browser received an invisible control character followed by "2 ", and CSS never
+saw a U+2212 MINUS SIGN at all.
+
+- Write `\u2212` (Python turns it into the character) or paste the character
+  itself; never a bare `\2212` inside a Python string. The same trap waits in
+  `\2014`, `\00b7` and friends - `re.finditer(r'\\([0-9a-fA-F]{3,6})', line)`
+  over `app/*.py` should come back empty.
+- Verified live after the fix: `content: "+ "` on a closed section,
+  `content: "\u2212 "` on an open one, and zero U+0091 anywhere in the page.

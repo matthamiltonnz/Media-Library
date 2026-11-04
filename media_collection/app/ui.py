@@ -199,7 +199,7 @@ SHELL = """<!doctype html>
       font-size: .85rem; font-weight: 600; opacity: 1; list-style: none; }
   .panel details.add > summary::-webkit-details-marker { display: none; }
   .panel details.add > summary::before { content: "+ "; }
-  .panel details.add[open] > summary::before { content: "\2212 "; }
+  .panel details.add[open] > summary::before { content: "\u2212 "; }
 </style>
 </head>
 <body>
