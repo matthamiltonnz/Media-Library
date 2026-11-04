@@ -318,6 +318,11 @@ def _stores_block(base, store_rows, targets, entities=()):
         " shop you walked into.</span></p></form></details>"
         % (html.escape(base), _kind_options("digital")))
 
+    shops_of = {}
+    for row in store_rows:
+        for player in row.get("players") or []:
+            shops_of.setdefault(player["id"], []).append(row["label"])
+
     devices = []
     for row in targets:
         devices.append(
@@ -327,9 +332,11 @@ def _stores_block(base, store_rows, targets, entities=()):
             "</form></td></tr>"
             % (html.escape(row["name"]), html.escape(row["kind"]),
                html.escape(row["ha_entity_id"] or ""),
-               html.escape(row["app_name"] or ""), html.escape(base), row["id"]))
+               html.escape(", ".join(shops_of.get(row["id"]) or []))
+               or '<span class="muted">-</span>',
+               html.escape(base), row["id"]))
     device_table = ('<table class="grid"><tr><th>Player</th><th>Kind</th>'
-                    "<th>Entity</th><th>App</th><th></th></tr>%s</table>"
+                    "<th>Entity</th><th>Opens</th><th></th></tr>%s</table>"
                     % "".join(devices) if devices else
                     '<p class="muted">No players yet - add the one a store opens'
                     " on.</p>")
@@ -363,7 +370,12 @@ def _stores_block(base, store_rows, targets, entities=()):
 
     return ('<p class="sub">A store is where a copy came from; a store with a'
             " player also opens on it.</p>"
-            + table + add + "<h3>Players</h3>" + device_table + add_device)
+            + table + add + "<h3>Players</h3>"
+            '<p class="sub">A player is what the app wakes. Attach one to a'
+            " shop in <em>Edit &lt;shop&gt;</em> and give it the app that shop"
+            " opens; a shop can run on several players, each with its own"
+            " app.</p>"
+            + device_table + add_device)
 
 
 def render(base, viewer, stats, message=None, refresh=None, duplicates=0,

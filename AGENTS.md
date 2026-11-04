@@ -2001,3 +2001,34 @@ the `applemusic` row, its Play sheet says "On Apple Music" and "Wakes the player
 and opens Apple Music", and posting it answers "Could not wake Bedroom TV:
 <urlopen error timed out>" off the box.
 
+## A player shows the shops it opens (0.23.113)
+
+`_stores_block`'s players table had an **App** column, which after 0.23.112 was
+misleading - the app lives on the shop/player link, so a player's own
+`playback_targets.app_name` is only the last fallback and read like a second
+answer to the same question.
+
+- The column is **Opens** now, and the cell lists the shops the player is
+  attached to. `shops_of` is built once at the top of the block by walking
+  `store_rows[*]["players"]` (the `stores.attached()` rows), keyed by
+  `player["id"]`, which **is** the `playback_targets.id` - the detach form
+  already used it in `/stores/<id>/detach/<target>`.
+- `playback_targets.app_name` is no longer rendered anywhere; it survives only
+  as `playable_stores()`' last fallback so links made before 0029 still open
+  something.
+- `<h3>Players</h3>` gained a `.sub` note: "A player is what the app wakes.
+  Attach one to a shop in *Edit &lt;shop&gt;* and give it the app that shop
+  opens; a shop can run on several players, each with its own app."
+
+Diagnostic worth keeping: when a page looks stale, the cheap test is a string
+that only the new build renders. Comparing the *store list* settles it in one
+look - a page that lists iTunes / other / Jellyfin / ripped but no **Apple
+Music** or **Google TV** predates the 0029 seed, whatever the version says.
+`sqlite3 /data/media.db "SELECT group_concat(key) FROM stores"` answers 7 rows
+(applemusic and googletv included) on the live box.
+
+Verified on a scratch DB: two players, four links; the players table reads
+"Bedroom TV · media_player · media_player.bedroom · Apple Music, Apple TV,
+Google TV" and "Lounge Apple TV · media_player · media_player.lounge ·
+Apple TV", the stores' *Opens on* cells carry the same links, and each store's
+edit row still holds `label, kind, target_id, app`.
