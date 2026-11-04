@@ -1024,6 +1024,32 @@ def _title_row(con, title, year):
         " ORDER BY t.id LIMIT 1", (title, year)).fetchone()
 
 
+def _near_title(con, title, year, kind):
+    """The title this POST would twin, when the year cannot tell them apart.
+
+    `_title_row()` needs the two years to agree, so a second add with the Year
+    box left empty never matched the row already on the shelf - and with
+    *Look up metadata* ticked the new row then gained the very same year from
+    MusicBrainz, leaving two identical titles (*Let the music play*, three
+    times on the live shelf).
+
+    Two different films that share a name always carry their own years, so
+    only a missing one is ambiguous: a posted year matches a stored NULL or an
+    equal year, and a blank posted year matches any row of that name and kind.
+    """
+    sql = ("SELECT t.id, t.name, t.release_year, t.imdb_id, t.kind,"
+           "       a.name AS artist_name"
+           "  FROM titles t LEFT JOIN artists a ON a.id = t.artist_id"
+           " WHERE lower(TRIM(t.name)) = lower(TRIM(?))"
+           "   AND t.kind = ?")
+    args = [title, kind]
+    if year is not None:
+        sql += " AND (t.release_year IS NULL OR t.release_year = ?)"
+        args.append(year)
+    sql += " ORDER BY t.id LIMIT 1"
+    return con.execute(sql, tuple(args)).fetchone()
+
+
 def _same_act(existing, form):
     """Is a music title the same act's work, not just the same album name?
 
@@ -1146,6 +1172,8 @@ def add_item(con, viewer, form):
                   or str(viewer["id"]))
     confirming = bool(field(form, "confirm_copy"))
     existing = _title_row(con, title, year)
+    if not existing:
+        existing = _near_title(con, title, year, kind)
     if not _same_act(existing, form):
         existing = None            # a different act's album of the same name
     if existing and not field(form, "from") and not confirming:

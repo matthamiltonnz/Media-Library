@@ -2107,3 +2107,33 @@ Live consequence worth knowing: the two `appletv` links were set to **`TV`**
 (the bedroom Android TV). Before this, the lounge link had no app at all and
 the bedroom carried the name "Apple TV", which is why pressing Play did nothing
 and why nobody could see why.
+## The same album, three times (0.23.116)
+
+The catalogue's duplicate guard (`_title_row` + `_same_act`) looked right and
+still let *Let the music play* onto the shelf three times. The hole was the
+**year**: `_title_row()` compares `COALESCE(t.release_year, -1) =
+COALESCE(?, -1)`, so a second add with the Year box empty matched nothing -
+and with *Look up metadata* ticked by default the brand-new row then gained the
+same 2011 from MusicBrainz, which left two rows that look identical and are.
+
+`_near_title(con, title, year, kind)` is the second chance: same name (trimmed,
+case-blind) and same kind, and the year may only *narrow* it -
+
+- a posted year matches a stored NULL or an equal year;
+- a blank posted year matches any row of that name and kind.
+
+It is consulted only when `_title_row()` misses, and the result still goes
+through `_same_act()`, so a different act's same-named album is still a new
+title. Two films that share a name always carry their own years, so 1994 and
+2019 *The Lion King* stay two titles; a third add with no year is refused and
+points at the existing row, which is the correct dead end ("add a copy").
+
+Verified on a scratch DB: first add 200; same add with the year blank **409**;
+same add with 2011 **409**; the same album with a blank year and a different
+artist 200; *The Lion King* 1994 200, 2019 200, blank **409** - four titles,
+the two Lion Kings plus the two Greatest-Hits-style names.
+
+Live check after the fix: the only repeated name left is `greatest hits` (music,
+2004), four titles belonging to **Queen, Robbie Williams, Simply Red and Tom
+Jones** - different acts, not duplicates, and `_same_act()` keeps them apart on
+purpose.
