@@ -2271,3 +2271,21 @@ Verified on a scratch DB with three concurrent POSTs of one new title:
 `[409, 200, 409]` and exactly **one** title row - previously that race produced
 three. The JS was run in node against a stub DOM: the note is shown and the
 button reads "Adding..." immediately, and is disabled after a tick.
+## The Play sheet says who refused the link (0.23.123)
+
+The admin's warning is in the wrong place when it matters: the click happens in
+the title's Play sheet. `ui_title._store_plays()` now appends one sentence to
+the section's note - but only when a *package* is involved (a `select_source`
+name cannot be refused this way):
+
+> Wakes the player and opens Apple TV — pick the title there. An Android set
+> opens the app by package; if nothing appears, its integration refused that
+> link - *Admin → Stores* says why.
+
+`packaged` is set in the loop that already blanks a package id out of the
+"opens X" wording (a package reads badly), so no new plumbing was needed.
+
+Deploy note: the first `tools/deploy.sh` run ended
+`installed: 0.23.122 (wanted 0.23.123)` after ~4 minutes and the re-run of
+`ha apps update` completed in seconds - the script's own "MISMATCH" line is what
+caught it, which is why that check exists.

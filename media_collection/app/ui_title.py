@@ -175,6 +175,7 @@ def _store_plays(base, row, shops):
     for store, players, app in shops:
         buttons = []
         apps = set()
+        packaged = False
         for player in players:
             buttons.append(
                 '<form method="post" action="%stitle/%s/store">'
@@ -185,6 +186,7 @@ def _store_plays(base, row, shops):
                    _text(player.get("name") or player["ha_entity_id"] or "")))
             named = (player.get("app") or "").strip()
             if "." in named:            # a package id reads badly on the page
+                packaged = True
                 named = ""
             apps.add(_text(named) or _text(app or "") or _text(store["label"]))
         wanted = apps.pop() if len(apps) == 1 else ""
@@ -192,10 +194,14 @@ def _store_plays(base, row, shops):
             '<section class="store-play">'
             '<h3>On %s</h3>'
             '<div class="players">%s</div>'
-            '<p class="muted">%s &#8212; pick the title there.</p></section>'
+            '<p class="muted">%s &#8212; pick the title there.%s</p>'
+            "</section>"
             % (_text(store["label"]), "".join(buttons),
                ("Wakes the player and opens %s" % wanted) if wanted
-               else "Wakes the player"))
+               else "Wakes the player",
+               " An Android set opens the app by package; if nothing appears,"
+               " its integration refused that link - <em>Admin &rarr;"
+               " Stores</em> says why." if packaged else ""))
     return "\n".join(parts)
 
 
