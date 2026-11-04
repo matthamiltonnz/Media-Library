@@ -28,7 +28,8 @@ def _adopt(store_rows):
     STORE_BY_ID.update({row["id"]: row["label"] for row in store_rows})
     del STORE_CHOICES[:]
     STORE_CHOICES.extend((row["key"], row["label"]) for row in store_rows
-                         if row["kind"] != "system" and row["is_active"])
+                         if row["kind"] not in ("system", "format")
+                         and row["is_active"])
 
 
 STORE_CHOICES = []
@@ -190,18 +191,29 @@ def _store_plays(base, row, shops):
                 named = ""
             apps.add(_text(named) or _text(app or "") or _text(store["label"]))
         wanted = apps.pop() if len(apps) == 1 else ""
+        if "kind" in store.keys() and store["kind"] == "format":
+            # A disc cannot be deep-linked - the format's players are there to
+            # get the room ready (amp input, screen, a script), so the heading
+            # is the format itself rather than "On <shop>".
+            heading = _text(store["label"])
+            note = "Wakes the player and gets it ready"
+            tail = " &#8212; put the disc in."
+        else:
+            heading = "On " + _text(store["label"])
+            note = (("Wakes the player and opens %s" % wanted) if wanted
+                    else "Wakes the player")
+            tail = (" &#8212; pick the title there."
+                    " An Android set opens the app by package; if nothing"
+                    " appears, its integration refused that link - <em>Admin"
+                    " &rarr; Stores</em> says why." if packaged
+                    else " &#8212; pick the title there.")
         parts.append(
             '<section class="store-play">'
-            '<h3>On %s</h3>'
+            "<h3>%s</h3>"
             '<div class="players">%s</div>'
-            '<p class="muted">%s &#8212; pick the title there.%s</p>'
+            '<p class="muted">%s%s</p>'
             "</section>"
-            % (_text(store["label"]), "".join(buttons),
-               ("Wakes the player and opens %s" % wanted) if wanted
-               else "Wakes the player",
-               " An Android set opens the app by package; if nothing appears,"
-               " its integration refused that link - <em>Admin &rarr;"
-               " Stores</em> says why." if packaged else ""))
+            % (heading, "".join(buttons), note, tail))
     return "\n".join(parts)
 
 

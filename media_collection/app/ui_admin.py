@@ -349,13 +349,22 @@ def _store_dialog(base, row, opened, targets, entities=None):
                % html.escape(trouble) or ""))
     players = "".join(players)
     hint = stores.suggested_app(row["label"])
+    if "kind" in row.keys() and row["kind"] == "format":
+        # a format row is not a shop: its kind is fixed, so an edit cannot
+        # quietly turn "Blu-ray" into a digital store
+        kind_field = ('<label>Kind<input value="format" disabled>'
+                      '<input type="hidden" name="kind" value="format">'
+                      "</label>")
+    else:
+        kind_field = ('<label>Kind<select name="kind">%s</select></label>'
+                      % _kind_options(row["kind"]))
     return (
         '<dialog class="sheet" id="store-%d">'
         "<h2>Edit %s</h2>"
         '<form method="post" action="%sstores/%d">'
         '<div class="grid">'
         '<label>Label<input name="label" value="%s"></label>'
-        '<label>Kind<select name="kind">%s</select></label>'
+        "%s"
         "</div>"
         '<p><button type="submit">Save</button></p>'
         "</form>"
@@ -376,7 +385,7 @@ def _store_dialog(base, row, opened, targets, entities=None):
         % (row["id"], html.escape(row["label"]),
            html.escape(base), row["id"],
            html.escape(row["label"], quote=True),
-           _kind_options(row["kind"]),
+           kind_field,
            players or '<p class="muted">No player attached yet.</p>',
            html.escape(base), row["id"],
            options or '<option value="">-</option>',
@@ -430,7 +439,8 @@ def _stores_block(base, store_rows, targets, entities=()):
     carry their own route and are edited with the copy, so the kind 'system'
     rows are left out of this panel.
     """
-    shops = [row for row in store_rows if row["kind"] != "system"]
+    shops = [row for row in store_rows if row["kind"] in ("digital", "retail")]
+    formats = [row for row in store_rows if row["kind"] == "format"]
     sources = {entity["entity_id"]: entity.get("sources") or []
                for entity in entities or ()}
     info = {entity["entity_id"]: entity for entity in entities or ()}
@@ -439,26 +449,38 @@ def _stores_block(base, store_rows, targets, entities=()):
         for player in row.get("players") or []:
             shops_of.setdefault(player["id"], []).append(row["label"])
 
+    def one_row(row, opened, removable, show_kind=True):
+        names = ", ".join(html.escape(player["name"]) for player in opened)
+        state = ("" if row["is_active"]
+                 else ' <span class="muted">(retired)</span>')
+        kind_cell = ("<td>%s</td>" % html.escape(row["kind"])
+                     if show_kind else "")
+        remove = ('<form method="post" action="%sstores/%d/delete">'
+                  '<button type="submit" class="danger">Remove</button>'
+                  "</form>" % (html.escape(base), row["id"])
+                  if removable else "")
+        return ('<tr><td>%s%s <span class="muted">%s</span></td>'
+                "%s"
+                "<td>%s</td>"
+                '<td class="actions">'
+                '<button type="button" data-open="store-%d">Edit</button> %s'
+                "</td></tr>"
+                % (html.escape(row["label"]), state, html.escape(row["key"]),
+                   kind_cell,
+                   names or '<span class="muted">-</span>',
+                   row["id"], remove))
+
     rows = []
     dialogs = []
     for row in shops:
         opened = row.get("players") or []
-        names = ", ".join(html.escape(player["name"]) for player in opened)
-        state = ("" if row["is_active"]
-                 else ' <span class="muted">(retired)</span>')
-        rows.append(
-            '<tr><td>%s%s <span class="muted">%s</span></td>'
-            "<td>%s</td>"
-            "<td>%s</td>"
-            '<td class="actions">'
-            '<button type="button" data-open="store-%d">Edit</button> '
-            '<form method="post" action="%sstores/%d/delete">'
-            '<button type="submit" class="danger">Remove</button>'
-            "</form></td></tr>"
-            % (html.escape(row["label"]), state, html.escape(row["key"]),
-               html.escape(row["kind"]),
-               names or '<span class="muted">-</span>',
-               row["id"], html.escape(base), row["id"]))
+        rows.append(one_row(row, opened, True))
+        dialogs.append(_store_dialog(base, row, opened, targets, info))
+
+    format_rows = []
+    for row in formats:
+        opened = row.get("players") or []
+        format_rows.append(one_row(row, opened, False, show_kind=False))
         dialogs.append(_store_dialog(base, row, opened, targets, info))
 
     table = ('<table class="grid"><tr><th>Store</th><th>Kind</th>'
@@ -466,6 +488,18 @@ def _stores_block(base, store_rows, targets, entities=()):
              % ("".join(rows) or
                 '<tr><td colspan="4" class="muted">No store yet - press'
                 " <em>Add a store</em> below.</td></tr>"))
+    format_table = (
+        "<h3>Players by format</h3>"
+        '<p class="sub">A disc has no shop to open, but the room still has to'
+        " be ready: attach the player, the amp input or a script to the"
+        " <em>format</em> itself - Blu-ray, DVD, vinyl - and every title held"
+        " on that format offers it in its Play sheet.</p>"
+        '<table class="grid"><tr><th>Format</th><th>Opens on</th><th></th>'
+        "</tr>%s</table>"
+        % ("".join(format_rows) or
+           '<tr><td colspan="3" class="muted">No format listed.</td></tr>'))
+
+
 
     add = (
         '<details class="add"><summary>Add a store</summary>'
@@ -536,7 +570,7 @@ def _stores_block(base, store_rows, targets, entities=()):
             " <em>retail</em>, a shop a disc was bought in. Jellyfin and"
             " ripped-file copies are not stores: they carry their own route,"
             " so they are not listed here.</p>"
-            + table + add
+            + table + add + format_table
             + '<datalist id="app-choices">%s</datalist>' % _app_options(sources)
             + "".join(dialogs)
             + "<h3>Players</h3>"

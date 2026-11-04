@@ -135,7 +135,7 @@ def resolve(con, value, kind="digital", commit=False):
         return ""
     wanted = text.casefold()
     for row in load(con):
-        if row["kind"] != "system" and (
+        if row["kind"] not in ("system", "format") and (
                 row["key"].casefold() == wanted
                 or row["label"].casefold() == wanted):
             return row["key"]

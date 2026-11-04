@@ -179,6 +179,12 @@ def store_keys(con, digital, items):
         shop = shops.get(store_id) if store_id else None
         if shop:
             keys.append(shop["key"])
+        # A disc is played by putting it in, but the room can still be set up
+        # first: a format row (kind 'format') carries the players for Blu-ray,
+        # DVD, vinyl and so on, whatever shop the copy came from.
+        fmt = copy["format"] if "format" in copy.keys() else ""
+        if fmt and fmt not in ("digital", "ripped"):
+            keys.append(fmt)
     return keys
 
 

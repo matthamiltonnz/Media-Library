@@ -2395,3 +2395,36 @@ Verified on a scratch DB (a band reading "Apple TV app" for a digital copy, and
 "Digital" once its provider was pointed at a key with no store row) and live:
 the films page is 636 cards with 143 "Apple TV" bands replacing "Digital", the
 music page shows "YouTube Music" ×10 and "Apple Music" ×4.
+## Players for a physical format (0.23.126)
+
+A disc has no shop to open, but the room still has to be set up - the amp has to
+change input, the screen has to wake, a script has to run. That belongs to the
+**format**, not to the shop the disc was bought in, so the catalogue can now
+carry players for Blu-ray, DVD, vinyl and so on.
+
+- `migrations/0032_format_players.sql` seeds one `stores` row per physical
+  format with `kind = 'format'`, `key` = the `items.format` value and `label`
+  as `server.FORMAT_LABELS` prints it (`bluray` → "Blu-ray", `uhd_4k` →
+  "4K Blu-ray", …). They are not shops: no copy ever names them as a provider.
+- `store_keys()` appends each copy's **format** when it is not `digital` or
+  `ripped`, so `playable_stores()` finds those rows and the Play sheet offers a
+  section per format that has players. A retail shop and a format are separate
+  sections on the same title - "JB Hi-Fi" and "Blu-ray" are different jobs.
+- `ui_title._store_plays()` heads a format section with the format name (not
+  "On &lt;shop&gt;") and says "Wakes the player and gets it ready - put the disc
+  in", because a disc cannot be deep-linked.
+- The admin keeps them apart: the stores table lists `digital`/`retail` only,
+  and a **Players by format** table below it uses the same edit dialog (with the
+  kind fixed to `format`, and no Remove - deleting the row would lose the place
+  to hang players).
+- `stores.resolve()` and `ui_title.STORE_CHOICES` skip `kind = 'format'`, so a
+  typed store name can never land on a format row and no picker offers one.
+
+Verified on a scratch DB: an `input_select.amp` player attached to the Blu-ray
+row made a Blu-ray title's Play sheet read "Blu-ray / [Amp (BD)] / Wakes the
+player and gets it ready - put the disc in", and pressing it posted
+`/title/<id>/store` and reached `playback.open_on` ("Could not wake Amp (BD):
+&lt;urlopen error timed out&gt;" off the box). Live: the stores table lists the
+four shops, the format table lists 3D Blu-ray, 4K Blu-ray, Blu-ray, Cassette,
+CD, DVD, Other, VHS, Vinyl and SACD, and the store datalist on a title page is
+unchanged.
