@@ -1,11 +1,10 @@
 # Media Library — Home Assistant add-on
 
-A household catalogue of physical and digital media (Blu-ray, 4K, 3D, DVD, iTunes,
-CDs, vinyl) with per-owner copies, shared visibility, CSV import and export, keyless
-metadata, and playable digital backups of what you own — ripped files mounted into
-Home Assistant or held by a Jellyfin server, matched to the titles you add.
-
-Runs as a Home Assistant add-on (ingress), backed by one SQLite file in `/data`.
+A household catalogue of physical and digital media — Blu-ray, 4K, 3D, DVD,
+CD, vinyl, cassette and the digital shops you buy from — with per-owner copies,
+shared or private visibility, CSV import and export, keyless metadata, and
+playable copies of what you own: ripped files on a mounted share, or items held
+by a Jellyfin server and matched to the titles you add.
 
 ## Install
 
@@ -58,29 +57,50 @@ Full documentation: [media_collection/DOCS.md](media_collection/DOCS.md).
 
 ## What it does
 
-- **One title, many copies** — a film owned on 3D Blu-ray and iTunes is one title
-  with two copies, each with its own format, barcode, location, condition, owner,
-  visibility and last-watched date.
-- **Multi-user without logins** — Home Assistant ingress passes the user id, so the
-  person signed in owns whatever they add; shared copies are visible to everyone,
-  private ones only to their owner.
-- **Import / export** — Blu-ray.com and iTunes style CSVs go through a staged review
-  (map columns → check ok/duplicate/error → commit). Export is CSV or JSON.
-- **Metadata** — keyless (Wikidata + Wikipedia): plot, poster, year, IMDb id, with a
-  background refresh for the whole library and IMDb-id-first matching so a corrected
-  match sticks.
-- **Browsing** — one mode at a time (**Movies**, **TV**, **Music**), never a mixed
-  list, plus an owner filter for *Everyone* or a single person, with titles/copies
-  counts broken down by format, search, list and poster views, and the admin page
-  tucked away at the foot of the catalogue.
-- **Playback sources** — a ripped copy is a playable digital backup of media you
-  already own, never a title of its own: it becomes another copy of a title in the
-  collection and records the media root plus the path inside a folder mounted into
-  Home Assistant (or the Jellyfin/Kodi/iTunes item). A ripped music tree
-  (`Owner's Music/Artist/Album`) is matched on every start, so an album folder
-  becomes the playable copy of an album you already catalogued.
-- **Housekeeping** — automatic schema migrations, duplicate-title folding, and a
-  repair pass that survives interrupted upgrades.
+- **One title, many copies.** The same film on 3D Blu-ray, on DVD and in a
+  digital shop is one title with three copies. Each copy keeps its own format,
+  edition, barcode, store, location, condition, price, acquisition date,
+  last-watched date, owner, visibility and notes.
+- **One owner per copy, shared or private.** Owners are the Home Assistant
+  users who open the panel, so the person adding a copy owns it — the add-on
+  has no accounts, passwords or invitations of its own. A `shared` copy is
+  visible to everyone; a `private` one only to its owner.
+- **Stores and platforms are data.** Apple TV, Apple Music, Google TV, YouTube
+  Music — or any shop you type — are rows you can add, rename and remove, and a
+  shop can be attached to one or more players. A disc records the shop it was
+  bought in; a digital copy records the shop it came from.
+- **Import and export.** A Blu-ray.com- or iTunes-style CSV is staged for
+  review first: map the columns, check each row (ok / duplicate / error), then
+  commit, so nothing lands in the catalogue until you say so. Export is a CSV
+  spreadsheet of every copy you can see, or a full JSON dump.
+- **Keyless metadata.** Films and TV come from Wikidata and Wikipedia (plot,
+  poster, year, running time, genres, IMDb id); albums from MusicBrainz
+  (release, year, cover); artists from Wikipedia (biography, portrait, links).
+  No API key is needed anywhere. A refresh job fills the gaps in the background,
+  and a known IMDb or MusicBrainz id always beats a fuzzy name match.
+- **Browsing.** One mode at a time — Movies, TV, Music, Artists — with an owner
+  filter, format pills, search that matches the artist as well as the title,
+  list and poster views, and tallies that add up. Titles file under the first
+  letter of the name with *The* / *A* / *An* moved to the end, and numbers sort
+  by value (2 before 10).
+- **A duplicate is a question, not an accident.** Adding a title that is already
+  on the shelf points at the existing row, because a second copy belongs there;
+  adding a copy someone already owns in that format asks first. The admin page
+  carries a duplicate-title merge and a clean pass over rows that no longer
+  point at anything.
+- **Playback.** Register a Jellyfin server in the admin page and sync: every
+  title it holds is matched and recorded as a playable copy, extra versions and
+  editions included, and the Play sheet lists the devices that can take it. A
+  pinned bar follows what is playing — play/pause, stop, previous, next, rewind
+  and fast-forward — and tracks a second player in another room as well.
+- **A disc gets a player too.** A physical copy has no app to open, but the room
+  still has to be set: attach a `media_player`, `remote`, `input_select`,
+  `script` or `automation` to a format (Blu-ray, vinyl, …) and the Play sheet
+  wakes it. For a shop, attach a player and give it the app that shop opens —
+  an Android package (`com.example.app`) or a name the device itself lists.
+- **Barcode scanning.** Type a UPC/EAN or scan it with a phone camera; the
+  lookup fills only the boxes you left empty and says so when the code is
+  already on a copy.
 
 ## Reaching it directly (a TV app, Kodi, the barcode scanner)
 
@@ -138,13 +158,21 @@ media_collection/            the add-on
 
 tools/deploy.sh              package and install on a live Home Assistant box
 tools/check_addon_repo.py    validate this repository (GitHub Actions runs it)
+.github/workflows/           the repository check, on every push and
+                             every pull request
 ```
 
 ## Privacy
 
-The database is not part of this repository, and the image ships no catalogue at all:
-a fresh install starts empty and is filled by your own imports or by adding copies by
-hand. Personal CSVs are git-ignored too, so a clone carries no household data.
+There is no telemetry and no account of its own. The add-on talks only to the
+services you ask it to: MusicBrainz, Wikidata, Wikipedia and a keyless product
+API when you add or refresh a title, your own Jellyfin server, and your own Home
+Assistant instance (to read its entities and to wake a player).
+
+The database is not part of this repository. The image ships no catalogue, so a
+fresh install starts empty and is filled by your own imports or by adding copies
+by hand; personal CSVs are git-ignored, so a clone carries no household data. A
+Jellyfin API key lives in that database, never in a file the repository tracks.
 
 ## Licence
 
