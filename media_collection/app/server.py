@@ -676,6 +676,19 @@ function barcodeField() {
   return dlg ? dlg.querySelector('input[name="upc_ean"]') : null;
 }
 
+function webSearch(code) {
+  var pick = document.querySelector('select[name="format"]');
+  var word = '';
+  if (pick) {
+    if (pick.value === 'dvd') { word = ' dvd'; }
+    else if (/^(bluray|bluray_3d|uhd_4k|vhs)$$/.test(pick.value)) {
+      word = pick.value === 'vhs' ? ' vhs' : ' blu-ray';
+    }
+  }
+  return 'https://www.google.com/search?q=' +
+    encodeURIComponent((code || '') + word);
+}
+
 function say(text, href) {
   var said = document.getElementById('upc-said');
   if (!said) { return; }
@@ -771,9 +784,8 @@ function fillFromBarcode(data) {
   if (!found) {
     notes.push('No match for ' + (data.upc || 'that barcode') + '.');
     if (data.note) { notes.push(data.note); }
-    notes.push('Type the title, or search the web for it.');
-    say(notes.join(' '), 'https://www.google.com/search?q=' +
-      encodeURIComponent(data.upc || 'barcode'));
+    notes.push('Type the title from the case, or search the web for the code.');
+    say(notes.join(' '), webSearch(data.upc));
     return;
   } else {
     var fill = function (name, value) {
@@ -2731,9 +2743,26 @@ class DualServer(ThreadingHTTPServer):
         return sock, addr
 
 
+def _check_page():
+    """Fail at boot, not with a blank page, if PAGE's Template has a stray `$`.
+
+    `PAGE` is a `string.Template`: a regex end-anchor (`$/`) inside its script is
+    an invalid placeholder, and the substitution error kills the request thread,
+    so the catalogue answers 0 bytes with no traceback on the page. One
+    substitute() at start-up turns that into a logged failure instead.
+    """
+    ids = set()
+    for match in PAGE.pattern.finditer(PAGE.template):
+        name = match.group("named") or match.group("braced")
+        if name:
+            ids.add(name)
+    PAGE.substitute({name: "" for name in ids})
+
+
 def main():
     if not os.path.exists(DB_PATH):
         raise SystemExit("database missing at %s - run migrate.sh first" % DB_PATH)
+    _check_page()
     log("media collection listening on :%d (db=%s)" % (PORT, DB_PATH))
     scan.start(DB_PATH)
     jellyfin.start_sync(DB_PATH)

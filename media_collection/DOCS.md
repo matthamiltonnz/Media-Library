@@ -104,6 +104,13 @@ database that usually knows the name on the box. A barcode already in the
 catalogue is named in the line under the boxes, so the same disc is never
 catalogued twice.
 
+**A disc barcode is the hard case.** MusicBrainz only files albums, and the
+keyless product database has far more groceries than Blu-rays, so a case no free
+service lists comes back empty. The page says which services were asked and
+offers a web search for the code ("9338176028766 blu-ray"); typing the title off
+the case is usually quicker. Both the 13-digit EAN and the 12-digit UPC form of a
+code are tried, and UPCitemdb's fuzzy search runs when its exact lookup misses.
+
 **The scanner needs a secure page.** Browsers hand out the camera only to
 `https://` or `localhost`, and never to a framed page - so inside the Home
 Assistant panel it is refused even when Home Assistant itself is HTTPS. Open the
