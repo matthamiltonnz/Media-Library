@@ -7,8 +7,18 @@
 # host works directly, and /tmp on the dev Mac is wiped on reboot.
 set -eu
 
-HOST="${1:-hassio@192.168.234.3}"
+# The address is never committed: pass it, set MC_HOST, or keep it in a
+# .deploy-host file beside the repository root (git-ignored).
+HOST="${1:-${MC_HOST:-}}"
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
+if [ -z "$HOST" ] && [ -f "$ROOT/.deploy-host" ]; then
+    HOST=$(tr -d '\r\n' < "$ROOT/.deploy-host")
+fi
+if [ -z "$HOST" ]; then
+    echo "usage: tools/deploy.sh hassio@<home-assistant>" >&2
+    echo "       or export MC_HOST, or write it into .deploy-host" >&2
+    exit 2
+fi
 TGZ="/tmp/mc-$$.tgz"
 
 cd "$ROOT"

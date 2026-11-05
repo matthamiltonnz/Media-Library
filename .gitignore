@@ -13,3 +13,7 @@ media_collection/seed/*.db
 media_collection/seed/*.csv
 upc-ean-additions.txt
 upc-ean-missing-research.md
+
+# never publish a machine's address, or the working notes that name a household
+.deploy-host
+AGENTS.md

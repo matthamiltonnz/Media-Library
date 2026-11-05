@@ -1,5 +1,5 @@
 name: Media Collection
-version: "0.23.131"
+version: "0.23.133"
 slug: media_collection
 description: >-
   Shared family media catalogue. Every disc has one owner, and every shared copy
@@ -40,6 +40,10 @@ watchdog: http://[HOST]:[PORT:8099]/health
 options:
   default_visibility: shared
   log_level: info
+  films_path: ""
+  films_owner: ""
 schema:
   default_visibility: list(shared|private)
   log_level: list(debug|info|warning|error)
+  films_path: str?
+  films_owner: str?

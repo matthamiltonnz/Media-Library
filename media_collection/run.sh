@@ -40,13 +40,26 @@ python3 "$APP/tv_import.py" "$DB" || echo "tv scan skipped"
 # the artist pages then read straight from artists/titles.
 python3 "$APP/artists.py" "$DB" --link || echo "artist link skipped"
 
-# Mitchell's films come from their own folder, one folder per film. The format is
-# read from the file name (2160p -> 4K, 1080p -> Blu-ray); disc details wait for
-# the Blu-ray.com export.
+# A folder of ripped films can be imported on start, one folder per film. The
+# two options name it and whose copies they are; FILMS_PATH / FILMS_OWNER win
+# when set (that is how a developer runs it), and nothing happens when either
+# is empty. The format is read from the file name (2160p -> 4K, 1080p ->
+# Blu-ray); disc details wait for the Blu-ray.com export.
+opt() {
+    python3 -c 'import json, sys
+try:
+    print(json.load(open("/data/options.json")).get(sys.argv[1]) or "")
+except Exception:
+    print("")' "$1"
+}
 FILMS=${FILMS_PATH:-}
-[ -n "$FILMS" ] || FILMS="/media/QNAP/Mitchell's Movies"
-if [ -d "$FILMS" ]; then
-    python3 "$APP/film_import.py" "$DB" "$FILMS" --owner "${FILMS_OWNER:-Mitchell}" \
+FILMS_OWNER=${FILMS_OWNER:-}
+if [ -f /data/options.json ]; then
+    [ -n "$FILMS" ] || FILMS=$(opt films_path)
+    [ -n "$FILMS_OWNER" ] || FILMS_OWNER=$(opt films_owner)
+fi
+if [ -n "$FILMS" ] && [ -n "$FILMS_OWNER" ] && [ -d "$FILMS" ]; then
+    python3 "$APP/film_import.py" "$DB" "$FILMS" --owner "$FILMS_OWNER" \
         || echo "film scan skipped"
 fi
 

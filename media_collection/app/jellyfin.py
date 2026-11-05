@@ -21,7 +21,7 @@ import urllib.parse
 import urllib.request
 
 OPTIONS_FILE = "/data/options.json"
-DEFAULT_URL = "http://192.168.234.3:8096"
+DEFAULT_URL = ""  # a server is a row now; never guess an address
 PAGE = 500
 TIMEOUT = 120
 _users = {}
@@ -115,6 +115,8 @@ def existing_ids(con, server_id, ids, chunk=50):
 def _call(base, key, path, params=None, method="GET", payload=None, timeout=TIMEOUT):
     if not key:
         raise JellyfinError("No Jellyfin API key yet - add one in the add-on options")
+    if not base:
+        raise JellyfinError("No Jellyfin server yet - add one in Admin")
     url = base + path
     if params:
         url += "?" + urllib.parse.urlencode(params)

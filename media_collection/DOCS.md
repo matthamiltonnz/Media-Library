@@ -15,12 +15,18 @@ titles 1───n items 1───n digital_sources
 - **items** — the copy you own: owner, `format`, `edition`, `upc_ean`, `region`,
   `bluray_com_id`, `condition`, `location`, `visibility`.
 - **digital_sources** — how to reach that copy in a library: `provider`
-  (itunes/appletv/jellyfin/kodi/other), `library_id`, `external_id`.
+  (a `stores.key` - `appletv`, `applemusic`, … - or `jellyfin` / `rip`),
+  `library_id`, `external_id`, `media_source_id`.
 - **playback_targets** — the devices a later "play this" action will drive:
-  `kind` (bluray_player/apple_tv/jellyfin/kodi), `ha_entity_id`, `input_source`, `app_name`.
+  `kind` (the entity's own domain: media_player / remote / input_select /
+  script / automation), `ha_entity_id`, `input_source`, `app_name`.
+- **stores** — the shops and platforms a copy came from or can be opened on:
+  `key`, `label`, `kind` (`digital`, `retail`, `format`, `system`).
+- **store_targets** — which player opens which shop, and the app it opens
+  (`store_id`, `target_id`, `app`). A shop can run on several players.
 
-One title can therefore have a Blu-ray, an iTunes purchase and a Jellyfin file
-without them counting as duplicates.
+One title can therefore have a Blu-ray, a download from a digital shop and a
+Jellyfin file without them counting as duplicates.
 
 ## Library admin
 
@@ -98,13 +104,22 @@ database that usually knows the name on the box. A barcode already in the
 catalogue is named in the line under the boxes, so the same disc is never
 catalogued twice.
 
+**The scanner needs a secure page.** Browsers hand out the camera only to
+`https://` or `localhost`, and never to a framed page - so inside the Home
+Assistant panel it is refused even when Home Assistant itself is HTTPS. Open the
+catalogue on its published port (8099) over HTTPS instead. The add-on answers
+plain HTTP and HTTPS on that one port, and offers HTTPS only when it finds an
+**unexpired** certificate in `/ssl`, `/data/tls` or `MC_TLS_CERT` /
+`MC_TLS_KEY`; putting it behind the reverse proxy you already run is the easier
+route, since that keeps renewals automatic.
+
 If that name and year are **already in the catalogue**, the title is not added:
 a page names the existing title and offers to open it, because what you have is
 almost certainly another copy of it - and copies belong on the title page,
 where the catalogue can ask about a duplicate:
 
 **Adding a copy** of something you already hold in that format (same owner) asks
-first - *Matt already owns a Blu-ray of 10,000 B.C. (2008) in Lounge shelf* -
+first - *Sam already owns a Blu-ray of that film in Lounge shelf* -
 with **Add another copy** and **Cancel**, and nothing is written until you say
 so. A second copy is a real thing (one for the lounge, one for a bedroom), so
 this asks rather than refuses. For music the artist decides as well as the
@@ -118,24 +133,23 @@ The **Copies** tab holds the detail and the editing: every copy of the title wit
 its format, store, owner, edition, region, shelf, condition, barcode, price paid,
 purchase date, last watched date and visibility. Open a copy to change it, delete
 it, or add another one (owner included) without leaving the page. A digital copy
-records the store it was bought from - iTunes, Apple TV or other - next to what it
-cost and when; Kodi is no longer offered because it sits outside Home Assistant.
-**Store** is empty ("-") unless something really was bought from a shop online,
-which is also the default when adding a title.
+records the shop it came from - where a disc was bought, or the digital shop a
+copy was purchased in - next to what it cost and when. **Store** is empty ("-")
+unless something really came from a shop, and the name is free text: a shop the
+catalogue has not seen before becomes a row the first time you type it.
 
 ## Where things are
 
 Every copy carries a **Location** - *Where it lives* on the add form: the room
-and the furniture, not the address. The catalogue starts with
+and the furniture, not the address. It is free text, so write what makes sense
+where you live - a shelf, a cupboard, a box in the garage. For example:
 
 * **Lounge kallax** - every record, whoever owns it
-* **Lounge shelf** - Matt's films, TV and box sets
-* **Bedroom storage** - Matt's CDs
-* **Mitchell's bedroom** - Mitchell's films, TV and CDs
+* **Lounge shelf** - the films, TV and box sets
+* **Bedroom storage** - the CDs
 
-Downloads and Jellyfin routes have no location, because they are not on a shelf;
-so do the copies of anyone else in the household. A location is free text, and
-the list view shows it beside each copy.
+A download and a Jellyfin route have no location, because there is no shelf to
+put them on. The list view shows a copy's location beside it.
 
 ## By artist
 
@@ -209,7 +223,8 @@ own copy (`repoint_rips`) on every run.
 Titles whose only copies are files used to be hidden from the catalogue, with a
 link under the tallies to bring them back; that switch was only ever there while
 the first import was being sorted out and is gone. Every title is listed, and the
-headline counts include every copy.
+tallies count real copies: a `ripped` file is the disc's own file, not a second
+copy, so the format pills and the headline agree.
 
 ## Play
 
@@ -225,6 +240,14 @@ Vero, a phone) and starts the linked item there. Nothing lists sessions on the p
 itself - the picker is where they belong. Only players that accept a file
 (`play_media`) and are reachable are listed, and **Admin → Players** narrows that
 list to the handful you actually use.
+
+Below those halves sits a section per **shop** that names a player (Apple TV,
+Apple Music, Google TV, …) and one per **physical format** that does (Blu-ray,
+vinyl, …). A shop's button wakes that player and opens the app the shop runs
+there - an Android package (`com.example.app`) or a name the device lists; a
+disc's says what it is doing and asks you to put the disc in, because a disc
+cannot be deep-linked. Admin → **Stores and platforms** is where a shop, a
+format and their players are wired together, each link carrying its own app.
 
 Playback asks Home Assistant to play
 `media-source://media_source/local/<path under /media>` through
@@ -275,20 +298,20 @@ track order and names them all. A film keeps its single id.
 ## Playback sources (rips in a media folder)
 
 Each copy can record where it can be played from: open a title → **Playback
-sources**. Pick the copy, the provider (*Ripped file*, Jellyfin, Kodi, iTunes,
-Apple TV) and the **media root** plus the path inside it.
+sources**. Pick the copy, the provider (*Ripped file*, Jellyfin, or a shop) and
+the **media root** plus the path inside it.
 
 Roots are rows, not config — Admin → **Media roots** lists them, and every row is
 editable in place (label and path) with **Save**, alongside **Remove**; a new
 folder is an **Add** form underneath. Labels and paths must be unique, and a clash is
-reported rather than silently dropped. Seeded with:
+reported rather than silently dropped. A root is a folder the container can see
+under `/media`, one row each - for example:
 
 | Root | Path |
 |---|---|
-| Matt — Movies | `/media/My Media/QNAP/Movies` |
-| iTunes Movies | `/media/My Media/QNAP/iTunes Movies` |
-| TV Shows | `/media/My Media/QNAP/TV` |
-| Mitchell — Movies | `/media/My Media/QNAP/Mitchell's Movies` |
+| Movies | `/media/movies` |
+| TV | `/media/tv` |
+| Music | `/media/music` |
 
 The add-on mounts the Home Assistant media share read-only (`map: media:ro`), so
 those paths are what the container sees. Nothing is scanned or moved — the path is
@@ -331,22 +354,22 @@ lossy) — the scanner can only see the codec, not the plastic.
 music title per album (named `Artist — Album`, year lifted from a `(1999)` suffix),
 one `cd` copy owned by the person whose folder it sits in, and a `rip` playback
 source pointing at the album folder. The codec decides the copy: **FLAC → CD** (a rip),
-**MP3 → Digital · Google Play · MP3**, **M4A/AAC → Digital · iTunes · AAC** (the store
+**MP3 → Ripped · YouTube Music · MP3**, **M4A/AAC → Ripped · Apple Music · AAC** (the shop
 is recorded in the copy's edition), and a folder that holds a concert disc (`.mka` /
 `.mkv` / `.cue` and no separate tracks, e.g. an Atmos Blu-ray) becomes a **Blu-ray**
 copy. Folders with no audio at all — artwork-only leftovers (`Folder.jpg`,
-`desktop.ini`, `.db`) and QNAP housekeeping (`.@__thumb`, `@eaDir`, `#recycle`) — are
+`desktop.ini`, `.db`) and NAS housekeeping (`.@__thumb`, `@eaDir`, `#recycle`) — are
 skipped. Re-running it adds nothing, so it is safe after every new rip:
 
 ```bash
-python3 /app/music_import.py /data/media.db "/media/QNAP/Music"            # import
-python3 /app/music_import.py /data/media.db "/media/QNAP/Music" --dry-run  # count only
-python3 /app/tv_import.py /data/media.db "/media/QNAP/TV"                 # TV seasons
-python3 /app/film_import.py /data/media.db "/media/QNAP/Mitchell's Movies" \
-        --owner Mitchell                                                # ripped films
+python3 /app/music_import.py /data/media.db "/media/music"            # import
+python3 /app/music_import.py /data/media.db "/media/music" --dry-run  # count only
+python3 /app/tv_import.py /data/media.db "/media/tv"                 # TV seasons
+python3 /app/film_import.py /data/media.db "/media/movies" \
+        --owner "<display name>"                                        # ripped films
 ```
 
-The media root is the Home Assistant media folder (`/media/QNAP`); everything below it
+The media root is the Home Assistant media folder (`/media`); everything below it
 (`Music/...`, `Movies/...`, `TV/...`) is stored in the source path, which is exactly what
 HA's `local` media source resolves. `location` on a copy is a shelf, so the importers
 leave it empty - fill it in when you know where the disc actually lives.
@@ -361,9 +384,8 @@ when the Supervisor passes it through).
 film, `Name (Year) - Edition` is the title, and the file name decides the format
 (`2160p` a 4K disc, `1080p` a Blu-ray, 3D a 3D Blu-ray, SD a DVD, otherwise
 `--format`). Barcode, region and condition stay empty on purpose - those come from
-a Blu-ray.com export. The start-up call covers `/media/QNAP/Mitchell's Movies` for
-Mitchell; `FILMS_PATH` / `FILMS_OWNER` override it, and `--dry-run` prints what it
-would add.
+a Blu-ray.com export. The start-up call runs only when `FILMS_PATH` and
+`FILMS_OWNER` are both set, and `--dry-run` prints what it would add.
 
 
 ## Browsing
@@ -594,6 +616,12 @@ Requests without ingress headers map to a single `local` profile.
 ## Roadmap
 
 1. ~~Import, review, search~~ (done)
-2. Home Assistant "play this" routing per `playback_targets`
-3. Jellyfin/Kodi item matching via `digital_sources.external_id`
-4. Apple TV: switch device and open the app; selecting the exact purchase stays manual
+2. ~~Home Assistant "play this" routing per `playback_targets`~~ (done - a shop
+   or a format carries its players, and each link carries the app it opens)
+3. ~~Jellyfin item matching via `digital_sources.external_id`~~ (done, versions
+   and editions included)
+4. ~~Open a shop's app on a device~~ (done - an Android package, or a name the
+   device lists)
+5. Still open: browsing a Jellyfin server's media folders from the link page
+   (only search is offered), and a prebuilt image so an install does not have to
+   compile on your own machine.

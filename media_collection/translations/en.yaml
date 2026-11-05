@@ -10,3 +10,14 @@ configuration:
     description: >-
       How much the add-on writes to the Supervisor log. "debug" is very noisy
       and is only useful while something is being fixed.
+  films_path:
+    name: Ripped films folder
+    description: >-
+      Optional. A folder inside the media share (one folder per film) imported
+      on every start, so a newly ripped disc appears without anyone typing a
+      path. Leave it empty to import by hand instead.
+  films_owner:
+    name: Whose films those are
+    description: >-
+      The display name of the person who owns the copies films_path imports.
+      Ignored when films_path is empty.

@@ -35,10 +35,11 @@ DISC_EXT = (".mka", ".mkv", ".cue")
 def album_format(folder, depth=2):
     """(format, edition) for an album folder.
 
-    FLAC means a ripped CD, MP3 means a Google Play Music purchase and M4A/AAC means
-    an iTunes purchase, so the copy is recorded as Digital rather than CD. Artwork-only
-    leftovers never become a copy; a concert disc (mka/mkv/cue without separate tracks,
-    e.g. an Atmos Blu-ray) is kept as a Blu-ray copy.
+    FLAC means a ripped CD; MP3 came from YouTube Music (it was Google Play Music
+    before that closed) and M4A/AAC from the Apple Music store, so the copy is
+    recorded as Ripped with the shop in its edition. Artwork-only leftovers never
+    become a copy; a concert disc (mka/mkv/cue without separate tracks, e.g. an
+    Atmos Blu-ray) is kept as a Blu-ray copy.
     """
     base = len(folder)
     flac = mp3 = aac = disc = False
@@ -61,9 +62,9 @@ def album_format(folder, depth=2):
     if flac:
         return "cd", ""
     if mp3:
-        return "ripped", "Google Play \u00b7 MP3"
+        return "ripped", "YouTube Music \u00b7 MP3"
     if aac:
-        return "ripped", "iTunes \u00b7 AAC"
+        return "ripped", "Apple Music \u00b7 AAC"
     return ("bluray", "") if disc else (None, "")
 
 
