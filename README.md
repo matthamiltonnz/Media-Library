@@ -150,7 +150,7 @@ media_collection/            the add-on
 ├── Dockerfile / build.yaml  image build (python3 + sqlite, no pip packages)
 ├── run.sh                   repair → migrate → merge → normalise → serve
 ├── migrate.sh               transactional migration runner
-├── migrations/              the schema, one file per change
+├── migrations/              the schema, in one baseline file
 ├── app/                     the web app (stdlib only)
 ├── DOCS.md                  the Documentation tab in the add-on store
 ├── translations/en.yaml     option names and help text

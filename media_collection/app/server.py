@@ -489,7 +489,13 @@ PAGE = Template("""<!doctype html>
             color: #fff; margin-bottom: 1rem; }
   .empty { opacity: .6; }
   dialog { border: 1px solid #8886; border-radius: 10px; padding: 1rem 1.2rem;
-           max-width: 32rem; width: calc(100% - 2rem); }
+           max-width: 32rem; width: calc(100% - 2rem);
+           max-height: calc(100vh - 2rem); max-height: calc(100dvh - 2rem);
+           overflow: auto; overscroll-behavior: contain;
+           padding-bottom: calc(1rem + env(safe-area-inset-bottom, 0px)); }
+  dialog .actions { position: sticky; bottom: 0; background: Canvas;
+           padding-top: .5rem;
+           padding-bottom: calc(.5rem + env(safe-area-inset-bottom, 0px)); }
   dialog::backdrop { background: #0008; }
   dialog h2 { margin-top: 0; }
 </style>
@@ -670,11 +676,19 @@ function barcodeField() {
   return dlg ? dlg.querySelector('input[name="upc_ean"]') : null;
 }
 
-function say(text) {
+function say(text, href) {
   var said = document.getElementById('upc-said');
   if (!said) { return; }
   said.hidden = !text;
   said.textContent = text || '';
+  if (!href) { return; }
+  var link = document.createElement('a');
+  link.href = href;
+  link.target = '_blank';
+  link.rel = 'noopener';
+  link.textContent = 'Search the web';
+  said.appendChild(document.createTextNode(' '));
+  said.appendChild(link);
 }
 
 function startScan() {
@@ -755,8 +769,12 @@ function fillFromBarcode(data) {
   }
   var found = data.found;
   if (!found) {
-    notes.push('No match for ' + (data.upc || 'that barcode')
-      + ' - type the title.');
+    notes.push('No match for ' + (data.upc || 'that barcode') + '.');
+    if (data.note) { notes.push(data.note); }
+    notes.push('Type the title, or search the web for it.');
+    say(notes.join(' '), 'https://www.google.com/search?q=' +
+      encodeURIComponent(data.upc || 'barcode'));
+    return;
   } else {
     var fill = function (name, value) {
       var field = dlg.querySelector('[name="' + name + '"]');

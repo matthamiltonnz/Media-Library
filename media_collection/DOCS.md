@@ -596,8 +596,10 @@ lists two add-ons with the same slug.
 ## Data, backup, schema changes
 
 `/data/media.db` (SQLite, WAL) is included in add-on snapshots. `migrate.sh` runs
-on each start and records applied files in `schema_migrations`; add
-`migrations/0002_*.sql`-style files, never edit an applied migration.
+on each start and records applied files in `schema_migrations`. The schema is one
+file, `migrations/0001_schema.sql`, which builds a brand-new database on its own;
+a database that already has tables is recorded as having it and left alone. Add a
+new `0002_*.sql` beside it for a change, and never edit a file that has run.
 
 Foreign keys are per-connection in SQLite and default **off** — the app and
 `migrate.sh` both enable them. Deleting an owner with copies aborts

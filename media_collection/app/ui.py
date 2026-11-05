@@ -99,7 +99,13 @@ SHELL = """<!doctype html>
   .artpick.current button { outline: 2px solid #4a9c6d; outline-offset: 1px; }
   button.danger { border-color: #b4453c; color: #e8837a; }
   dialog.sheet { border: 1px solid #8886; border-radius: 10px; padding: 1.2rem 1.4rem;
-                 max-width: 34rem; width: 92%; background: Canvas; color: CanvasText; }
+                 max-width: 34rem; width: 92%; background: Canvas; color: CanvasText;
+                 max-height: calc(100vh - 2rem); max-height: calc(100dvh - 2rem);
+                 overflow: auto; overscroll-behavior: contain;
+                 padding-bottom: calc(1.2rem + env(safe-area-inset-bottom, 0px)); }
+  dialog.sheet .actions { position: sticky; bottom: 0; background: Canvas;
+                 padding-top: .5rem;
+                 padding-bottom: calc(.5rem + env(safe-area-inset-bottom, 0px)); }
   dialog.sheet::backdrop { background: #0008; }
   dialog.sheet h2 { margin-top: 0; }
   dialog.sheet p.copy-play { display: flex; align-items: center; gap: .6rem;

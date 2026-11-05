@@ -568,6 +568,7 @@ def musicbrainz_artist_by_id(mbid):
     }
 
 UPC_ROOT = "https://api.upcitemdb.com/prod/trial/lookup"
+UPC_SEARCH = "https://api.upcitemdb.com/prod/trial/search"
 
 
 def musicbrainz_barcode(upc):
@@ -613,51 +614,80 @@ def musicbrainz_barcode(upc):
 
 
 def upc_lookup(upc):
-    """What a case barcode belongs to: MusicBrainz, then a product database.
+    """What a case barcode belongs to: MusicBrainz, then a product API.
 
-    Returns (match, note). The note says which service let us down, so the
-    page can be honest about a barcode it could not resolve instead of
-    silently filling nothing.
+    Returns (match, note). The note says which service let us down, so the page
+    can say why it found nothing instead of filling nothing in silence.
+
+    A 13-digit EAN that starts with a zero is the same product as the 12-digit
+    UPC-A, and the two databases disagree about which form to file, so both are
+    asked. UPCitemdb's trial `lookup` also misses a lot that its fuzzy `search`
+    still finds, so that is the last try before giving up.
     """
     if len(set(upc)) == 1:
         return None, "That barcode is a placeholder, not a real one."
+    codes = [upc]
+    if len(upc) == 13 and upc.startswith("0"):
+        codes.append(upc.lstrip("0"))
+    elif len(upc) == 12:
+        codes.append("0" + upc)
+
     notes = []
-    try:
-        match = musicbrainz_barcode(upc)
-    except Throttle:
-        match = None
-        notes.append("MusicBrainz is rate-limiting us - try again shortly.")
-    except Exception as exc:                   # offline, blocked, unknown
-        match = None
-        notes.append("MusicBrainz: %s." % exc)
-    if match:
-        return match, " ".join(notes)
-    try:
-        payload = _get(UPC_ROOT + "?" +
-                       urllib.parse.urlencode({"upc": upc}))
-    except urllib.error.HTTPError as exc:
-        # a 400 is "no such product", not a failure worth shouting about
-        notes.append("UPCitemdb has no product for that code."
-                     if exc.code == 400 else "UPCitemdb: %s." % exc)
-        return None, " ".join(notes)
-    except Exception as exc:
-        notes.append("UPCitemdb: %s." % exc)
-        return None, " ".join(notes)
-    if payload.get("code") and payload.get("code") != "OK":
-        notes.append("UPCitemdb said %s." % payload.get("code"))
-    for item in payload.get("items") or []:
-        title = (item.get("title") or "").strip()
-        if not title:
+    for code in codes:
+        try:
+            match = musicbrainz_barcode(code)
+        except Throttle:
+            notes.append("MusicBrainz is rate-limiting us - try again shortly.")
+            break
+        except Exception as exc:                  # offline, blocked, bad reply
+            notes.append("MusicBrainz: %s." % exc)
+            break
+        if match:
+            return match, " ".join(notes)
+
+    for code in codes:
+        try:
+            payload = _get(UPC_ROOT + "?" +
+                           urllib.parse.urlencode({"upc": code}))
+        except urllib.error.HTTPError as exc:
+            # a 400 is "no such product", not a failure
+            notes.append("UPCitemdb has no product for %s." % code
+                         if exc.code == 400 else
+                         "UPCitemdb answered %s." % exc.code)
             continue
-        return {
-            "source": "UPCitemdb",
-            "kind": "",
-            "title": title,
-            "artist": (item.get("brand") or "").strip(),
-            "category": (item.get("category") or "").strip(),
-            "year": None,
-        }, " ".join(notes)
+        except Exception as exc:
+            notes.append("UPCitemdb: %s." % exc)
+            payload = None
+            break
+        for item in payload.get("items") or []:
+            if (item.get("title") or "").strip():
+                return _upc_match(item), " ".join(notes)
+        if payload.get("code") and payload.get("code") != "OK":
+            notes.append("UPCitemdb said %s." % payload.get("code"))
+
+    try:
+        payload = _get(UPC_SEARCH + "?" + urllib.parse.urlencode({"s": upc}))
+    except Exception:
+        payload = None
+    for item in (payload or {}).get("items") or []:
+        if (item.get("title") or "").strip():
+            notes.append("Fuzzy match - check the title.")
+            return _upc_match(item), " ".join(notes)
+    if not notes:
+        notes.append("Neither MusicBrainz nor UPCitemdb knows that barcode.")
     return None, " ".join(notes)
+
+
+def _upc_match(item):
+    """One UPCitemdb item as the dict the add dialog understands."""
+    return {
+        "source": "UPCitemdb",
+        "kind": "",
+        "title": (item.get("title") or "").strip(),
+        "artist": (item.get("brand") or "").strip(),
+        "category": (item.get("category") or "").strip(),
+        "year": None,
+    }
 
 
 # -- acts --------------------------------------------------------------------

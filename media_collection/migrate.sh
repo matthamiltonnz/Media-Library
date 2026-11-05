@@ -14,6 +14,19 @@ sqlite3 "$DB" "PRAGMA journal_mode=WAL;
                    applied_at TEXT NOT NULL DEFAULT (datetime('now'))
                );" >/dev/null
 
+# The baseline describes the whole schema in one file. A database that already
+# has tables was built by an earlier version (or by the 33 files this replaced),
+# so it is recorded as having run the baseline rather than rebuilt under itself
+# - its CREATEs would collide with everything already there.
+BASE=0001_schema
+seen=$(sqlite3 "$DB" "SELECT 1 FROM sqlite_master
+                      WHERE type = 'table' AND name = 'titles';")
+done_=$(sqlite3 "$DB" "SELECT 1 FROM schema_migrations WHERE version = '$BASE';")
+if [ -n "$seen" ] && [ -z "$done_" ]; then
+    sqlite3 "$DB" "INSERT INTO schema_migrations (version) VALUES ('$BASE');"
+    echo "baseline $BASE (this database already had a schema)"
+fi
+
 for f in "$HERE"/migrations/*.sql; do
     [ -e "$f" ] || continue
     v=$(basename "$f" .sql)
