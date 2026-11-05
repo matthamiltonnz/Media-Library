@@ -105,11 +105,20 @@ catalogue is named in the line under the boxes, so the same disc is never
 catalogued twice.
 
 **A disc barcode is the hard case.** MusicBrainz only files albums, and the
-keyless product database has far more groceries than Blu-rays, so a case no free
-service lists comes back empty. The page says which services were asked and
-offers a web search for the code ("9338176028766 blu-ray"); typing the title off
-the case is usually quicker. Both the 13-digit EAN and the 12-digit UPC form of a
-code are tried, and UPCitemdb's fuzzy search runs when its exact lookup misses.
+keyless product database has far more groceries than Blu-rays, so a retail case
+is often in neither. The page says which services were asked and offers a web
+search for the code ("9338176028766 blu-ray"), which is what finds a disc; typing
+the title off the case is quicker still. Both the 13-digit EAN and the 12-digit
+UPC form of a code are tried, and UPCitemdb's fuzzy search runs when its exact
+lookup misses.
+
+One shop does file discs by barcode: **imusic.com** redirects `/movies/<upc>` (or
+`/music/<upc>`) to a slug carrying the year and title ("2024-madame-web-blu-ray"),
+so the add-on asks it once per barcode, in one request a minute, and only when
+everything else has missed. Their firewall answers 418 when it is asked too
+often - and that bans the household's address for a while, which is why the
+pacing is deliberate and why a refusal is reported ("try again in a minute")
+rather than cached as "no such product".
 
 **The scanner needs a secure page.** Browsers hand out the camera only to
 `https://` or `localhost`, and never to a framed page - so inside the Home

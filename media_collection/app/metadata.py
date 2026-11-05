@@ -645,6 +645,14 @@ def upc_lookup(upc):
         if match:
             return match, " ".join(notes)
 
+    # A disc barcode: MusicBrainz has no discs and the product APIs have few,
+    # but a shop that files releases by barcode does.
+    shop, shop_note = shop_barcode(upc)
+    if shop_note:
+        notes.append(shop_note)
+    if shop:
+        return shop, " ".join(notes)
+
     for code in codes:
         try:
             payload = _get(UPC_ROOT + "?" +
@@ -688,6 +696,114 @@ def _upc_match(item):
         "category": (item.get("category") or "").strip(),
         "year": None,
     }
+
+
+# -- a shop that files discs by barcode --------------------------------------
+#
+# MusicBrainz has albums and the product APIs have groceries, so a Blu-ray case
+# was the one barcode nobody could answer. imusic.com does answer it: their
+# /movies/<upc> (and /music/<upc>) replies 301 to
+# /movies/<upc>/<year>-<title>-<format>, so the title arrives in the Location
+# header and no page has to be parsed or rendered.
+
+SHOP_ROOT = "https://imusic.com"
+SHOP_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+           "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36")
+SHOP_FORMATS = ("4k-uhd", "3d-blu-ray", "blu-ray", "dvd", "uhd", "steelbook",
+                "box-set", "boxset", "import", "reissue", "remastered")
+_SHOP_SEEN = {}                      # barcode -> (match, note), this process only
+_SHOP_LAST = [0.0]                   # when we last asked, so we stay a browser
+SHOP_PAUSE = 60.0                    # one shop request a minute, no more
+_SHOP_SMALL = {"the", "a", "an", "of", "and", "in", "on", "to", "for", "at",
+               "by", "with", "from", "vs"}
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Leave a 301 alone: its Location is the answer."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def _slug_words(slug):
+    """(year, title, format) from a shop slug like 2024-madame-web-blu-ray."""
+    year = None
+    rest = slug
+    match = re.match(r"^((?:19|20)\d\d)-(.+)$", slug)
+    if match:
+        year = int(match.group(1))
+        rest = match.group(2)
+    found = []
+    changed = True
+    while changed:
+        changed = False
+        for token in sorted(SHOP_FORMATS, key=len, reverse=True):
+            if rest == token or rest.endswith("-" + token):
+                rest = rest[:-len(token)].rstrip("-")
+                found.insert(0, token)
+                changed = True
+                break
+    words = [w for w in rest.split("-") if w]
+    if not words:
+        return year, "", " ".join(found)
+    title = []
+    for position, word in enumerate(words):
+        if word.isupper() or position == 0 or word.lower() not in _SHOP_SMALL:
+            title.append(word[:1].upper() + word[1:])
+        else:
+            title.append(word)
+    return year, " ".join(title), " ".join(found)
+
+
+def shop_barcode(upc):
+    """(match, note) for a barcode a shop files under its own number.
+
+    One request and no page parsed: imusic.com answers /movies/<upc> (or
+    /music/<upc>) with a 301 whose Location ends in /<year>-<title>-<format>,
+    so the title is in the header. It is the only free source that carries disc
+    barcodes, so the scrape is worth it; their WAF answers 418 once it has had
+    enough, which is reported as "busy" and not cached, rather than pretending
+    the barcode does not exist.
+    """
+    if upc in _SHOP_SEEN:
+        return _SHOP_SEEN[upc]
+    # Stay a browser rather than a crawler: one request a minute, process-wide,
+    # and silence after that - their WAF bans the whole household's address.
+    now = time.time()
+    if now - _SHOP_LAST[0] < SHOP_PAUSE:
+        return None, ""
+    _SHOP_LAST[0] = now
+    opener = urllib.request.build_opener(_NoRedirect)
+    for section, kind in (("movies", "movie"), ("music", "music")):
+        request = urllib.request.Request(
+            SHOP_ROOT + "/" + section + "/" + upc,
+            headers={"User-Agent": SHOP_UA})
+        location = ""
+        try:
+            with opener.open(request, timeout=10) as response:
+                location = response.headers.get("Location") or ""
+        except urllib.error.HTTPError as exc:
+            if exc.code in (301, 302, 303, 307, 308):
+                location = exc.headers.get("Location") or ""
+            elif exc.code == 418:
+                return None, ("The shop that files discs by barcode is "
+                              "rate-limiting us - try again in a minute.")
+            else:
+                continue
+        except Exception:
+            return None, ""
+        slug = location.rstrip("/").split("/")[-1]
+        if not slug or slug.isdigit():
+            continue
+        year, title, fmt = _slug_words(slug)
+        if not title:
+            continue
+        match = {"source": "imusic.com", "kind": kind, "title": title,
+                 "artist": "", "category": fmt, "year": year}
+        _SHOP_SEEN[upc] = (match, "")
+        return match, ""
+    _SHOP_SEEN[upc] = (None, "")
+    return None, ""
 
 
 # -- acts --------------------------------------------------------------------
