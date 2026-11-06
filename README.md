@@ -78,6 +78,11 @@ Full documentation: [media_collection/DOCS.md](media_collection/DOCS.md).
   (release, year, cover); artists from Wikipedia (biography, portrait, links).
   No API key is needed anywhere. A refresh job fills the gaps in the background,
   and a known IMDb or MusicBrainz id always beats a fuzzy name match.
+- **Artwork you control.** A pencil on the cover opens every image a lookup has
+  offered, with a search across the free cover sources - album editions from
+  iTunes and the Cover Art Archive, film posters from Wikipedia - and an upload
+  box for a photographed sleeve. A stored MusicBrainz *release* id means that
+  edition's own cover, not the standard one's.
 - **Browsing.** One mode at a time — Movies, TV, Music, Artists — with an owner
   filter, format pills, search that matches the artist as well as the title,
   list and poster views, and tallies that add up. Titles file under the first

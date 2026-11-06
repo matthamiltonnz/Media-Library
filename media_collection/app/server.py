@@ -40,6 +40,12 @@ import stores
 PORT = int(os.environ.get("PORT", "8099"))
 DB_PATH = os.environ.get("DB_PATH", "/data/media.db")
 OPTIONS_PATH = "/data/options.json"
+COVERS_DIR = os.environ.get("COVERS_DIR") or os.path.join(
+    os.path.dirname(DB_PATH), "covers")
+COVER_MIME = {".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+              ".png": "image/png", ".gif": "image/gif",
+              ".webp": "image/webp"}
+MAX_COVER_BYTES = 6 * 1024 * 1024
 
 # One add at a time. A POST that starts a title then spends seconds looking
 # its metadata up holds this, so three impatient clicks cannot each pass the
@@ -1114,6 +1120,37 @@ def field(form, name):
     return (form.get(name) or [""])[0].strip()
 
 
+def image_ext(blob):
+    """(.ext, content type) for an uploaded picture, or ("", "") if it is none.
+
+    A browser sends the file name and a content type, and both can be made
+    up by any client; the first bytes of the file cannot be.
+    """
+    if blob.startswith(b"\x89PNG\r\n\x1a\n"):
+        return ".png", "image/png"
+    if blob.startswith(b"\xff\xd8\xff"):
+        return ".jpg", "image/jpeg"
+    if blob.startswith((b"GIF87a", b"GIF89a")):
+        return ".gif", "image/gif"
+    if blob[:4] == b"RIFF" and blob[8:12] == b"WEBP":
+        return ".webp", "image/webp"
+    return "", ""
+
+
+def _forget_cover_file(url):
+    """Delete an uploaded picture from the disk once nothing shows it."""
+    url = (url or "").strip()
+    if not url.startswith("/cover/"):
+        return
+    name = os.path.basename(url)
+    if not name:
+        return
+    try:
+        os.remove(os.path.join(COVERS_DIR, name))
+    except OSError:
+        pass
+
+
 def _title_row(con, title, year):
     """The title a POST is about, matched the way the catalogue files it."""
     return con.execute(
@@ -1364,7 +1401,15 @@ def parse_multipart(body, content_type):
         if not name_match:
             continue
         name = name_match.group(1).decode("utf-8", "replace")
-        fields.setdefault(name, []).append(data.rstrip(b"\r\n").decode("utf-8", "replace"))
+        # a part that names a file is kept as bytes: decoding a picture
+        # with "replace" would destroy it, and an upload is the only
+        # reason this reader sees one
+        payload = data[:-2] if data.endswith(b"\r\n") else data
+        if b"filename=" in head:
+            fields.setdefault(name, []).append(payload)
+        else:
+            fields.setdefault(name, []).append(
+                payload.decode("utf-8", "replace"))
     return fields
 
 
@@ -1570,6 +1615,18 @@ class Handler(BaseHTTPRequestHandler):
                                         "image/jpeg")
                 except jellyfin.JellyfinError:
                     return self.respond(404, "", "text/plain; charset=utf-8")
+            match = re.search(r"/cover/([A-Za-z0-9._-]+)$", route)
+            if match:
+                name = match.group(1)
+                path = os.path.join(COVERS_DIR, name)
+                if not name.startswith(".") and os.path.isfile(path):
+                    with open(path, "rb") as handle:
+                        blob = handle.read()
+                    return self.respond(
+                        200, blob,
+                        COVER_MIME.get(os.path.splitext(name)[1].lower(),
+                                       "image/jpeg"))
+                return self.respond(404, "", "text/plain; charset=utf-8")
             if route.rstrip("/").endswith("/nowplaying"):
                 wanted = (parse_qs(urlparse(self.path).query).get("session")
                           or [""])[0]
@@ -1746,6 +1803,12 @@ class Handler(BaseHTTPRequestHandler):
                     FORMAT_LABELS, "grid" if want == "grid" else "list",
                     notice, bool(asked.get("mbid_error"))))
 
+            covers = re.search(r"/title/(\d+)/covers/?$", route)
+            if covers:
+                asked = (parse_qs(urlparse(self.path).query).get("q")
+                         or [""])[0].strip()
+                return self.respond(200, self.cover_page(
+                    con, viewer, base, int(covers.group(1)), asked))
             # detail page, always last so /title/<id>/metadata is handled in POST
             linking = re.search(r"/title/(\d+)/link/?$", route)
             if linking:
@@ -1810,6 +1873,75 @@ class Handler(BaseHTTPRequestHandler):
                    title_id, html.escape(term), html.escape(note), rows))
         return ui.page(base, "Link to Jellyfin", body,
                        back="title/%d" % title_id)
+
+    def cover_page(self, con, viewer, base, title_id, term=""):
+        """Every cover the keyless sources hold for one title, to pick from.
+
+        A title can carry one picture, and the automatic lookup only ever finds
+        the standard edition's - so this page lists every edition the two free
+        sources know, and any of them can be chosen with one click.
+        """
+        row = con.execute(
+            "SELECT t.*, a.name AS artist_name FROM titles t"
+            "  LEFT JOIN artists a ON a.id = t.artist_id"
+            " WHERE t.id = ?", (title_id,)).fetchone()
+        if row is None:
+            return self.respond(404, "No such title",
+                                "text/plain; charset=utf-8")
+        artist_mbid = ""
+        if row["artist_id"]:
+            looked = con.execute("SELECT musicbrainz_id FROM artists"
+                                 " WHERE id = ?",
+                                 (row["artist_id"],)).fetchone()
+            if looked:
+                artist_mbid = (looked["musicbrainz_id"] or "").strip()
+        found, note = metadata.cover_search(row, term, artist_mbid or None)
+        tiles = "".join(
+            '<form method="post" action="%stitle/%d/art">'
+            '<input type="hidden" name="source" value="poster">'
+            '<input type="hidden" name="url" value="%s">'
+            '<button type="submit" title="Use this one">'
+            '<img src="%s" alt="" loading="lazy">'
+            '<span>%s</span></button></form>'
+            % (html.escape(base), title_id, html.escape(item["url"]),
+               html.escape(item["url"]), html.escape(item["label"]))
+            for item in found)
+        words = (term or "").strip() or " ".join(
+            part for part in ((row["artist_name"] or "").strip(),
+                              (row["name"] or "").strip()) if part)
+        body = ('<h2>Covers for %s</h2>'
+                '<form method="get" action="%stitle/%d/covers">'
+                '<label>Search<input name="q" value="%s"></label> '
+                '<button type="submit">Search</button></form>'
+                '<p class="sub">%s</p>'
+                '<div class="covers">%s</div>'
+                % (html.escape(row["name"] or ""), html.escape(base), title_id,
+                   html.escape(words), html.escape(note or ""), tiles))
+        if not found:
+            body += ('<p class="sub">Try the search box: a shop files its cover '
+                     'under the name it sells it by, which is not always the '
+                     'name on the shelf.</p>')
+        body += ('<section class="panel"><h2>Upload a picture</h2>'
+                 '<form class="upload" method="post"'
+                 ' enctype="multipart/form-data" action="%stitle/%d/cover">'
+                 '<label>Image file<input type="file" name="image" required'
+                 ' accept="image/png,image/jpeg,image/webp,image/gif"></label>'
+                 '<button type="submit">Upload</button></form>'
+                 '<p class="sub">A JPEG, PNG, WebP or GIF up to 6 MB. It is kept '
+                 'with the catalogue, so it does not depend on the page it came '
+                 'from.</p></section>'
+                 '<section class="panel"><h2>Use an image from a link</h2>'
+                 '<form method="post" action="%stitle/%d/art">'
+                 '<input type="hidden" name="source" value="poster">'
+                 '<label>Image address<input type="url" name="url"'
+                 ' placeholder="https://example.com/cover.jpg"></label> '
+                 '<button type="submit">Use this image</button></form>'
+                 '<p class="sub">Any address a browser can reach - a Wikipedia '
+                 'file, a record shop, a scan you put online somewhere.</p>'
+                 '</section>'
+                 % (html.escape(base), title_id, html.escape(base), title_id))
+        return ui.page(base, "Cover art", body, back="title/%d" % title_id,
+                       back_label="\u2190 Back to the title")
 
     def title_page(self, con, viewer, base, title_id, summary=None, error=None,
                    owner=None):
@@ -2250,6 +2382,48 @@ class Handler(BaseHTTPRequestHandler):
                 return self.respond(303, "", extra={
                     "Location": base + "admin?jellyfin=#jellyfin" + quote(message)})
 
+            match = re.search(r"/title/(\d+)/cover/?$", route)
+            if match:
+                title_id = int(match.group(1))
+                blob = (form.get("image") or [b""])[0]
+                if not isinstance(blob, bytes):
+                    blob = b""
+                ext, kind = image_ext(blob)
+                if not ext:
+                    return self.title_page(
+                        con, viewer, base, title_id,
+                        error="That file is not a JPEG, PNG, WebP or GIF "
+                              "image.")
+                if len(blob) > MAX_COVER_BYTES:
+                    return self.title_page(
+                        con, viewer, base, title_id,
+                        error="That image is %.1f MB - the limit is %d MB."
+                        % (len(blob) / 1048576.0,
+                           MAX_COVER_BYTES // 1048576))
+                try:
+                    os.makedirs(COVERS_DIR, exist_ok=True)
+                    name = "t%d-%d%s" % (title_id,
+                                         int(time.time() * 1000), ext)
+                    with open(os.path.join(COVERS_DIR, name), "wb") as out:
+                        out.write(blob)
+                except OSError as exc:
+                    return self.title_page(
+                        con, viewer, base, title_id,
+                        error="Could not keep the image: %s" % exc)
+                before = con.execute(
+                    "SELECT poster_url FROM titles WHERE id = ?",
+                    (title_id,)).fetchone()
+                url = "/cover/" + name
+                con.execute("UPDATE titles SET poster_url = ?,"
+                            " art_source = 'poster',"
+                            " metadata_updated_at = datetime('now')"
+                            " WHERE id = ?", (url, title_id))
+                metadata.remember_art(con, title_id, "upload", url)
+                con.commit()
+                if before and (before["poster_url"] or "") not in ("", url):
+                    _forget_cover_file(before["poster_url"])
+                return self.respond(303, "", extra={
+                    "Location": base + "title/%d" % title_id})
             match = re.search(r"/title/(\d+)/art/?$", route)
             if match:
                 title_id = int(match.group(1))
@@ -2279,14 +2453,21 @@ class Handler(BaseHTTPRequestHandler):
                         con.execute("UPDATE titles SET poster_url = NULL,"
                                     " art_source = NULL WHERE id = ?",
                                     (title_id,))
+                    _forget_cover_file(url)
                 elif source == "jellyfin":
                     con.execute("UPDATE titles SET art_source = 'jellyfin'"
                                 " WHERE id = ?", (title_id,))
                 elif source == "poster" and url.startswith(("http://",
                                                             "https://", "/")):
+                    before_art = con.execute(
+                        "SELECT poster_url FROM titles WHERE id = ?",
+                        (title_id,)).fetchone()
                     con.execute("UPDATE titles SET poster_url = ?,"
                                 " art_source = 'poster' WHERE id = ?",
                                 (url, title_id))
+                    metadata.remember_art(con, title_id, "chosen", url)
+                    if before_art and before_art["poster_url"] != url:
+                        _forget_cover_file(before_art["poster_url"])
                 con.commit()
                 return self.respond(303, "", extra={
                     "Location": base + "title/%d" % title_id})
@@ -2455,7 +2636,8 @@ class Handler(BaseHTTPRequestHandler):
                 kind = field(form, "kind") or "movie"
                 new_imdb = (field(form, "imdb_id") or "").strip() or None
                 before = con.execute(
-                    "SELECT imdb_id, tmdb_id, release_year, kind FROM titles"
+                    "SELECT imdb_id, tmdb_id, release_year, kind,"
+                    " musicbrainz_id FROM titles"
                     " WHERE id = ?", (title_id,)).fetchone()
                 new_year = int(year) if len(year) == 4 else None
                 new_tmdb = int(tmdb) if tmdb else None
@@ -2481,6 +2663,7 @@ class Handler(BaseHTTPRequestHandler):
                 changed = (new_imdb != before["imdb_id"]
                            or new_tmdb != before["tmdb_id"]
                            or new_year != before["release_year"]
+                           or new_mb != before["musicbrainz_id"]
                            or kind != before["kind"])
                 if changed:
                     # the stored plot/poster belong to whatever matched last time -

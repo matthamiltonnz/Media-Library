@@ -97,6 +97,21 @@ SHELL = """<!doctype html>
   .artpick img { width: 74px; height: 111px; object-fit: cover; display: block; }
   .artpick span { font-size: .7rem; opacity: .7; }
   .artpick.current button { outline: 2px solid #4a9c6d; outline-offset: 1px; }
+  /* the cover-art search page: one tile per cover the lookups found */
+  .covers { display: flex; flex-wrap: wrap; gap: .7rem; margin: 1rem 0; }
+  .covers form { margin: 0; }
+  .covers button { display: block; padding: 0; max-width: 9.5rem;
+                   border: 1px solid #8886; border-radius: 8px;
+                   overflow: hidden; background: none; }
+  .covers img { display: block; width: 9.5rem; height: 9.5rem;
+                object-fit: contain; background: #8881; }
+  .covers span { display: block; padding: .3rem .4rem; font-size: .68rem;
+                 line-height: 1.2; text-align: left; opacity: .78;
+                 white-space: normal; }
+  form.upload { display: flex; flex-wrap: wrap; gap: .5rem;
+                align-items: end; margin: 0 0 .6rem; }
+  form.upload label { flex: 1 1 12rem; min-width: 0; }
+  form.upload input { max-width: 100%; }
   button.danger { border-color: #b4453c; color: #e8837a; }
   dialog.sheet { border: 1px solid #8886; border-radius: 10px; padding: 1.2rem 1.4rem;
                  max-width: 34rem; width: 92%; background: Canvas; color: CanvasText;
@@ -463,6 +478,22 @@ NOW_PLAYING = """<style>
 """
 
 
+def cover_url(base, url):
+    """Where a stored poster url is actually served from.
+
+    A looked-up poster is an absolute http(s) url, but an uploaded picture is
+    a file on the add-on's own disk, kept as "/cover/<file>" and served by
+    this app - so it is resolved against the page's base path, which is not
+    "/" under Home Assistant ingress.
+    """
+    url = (url or "").strip()
+    if url.startswith("/cover/"):
+        return base + url[1:]
+    if not url or url.startswith(("http://", "https://", "/")):
+        return url
+    return base + url
+
+
 def pick_cover(base, jf_id, poster_url, art_source=""):
     """The image to show for a title: a chosen one first, else Jellyfin, else the poster.
 
@@ -471,10 +502,10 @@ def pick_cover(base, jf_id, poster_url, art_source=""):
     """
     still = base + "art/" + jf_id if jf_id else ""
     if art_source == "poster" and poster_url:
-        return poster_url
+        return cover_url(base, poster_url)
     if art_source == "jellyfin" and still:
         return still
-    return still or (poster_url or "")
+    return still or cover_url(base, poster_url)
 
 
 def page(base, title, content, back="",

@@ -438,6 +438,29 @@ it), and falls back to the `poster_url` the metadata refresh stored. Wikipedia o
 carried a poster for a quarter of the films; Jellyfin has one for everything it
 indexed, films and albums alike.
 
+The pencil on the corner of a cover changes that choice. It lists every image a
+lookup has offered so far (a title with no cover at all gets a *Choose cover art*
+button in the same place), each with a small x to forget it, plus *Automatic*
+(Jellyfin first, then the poster).
+
+Two more ways to get a picture, both at the bottom of that sheet:
+
+- **Search for other covers** opens a page of every cover the free sources hold.
+  Albums come from the iTunes Search API (one picture per edition the shop sells)
+  and from MusicBrainz, whose editions the Cover Art Archive answers for one at a
+  time - so a deluxe edition's sleeve is there to pick, not just the standard
+  one's. Films and seasons come from Wikipedia, whose articles each carry a
+  poster. Nothing is copied: the page lists urls and the browser draws them.
+- **Upload an image file** (JPEG, PNG, WebP or GIF, up to 6 MB) keeps the picture
+  with the catalogue, under `/data/covers`, and serves it at `/cover/<file>`. It
+  survives the source going away, which is what a photographed sleeve needs.
+
+For music, a stored `musicbrainz_id` that names a *release* (one edition) now
+gives that edition's own front cover from the Cover Art Archive; only when that
+release has none does the album's standard cover stand in. A cover picked by hand
+is never overwritten by a refresh - the fetched one is offered in the sheet
+instead.
+
 ## If an upgrade fails
 
 Each migration runs in one transaction, so a failure leaves nothing half-applied.

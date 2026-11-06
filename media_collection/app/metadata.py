@@ -248,10 +248,15 @@ def split_artist_album(name):
     return None, text
 
 
-def cover_art(mbid, size=500):
-    """Front cover from the Cover Art Archive, or None if the release has none."""
+def cover_art(mbid, size=500, kind="release-group"):
+    """Front cover from the Cover Art Archive, or None if there is none.
+
+    kind is "release-group" for the picture an album is known by, or
+    "release" for one edition's own - which is the only way a deluxe edition
+    can show its cover instead of the standard one's.
+    """
     try:
-        payload = _get("https://coverartarchive.org/release-group/%s" % mbid)
+        payload = _get("https://coverartarchive.org/%s/%s" % (kind, mbid))
     except Exception:
         return None
     for image in payload.get("images") or []:
@@ -264,6 +269,156 @@ def cover_art(mbid, size=500):
                 url = "https://" + url[len("http://"):]
             return url
     return None
+
+
+ITUNES_SEARCH = "https://itunes.apple.com/search"
+COVER_ARCHIVE = "https://coverartarchive.org/release/%s/front-500"
+COVER_LIMIT = 40
+
+
+def _art_size(url, size=600):
+    """iTunes serves every picture as .../100x100bb.jpg - ask for a bigger one."""
+    return re.sub(r"/\d+x\d+bb\.", "/%dx%dbb." % (size, size), url or "")
+
+
+def _cover_label(*parts):
+    return " \u00b7 ".join(str(part) for part in parts if part)
+
+
+def _itunes_covers(term, entity):
+    """What one shop sells under a name - one request, no key needed."""
+    params = urllib.parse.urlencode({"term": term, "entity": entity,
+                                     "limit": "25"})
+    try:
+        payload = _get(ITUNES_SEARCH + "?" + params, timeout=20)
+    except Exception:
+        return []
+    return payload.get("results") or []
+
+
+def _musicbrainz_covers(album, artist, artist_mbid, notes):
+    """One entry per edition MusicBrainz files, pictures fetched by the browser.
+
+    The Cover Art Archive answers /release/<id>/front-500 with the picture
+    itself (a redirect to archive.org), so listing a shelf of editions costs
+    one search request here and nothing at all until a tile is drawn.
+    """
+    clauses = ['release:"%s"' % (album or "").replace('"', "")]
+    if artist_mbid:
+        clauses.append("arid:%s" % artist_mbid)
+    elif artist:
+        clauses.append('artist:"%s"' % artist.replace('"', ""))
+    params = urllib.parse.urlencode({"query": " AND ".join(clauses),
+                                     "fmt": "json", "limit": "25"})
+    try:
+        time.sleep(MB_PAUSE)
+        payload = _get(MB_ROOT + "/release?" + params)
+    except Throttle:
+        notes.append("MusicBrainz is rate-limiting us, so the editions it "
+                     "files are missing from this list - try again in a minute.")
+        return []
+    except Exception as exc:
+        notes.append("MusicBrainz could not be asked: %s" % exc)
+        return []
+    found = []
+    for release in payload.get("releases") or []:
+        rid = release.get("id")
+        if not rid:
+            continue
+        media = release.get("media") or [{}]
+        found.append({
+            "source": "MusicBrainz",
+            "url": COVER_ARCHIVE % rid,
+            "label": _cover_label(release.get("title"), release.get("date"),
+                                  release.get("country"),
+                                  (media[0] or {}).get("format"),
+                                  release.get("disambiguation")),
+        })
+    return found
+
+
+def _wikipedia_covers(words):
+    """A poster per Wikipedia article a name finds.
+
+    PageImages no longer answers anonymous callers, so each hit's REST summary
+    is asked for its lead picture instead: one request per article, and only a
+    handful of articles.
+    """
+    params = urllib.parse.urlencode({"q": words, "limit": "6"})
+    try:
+        payload = _get("https://en.wikipedia.org/w/rest.php/v1/search/page?"
+                       + params)
+    except Exception:
+        return []
+    found = []
+    for page in (payload.get("pages") or [])[:6]:
+        title = (page.get("title") or "").strip()
+        if not title:
+            continue
+        try:
+            summary = _get("https://en.wikipedia.org/api/rest_v1/page/summary/"
+                           + urllib.parse.quote(title.replace(" ", "_")),
+                           timeout=15)
+        except Exception:
+            continue
+        image = ((summary.get("originalimage") or {}).get("source")
+                 or (summary.get("thumbnail") or {}).get("source") or "")
+        if not image:
+            continue
+        found.append({"source": "Wikipedia",
+                      "url": image.split("?")[0],
+                      "label": _cover_label(title, summary.get("description"))})
+    return found
+
+
+def cover_search(row, term="", artist_mbid=None):
+    """Every cover the free sources hold for one title, and a note when none.
+
+    Albums: the iTunes Search API, which sells one picture per edition, and
+    MusicBrainz, whose editions the Cover Art Archive answers for one by one -
+    the browser fetches those, so a search costs one request here. Films and
+    seasons: Wikipedia, whose articles each carry a poster. Nothing is
+    downloaded: a result is a url, drawn when the tile is.
+    """
+    kind = (row["kind"] or "movie").lower()
+    artist = ""
+    if "artist_name" in row.keys():
+        artist = (row["artist_name"] or "").strip()
+    album = (row["name"] or "").strip()
+    words = ((term or "").strip()
+             or " ".join(part for part in (artist, album) if part))
+    if not words:
+        return [], "Nothing to search for yet - give the title a name."
+    found, notes = [], []
+    if kind == "music":
+        hits = _itunes_covers(words, "album")
+        if artist:
+            # a shop's search is fuzzy - another band's record of the same name
+            # comes back too - so the act the title is filed under wins
+            same = [hit for hit in hits
+                    if artist.lower() in (hit.get("artistName") or "").lower()]
+            if same:
+                hits = same
+        for hit in hits:
+            url = _art_size(hit.get("artworkUrl100"))
+            if not url:
+                continue
+            found.append({"source": "iTunes", "url": url,
+                          "label": _cover_label(
+                              hit.get("collectionName"),
+                              (hit.get("releaseDate") or "")[:4],
+                              hit.get("country"))})
+        found.extend(_musicbrainz_covers(album, artist, artist_mbid, notes))
+    if not found:
+        found.extend(_wikipedia_covers(words))
+    seen, covers = set(), []
+    for cover in found:
+        if cover["url"] not in seen:
+            seen.add(cover["url"])
+            covers.append(cover)
+    if not covers:
+        notes.append("No cover art found for \u201c%s\u201d." % words)
+    return covers[:COVER_LIMIT], " ".join(notes)
 
 
 def musicbrainz_artist(name):
@@ -362,6 +517,7 @@ def musicbrainz_release(mbid):
     catalogue has historically stored whichever the lookup found first.
     """
     group = None
+    release_id = None
     try:
         group = _get("%s/release-group/%s?inc=artist-credits&fmt=json"
                      % (MB_ROOT, mbid))
@@ -391,7 +547,14 @@ def musicbrainz_release(mbid):
             (part.get("name") or "") + (part.get("joinphrase") or "")
             for part in release.get("artist-credit") or [])
         art_id = group.get("id") or mbid
+        release_id = release.get("id") or mbid
     time.sleep(MB_PAUSE)
+    cover = None
+    if release_id:          # one edition: its own picture, not the group's
+        cover = cover_art(release_id, kind="release")
+        time.sleep(MB_PAUSE)
+    if not cover:
+        cover = cover_art(art_id)
     return {
         "mbid": mbid,
         "title": title,
@@ -399,7 +562,7 @@ def musicbrainz_release(mbid):
         "date": date,
         "year": int(date[:4]) if date[:4].isdigit() else None,
         "types": " \u00b7 ".join(part for part in types if part),
-        "cover": cover_art(art_id),
+        "cover": cover,
     }
 
 
@@ -440,7 +603,12 @@ def refresh_music(con, row):
     if found["year"]:
         updates["release_year"] = found["year"]
     if found["cover"]:
-        updates["poster_url"] = found["cover"]
+        # every cover a lookup offers is kept, so the pencil can switch
+        # between editions; but a cover the household picked stays
+        remember_art(con, row["id"], "musicbrainz", found["cover"])
+        if not ((row["art_source"] or "") == "poster"
+                and (row["poster_url"] or "")):
+            updates["poster_url"] = found["cover"]
     words = ["%s by %s" % (found["title"], found["credit"]) if found["credit"]
              else found["title"]]
     if found["date"]:

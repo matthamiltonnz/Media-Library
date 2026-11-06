@@ -575,7 +575,7 @@ def _title_form(base, row):
              options, ids)
 
 
-def _art_block(base, row, jellyfin_link):
+def _art_block(base, row, jellyfin_link, inline=False):
     """The pencil on the cover: which image the shelf shows, and forgetting one.
 
     It used to be a paragraph-wide *Choose cover art* button under the picture,
@@ -600,8 +600,8 @@ def _art_block(base, row, jellyfin_link):
                                      for pick in picks):
         picks.append(("poster", row["poster_url"],
                       row["metadata_source"] or "poster"))
-    if not picks:                    # nothing to choose between
-        return ""
+    # a title with nothing to choose between still gets the sheet: searching
+    # for a cover and uploading one are how it gains a picture at all
     current = ui.pick_cover(base,
                             jellyfin_link["jf_id"] if jellyfin_link else None,
                             row["poster_url"], row["art_source"] or "")
@@ -614,8 +614,9 @@ def _art_block(base, row, jellyfin_link):
         '<button type="submit" name="action" value="forget" class="forget"'
         ' title="Forget this image" aria-label="Forget this image">\u00d7'
         '</button></form>'
-        % (" current" if url == current else "", _text(base), row["id"],
-           _text(kind), _text(url), _text(url), _text(label))
+        % (" current" if ui.cover_url(base, url) == current else "",
+           _text(base), row["id"], _text(kind), _text(url),
+           _text(ui.cover_url(base, url)), _text(label))
         for kind, url, label in picks)
     automatic = (
         '<form class="artpick%s" method="post" action="%stitle/%d/art">'
@@ -627,13 +628,26 @@ def _art_block(base, row, jellyfin_link):
     pencil = ('<button type="button" class="coveredit" data-open="artpick"'
               ' title="Choose the cover image"'
               ' aria-label="Choose the cover image">\u270e</button>')
-    return (pencil
+    # a title with no picture at all has no cover to put a pencil on, which
+    # is why the sheet is reachable from a button of its own there
+    button = ('<button type="button" class="artadd" data-open="artpick">'
+              'Choose cover art</button>') if inline else pencil
+    more = ('<p class="sub"><a href="%stitle/%d/covers">Search for other'
+            ' covers</a> &middot; or upload a picture of your own.</p>'
+            '<form class="upload" method="post" enctype="multipart/form-data"'
+            ' action="%stitle/%d/cover">'
+            '<label>Image file<input type="file" name="image" required'
+            ' accept="image/png,image/jpeg,image/webp,image/gif"></label>'
+            '<button type="submit">Upload</button></form>'
+            % (_text(base), row["id"], _text(base), row["id"]))
+    return (button
             + '<dialog id="artpick"><h2>Cover art</h2>'
             '<p class="sub">Pick the image the shelf shows for %s.</p>'
             '<div class="artpicks">%s%s</div>'
+            '%s'
             '<form method="dialog"><p><button type="submit">Close</button></p>'
             '</form></dialog>'
-            % (_text(row["name"]), cells, automatic))
+            % (_text(row["name"]), cells, automatic, more))
 
 
 def render(base, row, items, digital, formats, labels, summary=None, error=None,
@@ -658,6 +672,8 @@ def render(base, row, items, digital, formats, labels, summary=None, error=None,
                      % ('<img class="cover" src="%s" alt="" loading="lazy">'
                         % _text(cover),
                         _art_block(base, row, jellyfin_link)))
+    else:
+        parts.append(_art_block(base, row, jellyfin_link, inline=True))
 
     facts = _facts(row, base)
     if facts:

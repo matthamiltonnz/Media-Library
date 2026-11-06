@@ -26,7 +26,7 @@ def _cover(base, jf_id, poster_url):
     """Jellyfin's picture when the album is linked, else what MusicBrainz gave."""
     if jf_id:
         return base + "art/" + jf_id
-    return poster_url or ""
+    return ui.cover_url(base, poster_url)
 
 
 def _thumb(base, jf_id, poster_url):
