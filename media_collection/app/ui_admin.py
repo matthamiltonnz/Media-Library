@@ -108,9 +108,11 @@ def _refresh_block(base, refresh):
                     refresh["updated"], refresh["failed"]))
         action = '<button type="submit" disabled>Waiting…</button>'
     elif refresh.get("running"):
-        state = ("Refreshing %d/%d — %d updated, %d missed, %d rate-limited (started %s)."
+        state = ("Refreshing %d/%d — %d updated, %d filed, %d missed, "
+                 "%d rate-limited (started %s)."
                  % (refresh["done"], refresh["total"], refresh["updated"],
-                    refresh["failed"], refresh.get("throttled", 0), refresh["started"]))
+                    refresh.get("filed", 0), refresh["failed"],
+                    refresh.get("throttled", 0), refresh["started"]))
         action = '<button type="submit" disabled>Running…</button>'
     elif refresh.get("paused"):
         state = ("Paused at %d/%d — Wikimedia rate-limited the requests (%d updated, "
@@ -119,25 +121,43 @@ def _refresh_block(base, refresh):
                                refresh["failed"]))
         action = '<button type="submit">Resume refresh</button>'
     elif refresh.get("finished"):
-        state = ("Last run finished %s: %d updated, %d missed, %d rate-limited of %d."
-                 % (refresh["finished"], refresh["updated"], refresh["failed"],
+        state = ("Last run finished %s: %d updated, %d filed, %d missed, "
+                 "%d rate-limited of %d."
+                 % (refresh["finished"], refresh["updated"],
+                    refresh.get("filed", 0), refresh["failed"],
                     refresh.get("throttled", 0), refresh["total"]))
         action = '<button type="submit">Refresh metadata</button>'
     else:
         state = "Never run."
         action = '<button type="submit">Refresh metadata</button>'
     last = refresh.get("last") or ""
+    hours = refresh.get("auto_hours") or 0
+    nxt = refresh.get("auto_next") or 0
+    if not hours:
+        auto = ("The automatic pass is off - set refresh_hours to 24 for daily, "
+                "168 for weekly, or leave 0 to look things up only when asked.")
+    else:
+        span = {24: "daily at 03:00", 168: "weekly"}.get(
+            hours, "every %d hours" % hours)
+        auto = "Automatic pass %s." % span
+        if nxt:
+            auto += " Next one %s." % time.strftime("%a %H:%M",
+                                                    time.localtime(nxt))
     return """
 <div id="refresh-panel" data-running="%s" data-status="%sadmin/status.json">
   <p id="refresh-state">%s</p>
   <p id="refresh-last" class="muted">%s</p>
+  <p class="muted">%s</p>
   <form method="post" action="%sadmin/refresh">
     %s
-    <p class="muted">One button, both lookups: films and TV from
-      Wikipedia/Wikidata, albums from MusicBrainz, and for every act its
+    <p class="muted">One button, every lookup: films and TV from
+      Wikipedia/Wikidata, albums from MusicBrainz, for every act its
       MusicBrainz id, country, start year and kind plus a biography, portrait
-      and reading links from Wikipedia. Only what is missing is asked for, and
-      the same thing runs by itself when the add-on starts.</p>
+      and reading links from Wikipedia, and for every film the series it
+      belongs to - which is what fills the collections. Only what is missing is
+      asked for: a film that already has its metadata but no collection gets
+      its series looked up, not a fresh copy of everything. The same thing runs
+      by itself when the add-on starts, and again on the schedule above.</p>
     <label class="check"><input type="checkbox" name="force" value="1"> also
       overwrite titles that already have metadata</label>
   </form>
@@ -161,7 +181,8 @@ def _refresh_block(base, refresh):
         } else {
           document.getElementById('refresh-state').textContent =
             'Refreshing ' + s.done + '/' + s.total + ' — ' + s.updated + ' updated, ' +
-            s.failed + ' missed, ' + s.throttled + ' rate-limited.';
+            (s.filed || 0) + ' filed, ' + s.failed + ' missed, ' +
+            s.throttled + ' rate-limited.';
         }
         document.getElementById('refresh-last').textContent = s.last || '';
         window.setTimeout(poll, 3000);
@@ -172,7 +193,7 @@ def _refresh_block(base, refresh):
 })();
 </script>
 """ % (running, html.escape(base), html.escape(state), html.escape(last),
-       html.escape(base), action)
+       html.escape(auto), html.escape(base), action)
 
 
 def _roots_block(base, roots):

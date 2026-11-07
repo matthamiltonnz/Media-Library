@@ -11,17 +11,23 @@ import metadata
 
 _LOCK = threading.Lock()
 STATE = {
-    "running": False, "done": 0, "total": 0, "updated": 0, "failed": 0,
+    "running": False, "done": 0, "total": 0, "updated": 0, "filed": 0, "failed": 0,
     "throttled": 0, "started": None, "finished": None, "force": False,
     "last": "", "paused": False, "waiting": False, "next_try": 0,
 }
 
 
+AUTO = {"hours": 0, "next": 0.0}
+
+
 def status():
-    return dict(STATE)
+    state = dict(STATE)
+    state["auto_hours"] = AUTO["hours"]
+    state["auto_next"] = AUTO["next"]
+    return state
 
 
-def start(db_path, force=False, pause=0.4, limit=None):
+def start(db_path, force=False, pause=1.2, limit=None):
     """Look up the titles that are missing metadata, in the background.
 
     `limit` bounds a run: the add-on refreshes a handful on every start (the
@@ -38,7 +44,7 @@ def start(db_path, force=False, pause=0.4, limit=None):
         if not targets:
             return False
         STATE.update(running=True, force=force, done=0, total=len(targets),
-                     updated=0, failed=0, throttled=0, last="", paused=False,
+                     updated=0, filed=0, failed=0, throttled=0, last="", paused=False,
                      waiting=False, next_try=0, finished=None,
                      started=time.strftime("%Y-%m-%d %H:%M:%S"))
     threading.Thread(target=_run, args=(db_path, targets, pause), daemon=True).start()
@@ -66,29 +72,63 @@ def _targets(db_path, force):
                     "         OR (tmdb_id IS NOT NULL"
                     "             AND COALESCE(metadata_source, '')"
                     "                 NOT LIKE '%tmdb%')))")
-        return [row[0] for row in con.execute(sql + " ORDER BY name")]
+        found = [row[0] for row in con.execute(sql + " ORDER BY name")]
+        if force:
+            return [(title_id, True) for title_id in found]
+        # A title whose metadata is complete can still have no collection:
+        # the series question costs two or three requests, not a fresh
+        # lookup, so it is asked here rather than by overwriting the
+        # metadata of the whole shelf.
+        series = [row[0] for row in con.execute(
+            "SELECT id FROM titles WHERE kind IN ('movie', 'tv')"
+            "   AND collection_id IS NULL AND series_at IS NULL"
+            " ORDER BY name")]
+        seen = set(found)
+        wanted = [(title_id, False) for title_id in series
+                  if title_id not in seen]
+        # Alternate the two kinds of work, so a run that is bounded (the
+        # add-on looks up sixty at start-up) does some of each rather than
+        # spending the whole of itself on one backlog.
+        merged = []
+        for index in range(max(len(wanted), len(found))):
+            if index < len(wanted):
+                merged.append(wanted[index])
+            if index < len(found):
+                merged.append((found[index], True))
+        return merged
     finally:
         con.close()
 
 
 def _run(db_path, targets, pause):
-    con = sqlite3.connect(db_path, timeout=30)
+    con = sqlite3.connect(db_path, timeout=60)
     con.row_factory = sqlite3.Row
+    con.execute("PRAGMA busy_timeout = 60000")
     con.execute("PRAGMA foreign_keys = ON")
     try:
         wait_seconds = 10 * 60                     # first 429 -> wait 10 minutes
-        for title_id in targets:
+        for title_id, needs_metadata in targets:
             attempts = 0
             while True:
                 try:
-                    result = metadata.refresh(con, title_id)
+                    result = (metadata.refresh(con, title_id)
+                              if needs_metadata
+                              else metadata.fill_series(con, title_id))
                 except Exception as exc:          # never kill the job
                     result = "error: %s" % exc
 
-                if "rate-limited" not in result:
+                if "rate-limited" not in result and "locked" not in result:
                     break
 
                 attempts += 1
+                if "locked" in result:
+                    # the artist job or a page write held the database; that
+                    # passes, and a film is not worth losing to it
+                    STATE["last"] = "database busy - retrying"
+                    if attempts > 4:
+                        break
+                    time.sleep(5)
+                    continue
                 STATE["throttled"] += 1
                 if attempts > 4:
                     STATE["paused"] = True
@@ -113,6 +153,12 @@ def _run(db_path, targets, pause):
                 STATE["updated"] += 1
                 wait_seconds = 10 * 60            # reset the backoff after a good one
                 time.sleep(pause)
+            elif result.startswith("filed under"):
+                STATE["filed"] += 1
+                wait_seconds = 10 * 60
+                time.sleep(pause)
+            elif result == "no series":
+                time.sleep(pause)
             else:
                 STATE["failed"] += 1
                 time.sleep(max(pause, 1.0))
@@ -120,3 +166,56 @@ def _run(db_path, targets, pause):
         con.close()
         STATE["running"] = False
         STATE["finished"] = time.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _until_hour(hour):
+    """Seconds until the next `hour`:00 local time (never less than a minute)."""
+    now = time.localtime()
+    when = list(now)[:6]
+    when[3], when[4], when[5] = int(hour), 0, 0
+    target = time.mktime(tuple(when) + (0, 0, -1))
+    while target <= time.time():
+        target += 24 * 3600
+    return max(60.0, target - time.time())
+
+
+def start_auto(db_path, hours=24, hour_of_day=3, limit=200, also=None):
+    """Run the same pass by itself, so a shelf nobody touches still gets tidied.
+
+    `hours` is the interval - 24 daily, 168 weekly - and 0 turns it off. The
+    first run waits for the next `hour_of_day` (03:00 local) instead of firing
+    at start-up: `main()` already refreshes a bounded handful there, and two
+    passes at once is exactly the burst Wikimedia rate-limits. `limit` bounds a
+    night's work (a shelf holds hundreds of titles no lookup will ever fill);
+    `also` is called after each pass (the artist fill) and is allowed to fail.
+    """
+    try:
+        hours = int(hours)
+    except (TypeError, ValueError):
+        hours = 0
+    AUTO.update(hours=max(0, hours))
+    if hours <= 0:
+        AUTO["next"] = 0.0
+        return False
+    threading.Thread(target=_auto, daemon=True,
+                     args=(db_path, hours, hour_of_day, limit, also)).start()
+    return True
+
+
+def _auto(db_path, hours, hour_of_day, limit, also):
+    while True:
+        wait = _until_hour(hour_of_day)
+        AUTO["next"] = time.time() + wait
+        time.sleep(wait)
+        AUTO["next"] = 0.0
+        try:
+            start(db_path, limit=limit)
+            if also:
+                also()
+        except Exception as exc:        # a background pass must never die
+            print("refresh_job: automatic pass failed (%s)" % exc)
+        if hours != 24:
+            # any other interval counts from this run, not from 03:00 again
+            AUTO["next"] = time.time() + hours * 3600
+            time.sleep(hours * 3600)
+

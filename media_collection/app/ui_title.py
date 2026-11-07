@@ -2,6 +2,7 @@
 
 import html
 import json
+import urllib.parse
 
 import ui
 
@@ -54,7 +55,19 @@ def _quality(source):
     return (source["media_quality"] or "").strip()
 
 
-def _facts(row, base=""):
+def _search_of(back):
+    """The catalogue search carried by a back target (`?q=alien&kind=movie`).
+
+    A title page knows the filters the viewer arrived with; the collection link
+    under the title hands that word on, so the series opens with the same search
+    applied to its films (0.23.166).
+    """
+    if not back or "?" not in back:
+        return ""
+    return (urllib.parse.parse_qs(back.split("?", 1)[1]).get("q") or [""])[0]
+
+
+def _facts(row, base="", search=""):
     """The one-line summary under the title: year, kind, artist, runtime ...
 
     Every part is escaped here, so the caller can drop the result into the page
@@ -75,6 +88,19 @@ def _facts(row, base=""):
                         % (_text(base), artist_id, name))
         else:
             bits.append(name)
+    if "collection_name" in row.keys() and row["collection_name"]:
+        # a series is a shelf of its own - "Hobbs & Shaw" is the eighth Fast &
+        # Furious film and shares none of its words, so a search misses it
+        label = _text(row["collection_name"])
+        collection_id = (row["collection_id"]
+                         if "collection_id" in row.keys() else None)
+        if base and collection_id:
+            bits.append('<a href="%scollection/%d%s">%s</a>'
+                        % (_text(base), collection_id,
+                           "?q=" + urllib.parse.quote(search) if search else "",
+                           label))
+        else:
+            bits.append(label)
     if row["runtime_minutes"]:
         bits.append(_text("%d min" % row["runtime_minutes"]))
     if row["genres"]:
@@ -697,6 +723,64 @@ def _title_form(base, row):
              options, ids)
 
 
+def _collection_block(base, row, collections=()):
+    """Which series this title belongs to - the Fast & Furious shelf.
+
+    A collection has a page of its own holding every film in the series, which
+    is what a search cannot give: the eighth Fast & Furious film is *Hobbs &
+    Shaw* and shares none of its words. The box lists the collections already
+    made and takes a new name as well, so a series can be started from
+    whichever film is in hand.
+    """
+    if (row["kind"] or "") not in ("movie", "tv"):
+        return ""
+    cid = row["collection_id"] if "collection_id" in row.keys() else None
+    name = row["collection_name"] if "collection_name" in row.keys() else ""
+    order = (row["collection_order"]
+             if "collection_order" in row.keys() else None)
+    options = ['<option value="">-</option>']
+    for item in collections:
+        options.append('<option value="%s"%s>%s</option>'
+                       % (_text(item["name"]),
+                          " selected" if item["id"] == cid else "",
+                          _text(item["name"])))
+    if cid and name and not any(item["id"] == cid for item in collections):
+        options.append('<option value="%s" selected>%s</option>'
+                       % (_text(name), _text(name)))
+    if cid:
+        where = ('<p class="sub">In <a href="%scollection/%d">%s</a>%s</p>'
+                 % (_text(base), cid, _text(name),
+                    ", number %d in the series" % order if order else ""))
+    else:
+        where = '<p class="sub">Not in a collection yet.</p>'
+    # Wikidata files most films under their series (P179), so offer to ask - but
+    # only while the title is in none, because a hand-picked collection is never
+    # replaced.
+    ask = ""
+    if not cid:
+        ask = ('<form method="post" action="%stitle/%d/collection/lookup">'
+               '<p class="sub"><button type="submit">Look up its collection'
+               '</button> <span class="muted">Wikidata knows which film series'
+               ' a film belongs to</span></p></form>'
+               % (_text(base), row["id"]))
+    return ('<details class="copy"><summary>Collection</summary>%s'
+            '<form method="post" action="%stitle/%d/collection">'
+            '<input type="hidden" name="kind" value="%s">'
+            '<div class="grid">'
+            '<label>Collection<select name="collection">%s</select></label>'
+            '<label>... or a new one<input name="new_collection"'
+            ' placeholder="Fast &amp; Furious"></label>'
+            '<label>No. in the series<input name="collection_order"'
+            ' type="number" min="1" value="%s"></label>'
+            '</div>'
+            '<p><button type="submit">Save collection</button>'
+            ' <span class="muted">or pick "-" to take it out</span></p>'
+            '</form>%s</details>'
+            % (where, _text(base), row["id"], _text(row["kind"] or "movie"),
+               "".join(options), _text(order or ""), ask))
+
+
+
 def _art_block(base, row, jellyfin_link, inline=False):
     """The pencil on the cover: which image the shelf shows, and forgetting one.
 
@@ -776,7 +860,7 @@ def render(base, row, items, digital, formats, labels, summary=None, error=None,
            ripped_root="", roots=(), owner=None, players=(), last_player=None,
            jellyfin_link=None, jellyfin_sessions=(),
            jellyfin_configured=False, tab="about", users=(), viewer_id=None,
-           back=None, stores=None, shops=(),
+           back=None, stores=None, shops=(), collections=(),
            back_label="\u2190 Back to the catalogue"):
     _adopt(stores)
     parts = []
@@ -797,7 +881,7 @@ def render(base, row, items, digital, formats, labels, summary=None, error=None,
     else:
         parts.append(_art_block(base, row, jellyfin_link, inline=True))
 
-    facts = _facts(row, base)
+    facts = _facts(row, base, _search_of(back))
     if facts:
         parts.append('<p class="sub">%s</p>' % facts)
 
@@ -825,6 +909,7 @@ def render(base, row, items, digital, formats, labels, summary=None, error=None,
                  '<p><button type="submit">Refresh metadata</button></p>'
                  '</form>' % (_text(base), row["id"]))
     parts.append('</details>')
+    parts.append(_collection_block(base, row, collections))
     # the copies belong on the title page itself, not behind a tab
     copies_on = True
     tabs = ""

@@ -114,6 +114,26 @@ def get(con, artist_id):
                        (artist_id,)).fetchone()
 
 
+def matching(con, viewer_id, query, owner=None):
+    """The acts whose name matches `query`, for the catalogue's results.
+
+    `visible_clause` already finds their albums when you search an act's name,
+    but it shows the records, not the act. This is the row the catalogue turns
+    into a card that opens the artist's page.
+    """
+    needle = (query or "").strip().lower()
+    if not needle:
+        return []
+    found = []
+    for row in all_artists(con, viewer_id):
+        if needle not in (row["name"] or "").lower():
+            continue
+        if owner and str(owner) not in (row["owner_ids"] or "").split(","):
+            continue
+        found.append(row)
+    return found
+
+
 def titles_for(con, artist_id, viewer_id):
     """The albums of one artist this viewer can see, oldest first."""
     sorting.register(con)      # NATSORT is per connection; see sorting.py

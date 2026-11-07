@@ -30,8 +30,10 @@ import clean_job
 import refresh_job
 import scan
 import artists
+import boxsets
 import ui
 import ui_artists
+import ui_boxsets
 import ui_admin
 import ui_title
 import sorting
@@ -148,6 +150,22 @@ def load_options():
             return json.load(fh)
     except (OSError, ValueError):
         return {}
+
+
+def refresh_hours():
+    """How often the automatic metadata pass runs: 24 daily, 168 weekly, 0 off.
+
+    Read from the add-on option, so the household can change it on the
+    Configuration tab without touching the app; MC_REFRESH_HOURS overrides it
+    for a developer running the code directly.
+    """
+    value = os.environ.get("MC_REFRESH_HOURS")
+    if value is None:
+        value = load_options().get("refresh_hours", 24)
+    try:
+        return max(0, min(720, int(value)))
+    except (TypeError, ValueError):
+        return 24
 
 
 OPTIONS = load_options()
@@ -305,8 +323,15 @@ def visible_clause(query="", kind="", owner=None, format="",
         where.append("(t.name LIKE ? OR COALESCE(i.upc_ean, '') = ?"
                      " OR EXISTS (SELECT 1 FROM artists ar"
                      "             WHERE ar.id = t.artist_id"
-                     "               AND ar.name LIKE ?))")
-        params += ["%" + query + "%", query, "%" + query + "%"]
+                     "               AND ar.name LIKE ?)"
+                     # a film answers to its series' name too: a collection
+                     # with one film in it gets no card of its own, and has
+                     # to be reachable by the series name all the same
+                     " OR EXISTS (SELECT 1 FROM collections co"
+                     "             WHERE co.id = t.collection_id"
+                     "               AND co.name LIKE ?))")
+        params += ["%" + query + "%", query, "%" + query + "%",
+                   "%" + query + "%"]
     if kind:
         where.append("t.kind = ?")
         params.append(kind)
@@ -437,6 +462,23 @@ PAGE = Template("""<!doctype html>
   /* virtual cases: the artwork sits inside a drawn box, so a square cover never
      gets cropped into a poster and a Blu-ray looks like a Blu-ray */
   .thumb { position: relative; }
+  /* a collection is several cases in one box: the cover sits in front and two
+     more peek out behind it, so a series is never mistaken for the one film
+     the search found. The three layers stay inside the thumb, because .card
+     clips its contents. */
+  .thumb.stack { padding: 8% 8% 0 0; box-sizing: border-box; background: none; }
+  .thumb.stack::before, .thumb.stack::after {
+      content: ""; position: absolute; left: 0; top: 0;
+      width: 92%; height: 94.67%; border-radius: 5px; z-index: 1;
+      border: 1px solid #8887; box-shadow: 0 2px 5px #0004;
+      background: linear-gradient(180deg, #41454e66, #9aa0ab55); }
+  /* the cases step up and to the right of the cover, which sits at the
+     bottom-left with its lower edge flush with a title card artwork */
+  .thumb.stack::before { left: 4%; top: 2.7%; z-index: 2; }
+  .thumb.stack::after { left: 8%; top: 0; }
+  .thumb.stack > img { position: relative; z-index: 2; border-radius: 5px;
+      box-shadow: 0 0 0 1px #ffffff22, 0 2px 6px #0007; }
+  .thumb.stack > .muted { position: relative; z-index: 2; }
   .thumb.case-music { aspect-ratio: 1 / 1; }
   /* Blu-ray, 3D and 4K cases: coloured plastic with a printed band across the top,
      the way the real boxes look (blue / blue with 3D / black with 4K Ultra HD) */
@@ -514,9 +556,6 @@ PAGE = Template("""<!doctype html>
 <body>
 <h1>Media Collection<a class="admin" href="${base}admin">admin</a></h1>
 <p class="sub"><button type="button" onclick="addcopy.showModal()">+ Add a title</button></p>
-$modes
-<nav class="modes formats">$format_tabs</nav>
-<nav class="modes owners">$owner_tabs</nav>
 <form class="search" method="get" action="$base">
   <input name="q" value="$q" placeholder="Search title or barcode">
   <input type="hidden" name="kind" value="$kind">
@@ -525,6 +564,9 @@ $modes
   $format_hidden
   <button type="submit">Search</button>
 </form>
+$modes
+<nav class="modes formats">$format_tabs</nav>
+<nav class="modes owners">$owner_tabs</nav>
 <p class="sub">$viewtoggle$clear</p>
 $notice
 $error
@@ -841,6 +883,41 @@ ROW = Template("""<tr>
 </tr>""")
 
 
+def _span(row):
+    """'2012-2025' from a first_year/last_year pair, when a row carries one."""
+    first = row["first_year"] if "first_year" in row.keys() else None
+    last = row["last_year"] if "last_year" in row.keys() else None
+    if first and last and first != last:
+        return "%d\u2013%d" % (first, last)
+    return str(first or last or "")
+
+
+def _place_cover(base, row):
+    """The picture for a card that stands for a page rather than a copy."""
+    if "jf_id" in row.keys() and row["jf_id"]:
+        return base + "art/" + row["jf_id"]
+    poster = (row["poster_url"] if "poster_url" in row.keys() else "") or ""
+    if not poster and "member_poster" in row.keys():
+        poster = row["member_poster"] or ""
+    return ui.cover_url(base, poster)
+
+
+def _place_card(base, href, cover, name, caption, stack=False):
+    """A card shaped like a title's, whose link opens an act or a series.
+
+    `stack=True` draws the thumbnail as a stack of cases - the cover in front,
+    two more peeking out behind - because a collection is several films in one
+    box and would otherwise look like the single film that was searched for.
+    """
+    thumb = ('<img src="%s" alt="" loading="lazy">' % html.escape(cover)
+             if cover else '<span class="muted">no image</span>')
+    return ('<a class="card" href="%s%s"><div class="thumb%s">%s</div>'
+            '<div class="cap"><strong>%s</strong>'
+            '<span class="muted">%s</span></div></a>'
+            % (html.escape(base), href, " stack" if stack else "", thumb,
+               html.escape(name), html.escape(caption)))
+
+
 def render_index(con, viewer, base, error=None, query="",
                  view="list", kind="", owner=None, format="", only=False):
     sorting.register(con)      # the card query orders by NATSORT too
@@ -904,13 +981,19 @@ def render_index(con, viewer, base, error=None, query="",
            html.escape(FORMAT_LABELS.get(row["fmt"], row["fmt"])),
            row["n"])
         for row in formats if row["fmt"] != "ripped")
+    # Every row of pills leaves its own dimension out of its tally, so the
+    # numbers agree with one another: the formats (above) count the search,
+    # the kind and the owner; the kind chips count the search, the owner and
+    # the formats; the owners count the search, the kind and the formats. A
+    # search that finds four albums must not sit under "Music 560".
+    mode_clause, mode_extra = visible_clause(query, "", owner, format, only)
     mode_counts = {row["kind"]: row["n"] for row in con.execute(
         "SELECT t.kind AS kind, COUNT(DISTINCT t.id) AS n FROM items i"
         " JOIN titles t ON t.id = i.title_id"
-        " WHERE (i.visibility = 'shared' OR i.owner_id = ?)"
+        " WHERE " + mode_clause +
         " AND i.owner_id IN (SELECT id FROM users"
         "   WHERE username <> 'rips')"
-        " GROUP BY t.kind", (viewer["id"],))}
+        " GROUP BY t.kind", [viewer["id"]] + mode_extra)}
     extra = "".join([   # the filters a kind or owner chip has to keep
         "&amp;q=" + quote(query) if query else "",
         "&amp;format=" + quote(format) if format else "",
@@ -931,23 +1014,21 @@ def render_index(con, viewer, base, error=None, query="",
         "  SELECT 1 FROM items i WHERE i.owner_id = u.id"
         "  AND (i.visibility = 'shared' OR i.owner_id = ?))"
         " ORDER BY u.display_name COLLATE NOCASE", (viewer["id"],)).fetchall()
+    owner_clause, owner_extra = visible_clause(query, kind, None, format, only)
     owner_counts = {row["owner_id"]: row["n"] for row in con.execute(
         "SELECT i.owner_id AS owner_id, COUNT(DISTINCT t.id) AS n FROM items i"
         " JOIN titles t ON t.id = i.title_id"
-        " WHERE (i.visibility = 'shared' OR i.owner_id = ?)%s"
-        " GROUP BY i.owner_id"
-        % (" AND t.kind = ?" if kind else ""),
-        [viewer["id"]] + ([kind] if kind else []))}
+        " WHERE " + owner_clause +
+        " GROUP BY i.owner_id", [viewer["id"]] + owner_extra)}
     # the current kind applies here too, or "Everyone" sits at the all-kinds
     # total while the chips beside it count only this kind
     everyone = con.execute(
         "SELECT COUNT(DISTINCT t.id) FROM items i"
         " JOIN titles t ON t.id = i.title_id"
-        " WHERE (i.visibility = 'shared' OR i.owner_id = ?)"
+        " WHERE " + owner_clause +
         "   AND i.owner_id IN (SELECT id FROM users"
-        "                   WHERE username <> 'rips')"
-        + (" AND t.kind = ?" if kind else ""),
-        [viewer["id"]] + ([kind] if kind else [])).fetchone()[0]
+        "                   WHERE username <> 'rips')",
+        [viewer["id"]] + owner_extra).fetchone()[0]
     owner_tabs = "".join(
         ['<a class="%s" href="%s?kind=%s%s">Everyone<span class="n">%d</span></a>'
          % ("" if owner else "current", html.escape(base), kind,
@@ -959,6 +1040,50 @@ def render_index(con, viewer, base, error=None, query="",
               html.escape(row["display_name"]), owner_counts.get(row["id"], 0))
            for row in owner_rows])
     notice = ""
+    # A search also finds the shelves behind the titles: the act whose name was
+    # typed, the series a film belongs to. They come back as cards of their own
+    # - title-shaped, but the link opens a page rather than a copy.
+    place_cards, place_rows = [], []
+    if query:
+        places = []
+        if kind in ("", "music"):
+            for row in artists.matching(con, viewer["id"], query, owner):
+                places.append((row, "artist/%d" % row["id"], "Artist",
+                               "%d album%s" % (
+                                   row["albums"],
+                                   "" if row["albums"] == 1 else "s"),
+                               _span(row)))
+        if kind in ("", "movie", "tv"):
+            for row in boxsets.matching(con, viewer["id"], query, owner):
+                if kind and (row["kind"] or "") != kind:
+                    continue        # a TV series under Movies is noise
+                if row["films"] < 2:
+                    # one film is not a shelf worth a card of its own - that
+                    # film already answers to the collection's name, because
+                    # visible_clause matches it too
+                    continue
+                places.append((row,
+                               "collection/%d?q=%s" % (row["id"],
+                                                       quote(query)),
+                               "Collection",
+                               "%d film%s" % (
+                                   row["films"],
+                                   "" if row["films"] == 1 else "s"),
+                               _span(row)))
+        for row, href, label, count, span in places:
+            place_cards.append(_place_card(
+                base, href, _place_cover(base, row), row["name"],
+                " \u00b7 ".join(filter(None, [label, count, span])),
+                stack=(label == "Collection")))
+            place_rows.append(
+                '<tr><td><a href="%s%s">%s</a></td><td class="muted">%s</td>'
+                '<td><span class="tag">%s</span></td>'
+                '<td colspan="5" class="muted">%s</td></tr>'
+                % (html.escape(base), href, html.escape(row["name"]),
+                   html.escape(span), label, html.escape(count)))
+    place_cards = "".join(place_cards)
+    place_rows = "".join(place_rows)
+
     if view == "grid":
         clause, extra = visible_clause(query, kind, owner, format,
                                        only)
@@ -1002,7 +1127,7 @@ def render_index(con, viewer, base, error=None, query="",
             " GROUP BY t.id ORDER BY COALESCE(NULLIF(t.sort_name, ''), t.name)"
             " COLLATE NATSORT, t.name COLLATE NATSORT",
             [viewer["id"]] + fmt_owner_params + [viewer["id"]] + extra).fetchall()
-        library = '<div class="cards">%s</div>' % ("".join(
+        library = '<div class="cards">%s</div>' % (place_cards + "".join(
             '<a class="card" href="{0}title/{1}{5}">{2}'
             '<div class="cap"><strong>{3}</strong><span class="muted">{4}</span></div></a>'
             .format(
@@ -1029,7 +1154,7 @@ def render_index(con, viewer, base, error=None, query="",
                     ])))
                 , back_suffix
             )
-            for card in cards) or '<p class="empty">Nothing yet — add your first disc.</p>')
+            for card in cards) or ("" if place_cards else '<p class="empty">Nothing yet — add your first disc.</p>'))
     else:
         body = "".join(
             ROW.substitute(
@@ -1051,10 +1176,11 @@ def render_index(con, viewer, base, error=None, query="",
                 ),
             )
             for r in rows
-        ) or '<tr><td colspan="8" class="empty">Nothing yet — add your first disc.</td></tr>'
+        ) or ("" if place_rows else '<tr><td colspan="8" class="empty">Nothing yet — add your first disc.</td></tr>')
         library = ("<table><thead><tr><th>Title</th><th>Year</th><th>Format</th>"
                    "<th>Owner</th><th>Barcode</th><th>Watched</th><th>Where</th>"
-                   "<th></th></tr></thead><tbody>%s</tbody></table>" % body)
+                   "<th></th></tr></thead><tbody>%s</tbody></table>"
+                   % (place_rows + body))
     return PAGE.substitute(
         base=base,
         nowplaying=ui.NOW_PLAYING,
@@ -1082,8 +1208,11 @@ def render_index(con, viewer, base, error=None, query="",
                        "&amp;owner=%d" % owner if owner else "",
                        (("&amp;format=" + html.escape(format)) if format else ""),
                        "List view" if view == "grid" else "Thumbnails")
-                    + (' · <a href="%sartists">By artist</a>'
-                       % html.escape(base) if kind == "music" else "")),
+                    + (' · <a href="%sartists">Artists</a>'
+                       % html.escape(base) if kind == "music" else "")
+                    + (' · <a href="%scollections">Collections</a>'
+                       % html.escape(base)
+                       if kind in ("", "movie", "tv") else "")),
         library=library,
         format_options="".join(
             '<option value="{0}">{1}</option>'.format(f, FORMAT_LABELS[f]) for f in FORMATS
@@ -1483,6 +1612,37 @@ def stats(con):
     }
 
 
+def series_item_for(con, collection_id, row):
+    """The Wikidata item for a collection, resolved through its own films.
+
+    A series has an id nothing on the shelf stores, so it is found the way the
+    films themselves were filed: ask Wikidata about one of them (IMDb id first,
+    then by name) and keep the answer when it names *this* series. "" when no
+    film here resolves to the collection's name - which is honest, because a
+    collection can be a grouping nobody wrote down in Wikidata.
+    """
+    films = con.execute(
+        "SELECT id, name, release_year, imdb_id FROM titles"
+        " WHERE collection_id = ?"
+        " ORDER BY (imdb_id IS NULL), release_year, id LIMIT 4",
+        (collection_id,)).fetchall()
+    for film in films:
+        try:
+            found = metadata.series_of(film["imdb_id"],
+                                       year=film["release_year"],
+                                       name=film["name"],
+                                       kind=row["kind"] or "movie")
+        except metadata.Throttle:
+            raise
+        except Exception:
+            continue
+        for item in found:
+            if boxsets.same_name(item["name"], row["name"]):
+                boxsets.remember_series(con, collection_id, item["qid"])
+                return item["qid"]
+    return ""
+
+
 def _back_target(value):
     """Where a title's Back link may point: a ?query, or a page path.
 
@@ -1752,6 +1912,16 @@ class Handler(BaseHTTPRequestHandler):
                 want = (asked.get("view") or ["grid"])[0]
                 search = (asked.get("q") or [""])[0].strip()
                 rows = artists.all_artists(con, viewer["id"])
+                held = rows        # every act, so every owner keeps a chip
+                # The search narrows the acts before anything is counted, or
+                # the owner chips on this page keep the whole-shelf numbers
+                # under a list of three acts (the catalogue's three rows of
+                # pills were made to agree with the search in 0.23.154).
+                if search:
+                    needle = search.lower()
+                    rows = [row for row in rows
+                            if needle in (row["name"] or "").lower()]
+                shown = {row["id"] for row in rows}
                 total = len(rows)
                 owner_rows, owner_id = [], None
                 if asked.get("owner"):
@@ -1765,13 +1935,15 @@ class Handler(BaseHTTPRequestHandler):
                 people = {row["id"]: row for row in con.execute(
                     "SELECT id, display_name, username FROM users")}
                 tally = {}
-                for row in rows:
+                for row in held:
                     for oid in set((row["owner_ids"] or "").split(",")):
                         person = (people.get(int(oid))
                                   if oid.isdigit() else None)
                         if person is None or person["username"] == "rips":
                             continue
-                        tally[oid] = tally.get(oid, 0) + 1
+                        tally.setdefault(oid, 0)
+                        if row["id"] in shown:
+                            tally[oid] += 1
                 if tally:
                     owner_rows = [
                         {"id": int(oid),
@@ -1781,10 +1953,6 @@ class Handler(BaseHTTPRequestHandler):
                 if owner_id is not None:
                     rows = [row for row in rows
                             if str(owner_id) in (row["owner_ids"] or "").split(",")]
-                if search:
-                    needle = search.lower()
-                    rows = [row for row in rows
-                            if needle in (row["name"] or "").lower()]
                 return self.respond(200, ui_artists.render_list(
                     base, rows,
                     "grid" if want == "grid" else "list", search,
@@ -1806,6 +1974,40 @@ class Handler(BaseHTTPRequestHandler):
                     artists.titles_for(con, artist["id"], viewer["id"]),
                     FORMAT_LABELS, "grid" if want == "grid" else "list",
                     notice, bool(asked.get("mbid_error"))))
+
+            # Film collections. A collection is a series (Fast & Furious,
+            # Alien) and holds the titles that point at it; the page lists
+            # them in watching order, which a name search cannot do.
+            series = re.search(r"/collections/?$", route)
+            if series:
+                term = (parse_qs(urlparse(self.path).query).get("q")
+                        or [""])[0].strip()
+                rows = boxsets.all_collections(con, viewer["id"], term)
+                return self.respond(200, ui_boxsets.render_list(base, rows, term))
+
+            one = re.search(r"/collection/(\d+)/?$", route)
+            if one:
+                collection_id = int(one.group(1))
+                row = boxsets.get(con, collection_id)
+                if row is None:
+                    return self.respond(404, "No such collection",
+                                        "text/plain; charset=utf-8")
+                asked = parse_qs(urlparse(self.path).query)
+                query = (asked.get("q") or [""])[0].strip()
+                find = (asked.get("find") or [""])[0].strip()
+                # a lookup that failed says so in red, not as good news
+                error = (asked.get("error") or [""])[0]
+                found = (boxsets.candidates(con, find, viewer["id"],
+                                            collection_id) if find else [])
+                return self.respond(200, ui_boxsets.render_collection(
+                    base, row,
+                    boxsets.titles_for(con, collection_id, viewer["id"]),
+                    FORMAT_LABELS,
+                    notice=error or (asked.get("notice") or [""])[0],
+                    bad=bool(error),
+                    found=found, find=find, query=query,
+                    series=boxsets.series_summary(con, collection_id,
+                                                  viewer["id"])))
 
             covers = re.search(r"/title/(\d+)/covers/?$", route)
             if covers:
@@ -1950,8 +2152,10 @@ class Handler(BaseHTTPRequestHandler):
     def title_page(self, con, viewer, base, title_id, summary=None, error=None,
                    owner=None):
         row = con.execute(
-            "SELECT t.*, a.name AS artist_name FROM titles t"
+            "SELECT t.*, a.name AS artist_name, c.name AS collection_name"
+            " FROM titles t"
             "  LEFT JOIN artists a ON a.id = t.artist_id"
+            "  LEFT JOIN collections c ON c.id = t.collection_id"
             " WHERE t.id = ?", (title_id,)).fetchone()
         if row is None:
             return self.respond(404, "No such title", "text/plain; charset=utf-8")
@@ -2005,15 +2209,173 @@ class Handler(BaseHTTPRequestHandler):
             viewer_id=viewer["id"], tab=tab, back=back,
             stores=stores.load(con),
             shops=stores.playable_stores(con, store_keys(con, digital, items)),
+            collections=boxsets.choices(con, row["kind"]),
             back_label=("\u2190 Back to the artist"
                         if (back or "").startswith("artist/")
-                        else "\u2190 Back to the catalogue")))
+                        else ("\u2190 Back to the collection"
+                              if (back or "").startswith("collection/")
+                              else "\u2190 Back to the catalogue"))))
 
     def do_POST(self):
         form = parse_body(self)
         con = connect()
         try:
             viewer = viewer_for(self, con)
+            # Film collections. A collection is a series (Fast & Furious,
+            # Alien); it is made on the collections page, renamed and deleted
+            # from its own page, and picked on a film's page.
+            made = re.search(r"/collections/?$", route_path(self))
+            if made:
+                name = field(form, "name")
+                where = base_path(self) + "collections"
+                if name:
+                    where = (base_path(self) + "collection/%d"
+                             % boxsets.resolve(con, name,
+                                               field(form, "kind") or "movie"))
+                return self.respond(303, "", extra={"Location": where})
+
+            added = re.search(r"/collection/(\d+)/add$", route_path(self))
+            if added:
+                collection_id = int(added.group(1))
+                title_id = field(form, "title_id")
+                if title_id.isdigit():
+                    boxsets.link_title(con, int(title_id), collection_id,
+                                       field(form, "collection_order"))
+                return self.respond(303, "", extra={
+                    "Location": base_path(self) + "collection/%d" % collection_id})
+
+            enriched = re.search(r"/collection/(\d+)/metadata$",
+                                 route_path(self))
+            if enriched:
+                # the series' own Wikipedia article, which is the only place a
+                # collection has prose to scrape: its paragraph and lead picture
+                collection_id = int(enriched.group(1))
+                where = base_path(self) + "collection/%d" % collection_id
+                row = boxsets.get(con, collection_id)
+                qid = (row["wikidata_id"] or "") if row is not None else ""
+                try:
+                    if not qid and row is not None:
+                        qid = series_item_for(con, collection_id, row)
+                    page = metadata.series_page(qid) if qid else {}
+                    if not page:
+                        where += ("?error=" + quote(
+                            "No Wikipedia article for this series - type what "
+                            "it is in *Edit this collection* instead."))
+                    else:
+                        filled = boxsets.fill_details(
+                            con, collection_id,
+                            overview=page.get("overview") or "",
+                            poster=page.get("poster_url") or "")
+                        if filled:
+                            where += ("?notice=" + quote(
+                                "Filled the %s from Wikipedia's \"%s\" article."
+                                % (" and the ".join(filled),
+                                   page.get("title") or "")))
+                        else:
+                            have = []
+                            if (row["overview"] or "").strip():
+                                have.append("paragraph")
+                            if (row["poster_url"] or "").strip():
+                                have.append("cover")
+                            where += ("?notice=" + quote(
+                                "Nothing to fill - the collection already has "
+                                "its %s, and the article offers no more. Edit "
+                                "it under *Edit this collection*."
+                                % " and its ".join(have) if have else
+                                "The article had nothing to add - type the "
+                                "paragraph in *Edit this collection*."))
+                except metadata.Throttle:
+                    where += ("?error=" + quote(
+                        "Wikimedia is rate-limiting the lookups - try again in "
+                        "a few minutes."))
+                return self.respond(303, "", extra={"Location": where})
+
+            looked = re.search(r"/collection/(\d+)/members$",
+                               route_path(self))
+            if looked:
+                # what is in this series that the shelf is missing: ask Wikidata
+                # for the series item (or the one already stored) and keep the
+                # answer, so the page never waits on the network
+                collection_id = int(looked.group(1))
+                where = base_path(self) + "collection/%d" % collection_id
+                row = boxsets.get(con, collection_id)
+                qid = (row["wikidata_id"] or "") if row is not None else ""
+                try:
+                    if not qid and row is not None:
+                        qid = series_item_for(con, collection_id, row)
+                    if not qid:
+                        where += ("?error=" + quote(
+                            "Wikidata has no film series called \"%s\" - the "
+                            "collection's own name may be the place to start."
+                            % (row["name"] if row is not None else "")))
+                    else:
+                        rows = metadata.series_members(
+                            qid, kind=(row["kind"] if row is not None
+                                       else "movie"))
+                        boxsets.store_members(con, collection_id, rows)
+                        where += ("?notice=" + quote(
+                            "Wikidata files %d film%s under this series."
+                            % (len(rows), "" if len(rows) == 1 else "s")))
+                except metadata.Throttle:
+                    where += ("?error=" + quote(
+                        "Wikimedia is rate-limiting the lookups - try again "
+                        "in a few minutes."))
+                return self.respond(303, "", extra={"Location": where})
+
+            series = re.search(r"/collection/(\d+)/?$", route_path(self))
+            if series:
+                collection_id = int(series.group(1))
+                if field(form, "delete"):
+                    boxsets.remove(con, collection_id)
+                    return self.respond(303, "", extra={
+                        "Location": base_path(self) + "collections"})
+                if field(form, "name"):
+                    boxsets.rename(con, collection_id, field(form, "name"))
+                boxsets.set_notes(con, collection_id, field(form, "notes"))
+                return self.respond(303, "", extra={
+                    "Location": base_path(self) + "collection/%d" % collection_id})
+
+            lookup = re.search(r"/title/(\d+)/collection/lookup$",
+                               route_path(self))
+            if lookup:
+                title_id = int(lookup.group(1))
+                base = base_path(self)
+                held = con.execute(
+                    "SELECT c.name AS name FROM titles t"
+                    "  JOIN collections c ON c.id = t.collection_id"
+                    " WHERE t.id = ?", (title_id,)).fetchone()
+                if held:
+                    return self.title_page(
+                        con, viewer, base, title_id,
+                        summary=("Already in %s - pick \"-\" above to take it "
+                                 "out before Wikidata is asked." % held["name"]))
+                try:
+                    made = metadata.autofill_series(con, title_id, force=True)
+                    note = ("Filed under %s." % made if made else
+                            "Wikidata files this film under no series.")
+                except metadata.Throttle:
+                    note = ("Wikidata asked us to slow down - try again in a "
+                            "minute.")
+                except Exception as exc:
+                    note = "Could not ask Wikidata: %s" % exc
+                return self.title_page(con, viewer, base, title_id,
+                                       summary=note)
+
+            picked = re.search(r"/title/(\d+)/collection$", route_path(self))
+            if picked:
+                title_id = int(picked.group(1))
+                name = (field(form, "new_collection")
+                        or field(form, "collection"))
+                if name:
+                    collection_id = boxsets.resolve(con, name,
+                                                    field(form, "kind") or "movie")
+                    boxsets.link_title(con, title_id, collection_id,
+                                       field(form, "collection_order"))
+                else:
+                    boxsets.unlink_title(con, title_id)
+                return self.respond(303, "", extra={
+                    "Location": base_path(self) + "title/%d" % title_id})
+
             pressed = re.search(r"/nowplaying/?$", route_path(self))
             if pressed:
                 try:
@@ -2964,6 +3326,11 @@ def main():
     # titles that arrived without metadata (an import, a bare add) get
     # looked up too; with nothing missing this is a single query
     refresh_job.start(DB_PATH, limit=60)
+    # the same pass then repeats itself every day (or week), working through a
+    # couple of hundred titles a night, so a shelf nobody touches still tidies
+    # itself - and the artist fill rides along
+    refresh_job.start_auto(DB_PATH, hours=refresh_hours(), limit=200,
+                           also=lambda: artists.start(DB_PATH, limit=200))
     # Direct LAN access wants HTTPS - a barcode scanner is only handed the
     # camera on a secure origin - while Home Assistant's ingress proxy and the
     # watchdog still knock with plain HTTP on the same port, so the first byte

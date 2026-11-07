@@ -85,9 +85,23 @@ Full documentation: [media_collection/DOCS.md](media_collection/DOCS.md).
   edition's own cover, not the standard one's.
 - **Browsing.** One mode at a time — Movies, TV, Music, Artists — with an owner
   filter, format pills, search that matches the artist as well as the title,
-  list and poster views, and tallies that add up. Titles file under the first
-  letter of the name with *The* / *A* / *An* moved to the end, and numbers sort
+  list and poster views, and tallies that add up. A search also offers the
+  artist or the collection itself as a card, so "alien" gives you the series
+  before the six films inside it. Titles file under the first letter of the
+  name with *The* / *A* / *An* moved to the end, and numbers sort
   by value (2 before 10).
+- **Collections.** A film series - *Fast &amp; Furious* (eleven films, one of
+  them *Hobbs &amp; Shaw*), *Alien* - is a row of its own that its titles point
+  at, with a page listing them in watching order. A search cannot see a series;
+  a collection can. Wikidata's *part of the series* files films into theirs as
+  their metadata is refreshed - by itself once a day, and on demand with
+  *Refresh metadata* on the admin page, which asks about the series of a film
+  whose metadata is already complete without re-fetching any of it - and never
+  over a collection you picked. Ask a collection the other way round and it
+  lists the films in the series nobody here owns, so the gap in the shelf is
+  written down rather than remembered - and *Refresh metadata* on the
+  collection itself takes the paragraph and a poster from the series' Wikipedia
+  article, so a series page is not just a name until somebody types one.
 - **A duplicate is a question, not an accident.** Adding a title that is already
   on the shelf points at the existing row, because a second copy belongs there;
   adding a copy someone already owns in that format asks first. The admin page

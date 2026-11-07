@@ -11,6 +11,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+import boxsets       # the collections a film series becomes; imports no metadata
+
 UA = "media-collection-addon/0.9 (https://github.com/matthamiltonnz/Media-Library)"
 FORMAT_SUFFIX = re.compile(r"\s+(3D|4K|Ultra HD)$", re.I)
 YEAR = re.compile(r"\b(18|19|20)\d{2}\b")
@@ -201,6 +203,249 @@ def fetch_entities(qids):
     return found
 
 
+SERIES_CLASSES = ("film series", "film trilogy", "film tetralogy",
+                  "film pentalogy", "film hexalogy", "trilogy", "tetralogy",
+                  "pentalogy", "hexalogy", "film franchise", "film saga",
+                  "series of films")
+
+# Wikidata files the Marvel films under their *phase* ("Marvel Cinematic
+# Universe Phase Two"), which is a finer division than a shelf wants: a
+# household reads those as one series, so the trailing phase is dropped.
+PHASE = re.compile(r"\s+Phase\s+[A-Za-z0-9]+$", re.IGNORECASE)
+
+
+def _entities(qids):
+    """{qid: entity} with claims and English labels, in one request."""
+    qids = [qid for qid in dict.fromkeys(qids) if qid][:50]
+    if not qids:
+        return {}
+    url = ("https://www.wikidata.org/w/api.php?action=wbgetentities"
+           "&format=json&props=claims|labels&languages=en|mul&ids="
+           + urllib.parse.quote("|".join(qids)))
+    return _get(url).get("entities") or {}
+
+
+def _label(entity):
+    # Wikidata is migrating labels to the multilingual "mul" language, so an
+    # item that is perfectly well named can have no `en` label at all - asking
+    # for `en` alone silently returned "" for e.g. the film *Alien* (Q103569)
+    for language in ("en", "mul", "en-gb"):
+        value = ((entity or {}).get("labels") or {}).get(language) or {}
+        if value.get("value"):
+            return value["value"]
+    return ""
+
+
+def _claim_ids(entity, prop):
+    """The Q-ids an item gives for one property (P179, P31, P527...)."""
+    out = []
+    for claim in ((entity or {}).get("claims") or {}).get(prop, []):
+        value = ((claim.get("mainsnak") or {}).get("datavalue") or {}).get("value")
+        if isinstance(value, dict) and value.get("id"):
+            out.append(value["id"])
+    return out
+
+
+def _claim_text(entity, prop):
+    out = []
+    for claim in ((entity or {}).get("claims") or {}).get(prop, []):
+        value = ((claim.get("mainsnak") or {}).get("datavalue") or {}).get("value")
+        if isinstance(value, dict) and value.get("text"):
+            out.append(value["text"])
+    return out
+
+
+def fill_series(con, title_id, force=False):
+    """Ask for one title's film series and say, in a sentence, what happened.
+
+    `refresh_job` walks titles whose own metadata is complete but whose
+    collection is not known. This is the whole of that work, so the job can
+    ask about a series without re-fetching and overwriting the metadata of an
+    entire shelf.
+    """
+    try:
+        made = autofill_series(con, title_id, force=force)
+    except Throttle:
+        return "rate-limited"
+    except Exception as exc:
+        return "error: %s" % exc
+    return "filed under %s" % made if made else "no series"
+
+
+def _claim_years(entity, prop="P577"):
+    """The years an item dates something to (publication date, usually)."""
+    out = []
+    for claim in ((entity or {}).get("claims") or {}).get(prop, []):
+        value = ((claim.get("mainsnak") or {}).get("datavalue") or {}).get("value")
+        text = value.get("time") if isinstance(value, dict) else ""
+        if isinstance(text, str) and text[1:5].isdigit():
+            out.append(int(text[1:5]))
+    return out
+
+
+_CLASS_LABELS = {}
+
+
+def _class_labels(qids):
+    """{qid: English label} for the series classes, remembered per process.
+
+    The same handful of classes - "film series", "film trilogy", "media
+    franchise" - come back for every film, and Wikidata rate-limits (HTTP 429,
+    which stops the job for ten minutes). Asking for each of them once turns
+    four requests per title into three.
+    """
+    missing = [qid for qid in dict.fromkeys(qids)
+               if qid and qid not in _CLASS_LABELS]
+    if missing:
+        for qid, entity in _entities(missing).items():
+            _CLASS_LABELS[qid] = _label(entity)
+    return {qid: _CLASS_LABELS.get(qid, "") for qid in qids if qid}
+
+
+def series_of(imdb_id=None, qid=None, year=None, name=None, kind="movie"):
+    """The film series Wikidata files this title under - [] when it files none.
+
+    P179 ("part of the series") is the only keyless route to a franchise: TMDB's
+    collection field wants an API key and MusicBrainz knows albums, not films.
+    It is not a tidy field - *Inception* is "part of the series BBC's 100
+    Greatest Films of the 21st Century", and *The Dark Knight* is both "Batman
+    in film" and "The Dark Knight trilogy" - so a candidate only counts when its
+    own P31 class is some kind of film series, and the widest one wins (Star
+    Wars over "Star Wars original trilogy", by how many parts it lists).
+
+    Three requests at most: the film, its series, and their classes.
+    """
+    if not qid and imdb_id:
+        qid = qid_by_imdb(imdb_id)
+    if not qid and name:
+        cleaned = clean_title(name)
+        qid = search_wikidata([cleaned], kind=kind or "movie").get(cleaned)
+    if not qid:
+        return []
+    film = _entities([qid]).get(qid)
+    if year:
+        # a name search can land on the wrong film of the same name; the
+        # publication date is the cheap way to tell them apart
+        dates = _claim_years(film)
+        if dates and min(abs(int(year) - one) for one in dates) > 1:
+            return []
+    series_ids = _claim_ids(film, "P179")
+    if not series_ids:
+        return []
+    series = _entities(series_ids)
+    classes = []
+    for entity in series.values():
+        classes += _claim_ids(entity, "P31")
+    kinds = _class_labels(classes)
+    order = (_claim_text(film, "P1545") or [""])[0]
+    found = []
+    for series_id, entity in series.items():
+        label = _label(entity).strip()
+        if not label:
+            continue
+        name = PHASE.sub("", label).strip() or label
+        words = [(kinds.get(cls) or "").lower()
+                 for cls in _claim_ids(entity, "P31")]
+        if not any(word in kind for kind in words for word in SERIES_CLASSES):
+            continue
+        found.append({"name": name, "qid": series_id,
+                      "parts": len(_claim_ids(entity, "P527")),
+                      "order": order})
+    found.sort(key=lambda item: (-item["parts"], len(item["name"])))
+    return found[:1]
+
+
+def series_members(qid, limit=60, kind="movie"):
+    """Every film Wikidata files under one series item, oldest first.
+
+    `P179` runs from a film *to* its series, so the reverse needs a search:
+    CirrusSearch's `haswbstatement:P179=<qid>` answers with the item ids, then
+    one `wbgetentities` turns those into names, years and IMDb ids. Only what is
+    classed as a film survives - a series item also attracts *list articles*
+    ("list of Fast & Furious characters"), and a gap list of those is nonsense.
+    Two or three requests, a second apart; returns `[{qid, name, year, imdb_id}]`
+    and `[]` for a series Wikidata knows nothing about.
+    """
+    if not qid:
+        return []
+    url = ("https://www.wikidata.org/w/api.php?action=query&list=search"
+           "&format=json&srnamespace=0&srlimit=%d&srsearch=%s"
+           % (max(1, min(int(limit), 200)),
+              urllib.parse.quote("haswbstatement:P179=%s" % qid)))
+    hits = ((_get(url).get("query") or {}).get("search")) or []
+    ids = [hit.get("title") for hit in hits if hit.get("title")]
+    if not ids:
+        return []
+    time.sleep(1.0)
+    entities = _entities(ids)
+    wanted = "series" if (kind or "movie") == "tv" else "film"
+    classes = _class_labels([cls for item_id in ids
+                             for cls in _claim_ids(entities.get(item_id), "P31")])
+    found = []
+    for item_id in ids:
+        entity = entities.get(item_id) or {}
+        words = [(classes.get(cls) or "").lower()
+                 for cls in _claim_ids(entity, "P31")]
+        if not any(wanted in word for word in words):
+            continue
+        name = _label(entity).strip()
+        if not name:
+            continue
+        years = _claim_years(entity)
+        imdb = (_claim_text(entity, "P345") or [""])[0]
+        found.append({"qid": item_id, "name": name,
+                      "year": min(years) if years else None,
+                      "imdb_id": imdb or None})
+    found.sort(key=lambda item: (item["year"] or 9999, item["name"]))
+    return found
+
+
+def autofill_series(con, title_id, qid=None, force=False):
+    """Give a film its collection from Wikidata, once, never over a hand's pick.
+
+    A collection someone chose by hand is left alone (only an empty one is
+    filled), and `titles.series_at` records that the question was asked, so a
+    film that is genuinely part of no series is not asked about again. `force`
+    asks again anyway - that is what the button on a film's page does.
+
+    Returns the collection name it filed the title under, or "".
+    """
+    row = con.execute("SELECT id, name, kind, imdb_id, release_year,"
+                      " collection_id, series_at FROM titles WHERE id = ?",
+                      (title_id,)).fetchone()
+    if row is None or row["collection_id"] is not None:
+        return ""
+    if (row["kind"] or "") not in boxsets.SERIES_KINDS:
+        return ""
+    if not force and row["series_at"]:
+        return ""
+    try:
+        found = series_of(row["imdb_id"], qid=qid,
+                          year=row["release_year"], name=row["name"],
+                          kind=row["kind"] or "movie")
+    except Throttle:
+        raise
+    except Exception:
+        return ""
+    con.execute("UPDATE titles SET series_at = datetime('now') WHERE id = ?",
+                (title_id,))
+    con.commit()
+    if not found:
+        return ""
+    best = found[0]
+    collection_id = boxsets.resolve(con, best["name"], row["kind"])
+    if collection_id is None:
+        return ""
+    # keep the series item: the reverse lookup ("what is in this series that we
+    # do not have") needs the id, and a name search could land elsewhere later
+    boxsets.remember_series(con, collection_id, best.get("qid") or "")
+    order = str(best.get("order") or "").strip()
+    boxsets.link_title(con, title_id, collection_id,
+                       int(order) if order.isdigit() else None)
+    return best["name"]
+
+
+
 def enwiki_title(qid):
     """English Wikipedia page title for a Wikidata item (for the REST summary)."""
     if not qid:
@@ -229,7 +474,32 @@ def wikipedia_summary(page_title):
         "poster_url": (data.get("originalimage") or data.get("thumbnail") or {}).get("source"),
         "description": description or None,
         "year": int(match.group(0)) if match else None,
+        # "disambiguation" for a "may refer to" page - a caller that wanted an
+        # article about one thing should refuse it rather than quote the list
+        "page_type": data.get("type") or "",
     }
+
+
+def series_page(qid):
+    """A film series' own article: one paragraph of prose and the lead picture.
+
+    A collection has nothing to read but what somebody typed, because a series
+    is not an item a catalogue normally describes. Wikipedia is the one keyless
+    place it does have prose (`collections.wikidata_id` is the series, and its
+    `enwiki` sitelink names the article), so this is what "Refresh metadata" on a
+    collection asks for. `{}` when the item has no English article, or when that
+    article is a disambiguation page rather than the series.
+    """
+    title = enwiki_title(qid)
+    if not title:
+        return {}
+    page = wikipedia_summary(title)
+    if page.get("page_type") == "disambiguation":
+        return {}
+    page["title"] = title
+    page["url"] = ("https://en.wikipedia.org/wiki/"
+                   + urllib.parse.quote(title.replace(" ", "_")))
+    return page
 
 
 MUSIC_SPLIT = re.compile(r"\s+[—–]\s+")
@@ -646,9 +916,9 @@ def refresh(con, title_id):
     updates = {}
     source = []
     unresolved = []
+    qid = None          # the Wikidata item, when one was found
 
     try:
-        qid = None
         if row["imdb_id"]:
             qid = qid_by_imdb(row["imdb_id"])
             if qid:
@@ -716,6 +986,13 @@ def refresh(con, title_id):
     if unresolved:
         message = ("%s not found in Wikidata - matched by name and year instead. %s"
                    % (" and ".join(unresolved), message))
+    # The film series Wikidata files it under, never over one picked by hand.
+    try:
+        filed = autofill_series(con, title_id, qid=qid)
+    except Exception:
+        filed = ""
+    if filed:
+        message += " - filed under %s" % filed
     return message
 
 

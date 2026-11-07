@@ -21,3 +21,11 @@ configuration:
     description: >-
       The display name of the person who owns the copies films_path imports.
       Ignored when films_path is empty.
+  refresh_hours:
+    name: Automatic metadata pass
+    description: >-
+      How often the catalogue looks up metadata nobody has asked for yet -
+      posters, plots, artist biographies and the film series that fill the
+      collections - without anyone pressing a button. 24 is daily, 168 is
+      weekly, 0 turns it off. A bounded handful is also looked up every time
+      the add-on starts, however this is set.

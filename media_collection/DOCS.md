@@ -29,6 +29,12 @@ otherwise look like a sizing bug).
   `key`, `label`, `kind` (`digital`, `retail`, `format`, `system`).
 - **store_targets** — which player opens which shop, and the app it opens
   (`store_id`, `target_id`, `app`). A shop can run on several players.
+- **collections** — a film or TV series (Fast & Furious, Alien): `name`,
+  `sort_name`, `kind`, `overview` (what the series is), `notes`, `poster_url`.
+  A title points at one with `titles.collection_id`, and `collection_order` is
+  its place in the series - NULL sorts after the numbered ones, by year.
+  `titles.series_at` is when Wikidata was asked which series the title belongs
+  to, so a film that belongs to none is only asked about once.
 
 One title can therefore have a Blu-ray, a download from a digital shop and a
 Jellyfin file without them counting as duplicates.
@@ -77,7 +83,11 @@ Exports are per viewer: shared copies plus your own private ones.
   up in the background, and adding a title with *Look up metadata* ticked (it is
   ticked by default) fetches it there and then, a new act's MusicBrainz record
   and biography included. For an act already on the shelf that last step costs a
-  single row read.
+  single row read. On top of that the whole pass repeats itself **once a day at
+  03:00** (`refresh_hours` - 24 daily, 168 weekly, 0 never; see *Options*),
+  working through up to two hundred titles (and two hundred acts) a night, so a
+  shelf nobody touches still drains its backlog. The start-up pass stays at
+  sixty: a restart is cheap, a nightly sweep can afford to be patient.
 
 The catalogue opens in **Thumbnails** view (poster grid, one card per title with its
 formats and copy count); the **List view** link next to the search box switches to
@@ -172,11 +182,11 @@ where you live - a shelf, a cupboard, a box in the garage. For example:
 A download and a Jellyfin route have no location, because there is no shelf to
 put them on. The list view shows a copy's location beside it.
 
-## By artist
+## Artists
 
 Music titles are stored as "Artist — Album", and that name is split once into an
 `artists` row per act (`artists.py --link`, re-run on every add-on start and after
-a music import). The Music view then offers **By artist**: every act with albums
+a music import). The Music view then offers **Artists**: every act with albums
 on the shelf, how many, and the years covered, as a table or as a wall of covers.
 Each act opens a page with their albums (again list or thumbnails), what each one
 is owned as, and a MusicBrainz link, so a music title edits the **MusicBrainz ID**
@@ -223,6 +233,94 @@ re-read for country, start year and kind (the fields a bad lookup leaves blank o
 takes from the wrong act), and the old "read more" links are dropped so **Fetch
 details** rebuilds them against the right act. A mistyped id is refused with a
 red banner and nothing written; an empty box clears the id on purpose.
+
+## Collections
+
+A **collection** is a film series - *Fast & Furious*, *Alien*, the Cornetto
+trilogy - and it is one row (`collections`) that several titles point at, the
+same shape as an artist and its albums. It exists because a search cannot see a
+series: the eighth Fast & Furious film is *Hobbs & Shaw* and shares not one word
+with the other seven.
+
+- **Collections**, on the film and TV views of the catalogue, opens the list of
+  every collection with a search box and a wall of covers. A collection's cover
+  is its own picture if it has one, else the first film's poster.
+- **A search finds the shelf, not only the discs.** Type `alien` on the film
+  view and the first card is **Alien - Collection · 6 films · 1979–2024**,
+  linking to the series; the films inside follow. Type `tame` on the music view
+  and the first card is **Tame Impala - Artist · 4 albums · 2012–2025**. The
+  card is title-shaped (a cover, a name, a caption) but it opens a page, and it
+  obeys the media-type filter: no artist under Movies, no collection under
+  Music. In list view they are the first rows, with *Artist* or *Collection* in
+  the Format column.
+- A collection with **one film in it gets no card** - one film is not a shelf to
+  browse - but that film still answers to the series' name, so `q=phase three`
+  finds *Ant-Man and the Wasp* through its collection. Clicking a collection
+  card carries the search into the collection page's **own** search
+  (`/collection/18?q=marvel`), which narrows the series to the films that match
+  and says "Showing 2 of 6 films matching …" with a *clear the search*
+  link. A collection name on a film's page does the same, so the search
+  follows you from the catalogue through a film to its series.
+- A collection's card is drawn as a **stack of cases**: the cover in front with
+  two more cases peeking out above and to the right of it, which keeps the
+  artwork's lower edge in line with the film cards beside it. Title cards stay
+  single cases, so a series can be told from a film at a glance.
+- One collection's page lists every film in it, numbered, in watching order:
+  `titles.collection_order` when it is set, then the year, then the name. Each
+  card opens the film, and *Back* returns to the collection.
+- A film joins a collection on its own page, under **Collection**: pick one from
+  the list or type a new name - a series can be started from whichever film is
+  in hand - and say where it comes in the series. Picking `-` takes it out
+  again. The collection then shows in the line under the title.
+- **Add a film to this collection**, behind a button at the bottom of a
+  collection, searches the shelf for a film that is not in it yet - the box is
+  hidden until you press it, and it has a field of its own (`?find=`), so the
+  page's search above it and this one never overwrite each other. That is how
+  *Hobbs & Shaw* gets in. A film already in another collection says so, and Add
+  moves it.
+- **Films in this series**, under the wall, lists what the series has that the
+  shelf does not. Press *Look up the films in this series* and the catalogue
+  asks Wikidata which films point at the series item (`P179`, the reverse
+  direction), keeps the answer, and shows the ones nobody here owns, each with
+  its year and a link to its own record. A film the household owns but has filed
+  under another collection is named too, so you can see it is not lost. Nothing
+  is fetched until you press it, and pressing it again refreshes the list - a
+  new film in the series appears the day Wikidata knows about it.
+- **Refresh metadata**, under the paragraph, fills the two things a collection
+  cannot work out for itself - what the series *is*, and a cover - from the
+  series' own Wikipedia article (reached through its Wikidata item). It fills
+  only what is empty: a paragraph typed in *Edit this collection* is never
+  replaced, and a cover already chosen is kept. Jellyfin artwork still wins over
+  it while a linked copy has any, so the scraped picture is the fallback for a
+  collection with no links. There is no other keyless source for a series -
+  TMDB's collection data needs an API key this add-on does not have.
+- **Edit this collection** renames it and says what the series is (one
+  paragraph, shown at the top of its page). **Delete this collection** removes
+  the collection and leaves every film on the shelf.
+- **A film files itself when metadata is refreshed.** Wikidata's *part of the
+  series* (P179) is the only keyless route to a franchise - TMDB's collection
+  field wants an API key - so a refresh asks it and puts the film in the series
+  it names, creating the collection if it is new. Two guards: a collection
+  someone chose by hand is **never** replaced, and `titles.series_at` records
+  that the question was asked, so a film that is genuinely part of no series is
+  not asked about again. Asking is not free (three requests), which is why it
+  happens on refresh rather than on every page: *Refresh metadata* on the admin
+  page walks the whole shelf in one pass, and the button on a film's page
+  (*Look up its collection*) asks about that one title again.
+- **No overwrite needed.** A film that already has its metadata but no
+  collection is picked up by *Refresh metadata* for its series alone - two or
+  three requests, not a fresh copy of its poster, plot and year - so the
+  "also overwrite titles that already have metadata" tick is no longer the only
+  way to file an existing library. The job alternates the two kinds of work, so
+  the sixty-title pass the add-on runs at start-up makes progress on both.
+- P179 is not a tidy field. *Inception* is "part of the series BBC's 100
+  Greatest Films of the 21st Century", and *The Dark Knight* is both "Batman in
+  film" and "The Dark Knight trilogy", so a candidate only counts when its own
+  class is a kind of film series (not a list article) and the widest one wins
+  (Star Wars over "Star Wars original trilogy"). It is still a guess: it files
+  *Batman Returns* under "Batman", which is right, and *Batman: Mask of the
+  Phantasm* under nothing at all, which is honest but useless. Rename, merge or
+  delete what it gets wrong - a collection is a row, not a fixed fact.
 
 ## Filtering
 
@@ -616,6 +714,7 @@ fills blanks, so re-running is safe.
 |---|---|---|
 | `default_visibility` | `shared` / `private` | `shared` |
 | `log_level` | `debug`/`info`/`warning`/`error` | `info` |
+| `refresh_hours` | hours between automatic metadata passes: `24` daily, `168` weekly, `0` only when asked | `24` |
 
 ## Sharing
 

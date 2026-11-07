@@ -86,6 +86,11 @@ SHELL = """<!doctype html>
   .bio .portrait { width: 9rem; flex: 0 0 auto; border-radius: 8px;
                    box-shadow: 0 6px 18px #0003; }
   .bio div { min-width: 0; }
+  /* the films a series holds that the shelf does not: a plain list, because it
+     is a want-list rather than part of the collection */
+  ul.gaps { list-style: none; padding: 0; margin: .3rem 0 .6rem; }
+  ul.gaps li { padding: .15rem 0; }
+  form.inline { display: inline-block; margin: .3rem 0 .2rem; }
   @media (max-width: 34rem) {
     .bio { flex-direction: column; }
     .bio .portrait { width: 6rem; }
@@ -156,6 +161,23 @@ SHELL = """<!doctype html>
   /* virtual cases: the artwork sits inside a drawn box, so a square cover never
      gets cropped into a poster and a Blu-ray looks like a Blu-ray */
   .thumb { position: relative; }
+  /* a collection is several cases in one box: the cover sits in front and two
+     more peek out behind it, so a series is never mistaken for the one film
+     the search found. The three layers stay inside the thumb, because .card
+     clips its contents. */
+  .thumb.stack { padding: 8% 8% 0 0; box-sizing: border-box; background: none; }
+  .thumb.stack::before, .thumb.stack::after {
+      content: ""; position: absolute; left: 0; top: 0;
+      width: 92%; height: 94.67%; border-radius: 5px; z-index: 1;
+      border: 1px solid #8887; box-shadow: 0 2px 5px #0004;
+      background: linear-gradient(180deg, #41454e66, #9aa0ab55); }
+  /* the cases step up and to the right of the cover, which sits at the
+     bottom-left with its lower edge flush with a title card artwork */
+  .thumb.stack::before { left: 4%; top: 2.7%; z-index: 2; }
+  .thumb.stack::after { left: 8%; top: 0; }
+  .thumb.stack > img { position: relative; z-index: 2; border-radius: 5px;
+      box-shadow: 0 0 0 1px #ffffff22, 0 2px 6px #0007; }
+  .thumb.stack > .muted { position: relative; z-index: 2; }
   .thumb.case-music { aspect-ratio: 1 / 1; }
   /* Blu-ray, 3D and 4K cases: coloured plastic with a printed band across the top,
      the way the real boxes look (blue / blue with 3D / black with 4K Ultra HD) */
@@ -226,13 +248,19 @@ SHELL = """<!doctype html>
   .panel details summary { cursor: pointer; font-size: .85rem; opacity: .85; }
   .panel tr.edit td { border-top: 0; padding-top: 0; }
   /* "Add a server" / "Add a root": a button that opens the form under it */
-  .panel details.add { margin: .6rem 0 0; }
-  .panel details.add > summary { display: inline-block; padding: .25rem .6rem;
+  /* an "Add …" disclosure styled as a button, so it reads as an action waiting
+     to be pressed rather than as a section that happens to be closed. Not
+     scoped to .panel: the collection page's "Add a film" and /collections'
+     "Add a collection" want the same look. */
+  details.add { margin: .6rem 0 0; }
+  details.add > summary { display: inline-block; padding: .25rem .6rem;
       border: 1px solid #8886; border-radius: 5px; background: Canvas;
-      font-size: .85rem; font-weight: 600; opacity: 1; list-style: none; }
-  .panel details.add > summary::-webkit-details-marker { display: none; }
-  .panel details.add > summary::before { content: "+ "; }
-  .panel details.add[open] > summary::before { content: "\u2212 "; }
+      font-size: .85rem; font-weight: 600; opacity: 1; list-style: none;
+      cursor: pointer; }
+  details.add > summary::-webkit-details-marker { display: none; }
+  details.add > summary::before { content: "+ "; }
+  details.add[open] > summary::before { content: "\u2212 "; }
+  details.add[open] > summary { margin-bottom: .6rem; }
   /* a panel that starts folded - the summary is its heading and the
      `+`/`-` prefix says whether there is anything to open */
   .panel.fold > summary { cursor: pointer; list-style: none;
