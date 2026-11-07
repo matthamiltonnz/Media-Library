@@ -1417,3 +1417,77 @@ def artist_bio(name, mbid=None):
             "image_url": summary.get("poster_url"),
             "wiki_url": article,
             "links": links[:6]}
+
+
+def series_item_for(con, collection_id, row):
+    """The Wikidata item for a collection, resolved through its own films.
+
+    A series has an id nothing on the shelf stores, so it is found the way the
+    films themselves were filed: ask Wikidata about one of them (IMDb id first,
+    then by name) and keep the answer when it names *this* series. "" when no
+    film here resolves to the collection's name - which is honest, because a
+    collection can be a grouping nobody wrote down in Wikidata.
+    """
+    films = con.execute(
+        "SELECT id, name, release_year, imdb_id FROM titles"
+        " WHERE collection_id = ?"
+        " ORDER BY (imdb_id IS NULL), release_year, id LIMIT 4",
+        (collection_id,)).fetchall()
+    for film in films:
+        try:
+            found = series_of(film["imdb_id"],
+                                       year=film["release_year"],
+                                       name=film["name"],
+                                       kind=row["kind"] or "movie")
+        except Throttle:
+            raise
+        except Exception:
+            continue
+        for item in found:
+            if boxsets.same_name(item["name"], row["name"]):
+                boxsets.remember_series(con, collection_id, item["qid"])
+                return item["qid"]
+    return ""
+
+
+def refresh_collection(con, collection_id, row=None):
+    """Everything a collection can learn from outside, in one call.
+
+    The films of the series (so the page can say what is missing), the series'
+    own Wikipedia paragraph and cover, and any film on the shelf that this
+    series names but nobody has filed. The two buttons on a collection page,
+    the admin's *Refresh metadata* and the nightly pass all come through here,
+    so they cannot drift apart.
+
+    Returns a summary: `qid` (the series' Wikidata item, "" when nobody knows
+    one), `page` (Wikipedia's answer, {} with no article), `article` (that
+    article's title), `members` (how many films the series lists), `filled`
+    (the fields `fill_details()` filled) and `filed` (titles filed from the
+    shelf). Raises `Throttle` when Wikimedia refuses, so the caller can wait
+    or stop.
+    """
+    if row is None:
+        row = boxsets.get(con, collection_id)
+    summary = {"qid": "", "page": {}, "article": "", "members": 0,
+               "filled": [], "filed": []}
+    if row is None:
+        return summary
+    qid = (row["wikidata_id"] or "").strip()
+    if not qid:
+        qid = series_item_for(con, collection_id, row)
+    summary["qid"] = qid
+    if not qid:
+        return summary
+    films = series_members(qid, kind=(row["kind"] or "movie"))
+    boxsets.store_members(con, collection_id, films)
+    summary["members"] = len(films)
+    page = series_page(qid)
+    summary["page"] = page
+    summary["article"] = page.get("title") or ""
+    summary["filled"] = boxsets.fill_details(
+        con, collection_id, overview=page.get("overview") or "",
+        poster=page.get("poster_url") or "")
+    # The member list names the series' films, so a film the shelf holds and
+    # has never filed can be filed now - nobody has to do it by hand.
+    summary["filed"] = boxsets.file_members(con, collection_id)
+    return summary

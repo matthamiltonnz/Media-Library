@@ -289,6 +289,42 @@ def store_members(con, collection_id, rows):
     con.commit()
 
 
+def file_members(con, collection_id):
+    """File uncollected shelf films that this series knows about.
+
+    A member list names the films of a series with their years, so a film
+    sitting uncollected on the shelf - *Hobbs & Shaw* beside ten Fast & Furious
+    discs - can be filed from it without asking anybody. Only titles with **no**
+    collection are touched: a film somebody filed elsewhere is never moved,
+    which is `autofill_series()`'s rule too and for the same reason. Returns the
+    names it filed, so the caller can say so.
+    """
+    head = con.execute("SELECT kind FROM collections WHERE id = ?",
+                       (collection_id,)).fetchone()
+    if head is None or (head["kind"] or "") not in SERIES_KINDS:
+        return []
+    rows = members(con, collection_id)
+    if not rows:
+        return []
+    loose = con.execute(
+        "SELECT id, name, release_year, kind FROM titles"
+        " WHERE collection_id IS NULL AND kind = ?"
+        " ORDER BY name", (head["kind"],)).fetchall()
+    filed = []
+    for title in loose:
+        for item in rows:
+            if not _same_film(title["name"], title["release_year"],
+                              item["name"], item["release_year"]):
+                continue
+            con.execute("UPDATE titles SET collection_id = ? WHERE id = ?",
+                        (collection_id, title["id"]))
+            filed.append(title["name"])
+            break
+    if filed:
+        con.commit()
+    return filed
+
+
 # superscript digits, because Wikidata writes "Alien 3" for the shelf's "Alien³"
 _SUPERSCRIPT = {"\u2070": "0", "\u00b9": "1", "\u00b2": "2", "\u00b3": "3",
                 "\u2074": "4", "\u2075": "5", "\u2076": "6", "\u2077": "7",

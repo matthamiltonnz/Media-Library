@@ -1612,35 +1612,17 @@ def stats(con):
     }
 
 
-def series_item_for(con, collection_id, row):
-    """The Wikidata item for a collection, resolved through its own films.
 
-    A series has an id nothing on the shelf stores, so it is found the way the
-    films themselves were filed: ask Wikidata about one of them (IMDb id first,
-    then by name) and keep the answer when it names *this* series. "" when no
-    film here resolves to the collection's name - which is honest, because a
-    collection can be a grouping nobody wrote down in Wikidata.
-    """
-    films = con.execute(
-        "SELECT id, name, release_year, imdb_id FROM titles"
-        " WHERE collection_id = ?"
-        " ORDER BY (imdb_id IS NULL), release_year, id LIMIT 4",
-        (collection_id,)).fetchall()
-    for film in films:
-        try:
-            found = metadata.series_of(film["imdb_id"],
-                                       year=film["release_year"],
-                                       name=film["name"],
-                                       kind=row["kind"] or "movie")
-        except metadata.Throttle:
-            raise
-        except Exception:
-            continue
-        for item in found:
-            if boxsets.same_name(item["name"], row["name"]):
-                boxsets.remember_series(con, collection_id, item["qid"])
-                return item["qid"]
-    return ""
+def _with_filed(note, names):
+    """Say what a collection refresh filed from the shelf, if anything."""
+    if not names:
+        return note
+    listed = ", ".join(names[:4])
+    if len(names) > 4:
+        listed += " and %d more" % (len(names) - 4)
+    tail = ("Filed %d film%s from the shelf: %s."
+            % (len(names), "" if len(names) == 1 else "s", listed))
+    return (note + " " + tail) if note else tail
 
 
 def _back_target(value):
@@ -2247,79 +2229,81 @@ class Handler(BaseHTTPRequestHandler):
             enriched = re.search(r"/collection/(\d+)/metadata$",
                                  route_path(self))
             if enriched:
-                # the series' own Wikipedia article, which is the only place a
-                # collection has prose to scrape: its paragraph and lead picture
                 collection_id = int(enriched.group(1))
                 where = base_path(self) + "collection/%d" % collection_id
                 row = boxsets.get(con, collection_id)
-                qid = (row["wikidata_id"] or "") if row is not None else ""
+                note = ""
+                bad = ""
                 try:
-                    if not qid and row is not None:
-                        qid = series_item_for(con, collection_id, row)
-                    page = metadata.series_page(qid) if qid else {}
-                    if not page:
-                        where += ("?error=" + quote(
-                            "No Wikipedia article for this series - type what "
-                            "it is in *Edit this collection* instead."))
-                    else:
-                        filled = boxsets.fill_details(
-                            con, collection_id,
-                            overview=page.get("overview") or "",
-                            poster=page.get("poster_url") or "")
-                        if filled:
-                            where += ("?notice=" + quote(
-                                "Filled the %s from Wikipedia's \"%s\" article."
-                                % (" and the ".join(filled),
-                                   page.get("title") or "")))
-                        else:
-                            have = []
-                            if (row["overview"] or "").strip():
-                                have.append("paragraph")
-                            if (row["poster_url"] or "").strip():
-                                have.append("cover")
-                            where += ("?notice=" + quote(
-                                "Nothing to fill - the collection already has "
-                                "its %s, and the article offers no more. Edit "
-                                "it under *Edit this collection*."
-                                % " and its ".join(have) if have else
-                                "The article had nothing to add - type the "
-                                "paragraph in *Edit this collection*."))
+                    summary = metadata.refresh_collection(
+                        con, collection_id, row)
                 except metadata.Throttle:
-                    where += ("?error=" + quote(
-                        "Wikimedia is rate-limiting the lookups - try again in "
-                        "a few minutes."))
+                    bad = ("Wikimedia is rate-limiting the lookups - try "
+                           "again in a few minutes.")
+                    summary = None
+                if summary is not None:
+                    if not summary["page"]:
+                        bad = ("No Wikipedia article for this series - type "
+                               "the paragraph in *Edit this collection* "
+                               "instead.")
+                    elif summary["filled"]:
+                        note = ("Filled the %s from Wikipedia's \"%s\" "
+                                "article." % (" and the ".join(
+                                    summary["filled"]),
+                                    summary["article"]))
+                    else:
+                        have = [label for label, value in
+                                (("paragraph", row["overview"]),
+                                 ("cover", row["poster_url"]))
+                                if (value or "").strip()]
+                        if have:
+                            note = ("Nothing to fill - the collection "
+                                    "already has its %s, and the article "
+                                    "offers no more. Type it under *Edit this "
+                                    "collection*." % " and its ".join(have))
+                        else:
+                            note = ("The article had nothing to add - type "
+                                    "the paragraph in *Edit this "
+                                    "collection*.")
+                    note = _with_filed(note, summary["filed"])
+                if bad:
+                    where += "?error=" + quote(bad)
+                elif note:
+                    where += "?notice=" + quote(note)
                 return self.respond(303, "", extra={"Location": where})
 
             looked = re.search(r"/collection/(\d+)/members$",
                                route_path(self))
             if looked:
-                # what is in this series that the shelf is missing: ask Wikidata
-                # for the series item (or the one already stored) and keep the
-                # answer, so the page never waits on the network
+                # What is in this series that the shelf has not got, plus the
+                # paragraph and the films this pass could file. One call, so
+                # the two buttons and the nightly pass cannot drift apart.
                 collection_id = int(looked.group(1))
                 where = base_path(self) + "collection/%d" % collection_id
                 row = boxsets.get(con, collection_id)
-                qid = (row["wikidata_id"] or "") if row is not None else ""
+                note = ""
+                bad = ""
                 try:
-                    if not qid and row is not None:
-                        qid = series_item_for(con, collection_id, row)
-                    if not qid:
-                        where += ("?error=" + quote(
-                            "Wikidata has no film series called \"%s\" - the "
-                            "collection's own name may be the place to start."
-                            % (row["name"] if row is not None else "")))
-                    else:
-                        rows = metadata.series_members(
-                            qid, kind=(row["kind"] if row is not None
-                                       else "movie"))
-                        boxsets.store_members(con, collection_id, rows)
-                        where += ("?notice=" + quote(
-                            "Wikidata files %d film%s under this series."
-                            % (len(rows), "" if len(rows) == 1 else "s")))
+                    summary = metadata.refresh_collection(
+                        con, collection_id, row)
                 except metadata.Throttle:
-                    where += ("?error=" + quote(
-                        "Wikimedia is rate-limiting the lookups - try again "
-                        "in a few minutes."))
+                    bad = ("Wikimedia is rate-limiting the lookups - try "
+                           "again in a few minutes.")
+                    summary = None
+                if summary is not None:
+                    if not summary["qid"]:
+                        bad = ("Wikidata has no film series called \"%s\" - "
+                               "the collection's own name may be the place "
+                               "to look." % (row["name"] if row else ""))
+                    else:
+                        count = summary["members"]
+                        note = ("Wikidata files %d film%s under this series."
+                                % (count, "" if count == 1 else "s"))
+                        note = _with_filed(note, summary["filed"])
+                if bad:
+                    where += "?error=" + quote(bad)
+                elif note:
+                    where += "?notice=" + quote(note)
                 return self.respond(303, "", extra={"Location": where})
 
             series = re.search(r"/collection/(\d+)/?$", route_path(self))
@@ -2545,9 +2529,11 @@ class Handler(BaseHTTPRequestHandler):
                     "Location": base + "admin?deduped=%d#maintenance" % folded})
 
             if route.rstrip("/").endswith("/admin/refresh"):
-                # one button, two lookups: the titles (Wikipedia/Wikidata for
-                # films and TV, MusicBrainz for albums) and the acts themselves
-                refresh_job.start(DB_PATH, force=bool(field(form, "force")))
+                # one button, three lookups: the titles (Wikipedia/Wikidata for
+                # films and TV, MusicBrainz for albums), the acts themselves
+                # and every collection's films, paragraph and cover
+                refresh_job.start(DB_PATH, force=bool(field(form, "force")),
+                                  collections=True)
                 artists.start(DB_PATH)
                 return self.respond(303, "", extra={"Location": base + "admin#metadata"})
 

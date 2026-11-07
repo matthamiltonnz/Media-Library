@@ -143,6 +143,11 @@ def _refresh_block(base, refresh):
         if nxt:
             auto += " Next one %s." % time.strftime("%a %H:%M",
                                                     time.localtime(nxt))
+    if refresh.get("collections"):
+        state += (" Collections: %d of %d refreshed, %d film(s) filed from "
+                  "the shelf." % (refresh.get("collection_done", 0),
+                                  refresh["collections"],
+                                  refresh.get("collection_filed", 0)))
     return """
 <div id="refresh-panel" data-running="%s" data-status="%sadmin/status.json">
   <p id="refresh-state">%s</p>
@@ -157,7 +162,10 @@ def _refresh_block(base, refresh):
       belongs to - which is what fills the collections. Only what is missing is
       asked for: a film that already has its metadata but no collection gets
       its series looked up, not a fresh copy of everything. The same thing runs
-      by itself when the add-on starts, and again on the schedule above.</p>
+      by itself when the add-on starts, and again on the schedule above.
+      A collection is refreshed here too: its films are listed, its paragraph
+      and cover come from its series' article, and any film of the series that
+      the shelf holds but nobody had filed is filed from that list.</p>
     <label class="check"><input type="checkbox" name="force" value="1"> also
       overwrite titles that already have metadata</label>
   </form>
@@ -185,6 +193,12 @@ def _refresh_block(base, refresh):
             s.throttled + ' rate-limited.';
         }
         document.getElementById('refresh-last').textContent = s.last || '';
+        if (s.collections) {
+          document.getElementById('refresh-state').textContent +=
+            ' Collections: ' + (s.collection_done || 0) + ' of ' +
+            s.collections + ' refreshed, ' +
+            (s.collection_filed || 0) + ' film(s) filed from the shelf.';
+        }
         window.setTimeout(poll, 3000);
       })
       .catch(function () { window.setTimeout(poll, 5000); });

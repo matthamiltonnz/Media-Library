@@ -58,7 +58,7 @@ occasional jobs:
 
 Exports are per viewer: shared copies plus your own private ones.
 
-- **Metadata** — one button, **Refresh metadata**, does both lookups at once:
+- **Metadata** — one button, **Refresh metadata**, does every lookup at once:
   it walks every title missing data in the background (sequential, two requests
   per title: Wikipedia page search + summary) and fills
   plot, poster, year and IMDb id. The page polls `/admin/status.json` every three
@@ -88,6 +88,16 @@ Exports are per viewer: shared copies plus your own private ones.
   working through up to two hundred titles (and two hundred acts) a night, so a
   shelf nobody touches still drains its backlog. The start-up pass stays at
   sixty: a restart is cheap, a nightly sweep can afford to be patient.
+
+  **Collections are refreshed by that button and by the nightly pass too.** For
+  every collection: its films are listed from Wikidata (that is the *Films in
+  this series* gap list on its own page), its paragraph and cover come from the
+  series' Wikipedia article, and any film of the series that is on the shelf but
+  in no collection is **filed into it** from that list — so a *Fast & Furious*
+  series picks up *Hobbs & Shaw* without anyone dragging it in. A film somebody
+  filed elsewhere is never moved, and a film with no year that matches nothing
+  is left alone. The two buttons on the collection page (*Look up the films in
+  this series*, *Refresh metadata*) run the same pass for that one collection.
 
 The catalogue opens in **Thumbnails** view (poster grid, one card per title with its
 formats and copy count); the **List view** link next to the search box switches to
@@ -294,6 +304,11 @@ with the other seven.
   it while a linked copy has any, so the scraped picture is the fallback for a
   collection with no links. There is no other keyless source for a series -
   TMDB's collection data needs an API key this add-on does not have.
+  Both buttons also do the *other* half — each is the whole refresh for this
+  one collection: the film list is looked up again, and any film of the series
+  that is on the shelf and in no collection is filed into this one (a film
+  already in *another* collection is never moved). The nightly pass and the
+  admin's **Refresh metadata** do the same for every collection.
 - **Edit this collection** renames it and says what the series is (one
   paragraph, shown at the top of its page). **Delete this collection** removes
   the collection and leaves every film on the shelf.

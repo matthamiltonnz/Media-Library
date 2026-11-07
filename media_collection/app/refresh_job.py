@@ -14,6 +14,9 @@ STATE = {
     "running": False, "done": 0, "total": 0, "updated": 0, "filed": 0, "failed": 0,
     "throttled": 0, "started": None, "finished": None, "force": False,
     "last": "", "paused": False, "waiting": False, "next_try": 0,
+    # the collections half of the pass: every collection's film list, its
+    # paragraph and any shelf film the series names that nobody had filed
+    "collections": 0, "collection_done": 0, "collection_filed": 0,
 }
 
 
@@ -27,13 +30,18 @@ def status():
     return state
 
 
-def start(db_path, force=False, pause=1.2, limit=None):
+def start(db_path, force=False, pause=1.2, limit=None, collections=False):
     """Look up the titles that are missing metadata, in the background.
 
     `limit` bounds a run: the add-on refreshes a handful on every start (the
     button does the whole catalogue), because a shelf can easily hold hundreds
     of titles that no lookup will ever fill and repeating that sweep on each
     restart would keep Wikipedia busy for nothing.
+
+    `collections` adds the other backlog: every collection's film list, its
+    paragraph and cover, and any film on the shelf that its series names but
+    nobody has filed. It is off at start-up (a restart should not walk fifteen
+    series) and on for the button and the nightly pass.
     """
     with _LOCK:
         if STATE["running"]:
@@ -41,13 +49,15 @@ def start(db_path, force=False, pause=1.2, limit=None):
         targets = _targets(db_path, force)
         if limit is not None:
             targets = targets[:limit]
-        if not targets:
+        if not targets and not collections:
             return False
         STATE.update(running=True, force=force, done=0, total=len(targets),
                      updated=0, filed=0, failed=0, throttled=0, last="", paused=False,
                      waiting=False, next_try=0, finished=None,
+                     collections=0, collection_done=0, collection_filed=0,
                      started=time.strftime("%Y-%m-%d %H:%M:%S"))
-    threading.Thread(target=_run, args=(db_path, targets, pause), daemon=True).start()
+    threading.Thread(target=_run, args=(db_path, targets, pause, collections),
+                     daemon=True).start()
     return True
 
 
@@ -100,13 +110,18 @@ def _targets(db_path, force):
         con.close()
 
 
-def _run(db_path, targets, pause):
+def _run(db_path, targets, pause, collections=False):
     con = sqlite3.connect(db_path, timeout=60)
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA busy_timeout = 60000")
     con.execute("PRAGMA foreign_keys = ON")
     try:
         wait_seconds = 10 * 60                     # first 429 -> wait 10 minutes
+        # Collections first. Each costs a handful of requests, while the title
+        # backlog behind it can be hours long - and a pass that is running out
+        # of patience with Wikimedia should have done the cheap half already.
+        if collections:
+            _run_collections(con, pause)
         for title_id, needs_metadata in targets:
             attempts = 0
             while True:
@@ -168,6 +183,41 @@ def _run(db_path, targets, pause):
         STATE["finished"] = time.strftime("%Y-%m-%d %H:%M:%S")
 
 
+def _run_collections(con, pause):
+    """The other backlog: each collection's films, paragraph and cover.
+
+    A collection is cheap next to a title - four or five requests - and the
+    shelf holds a handful of them, so there is no limit and no ordering to
+    interleave: every collection is refreshed on every unbounded pass. What a
+    pass cannot carry is a rate limit, so a `Throttle` stops the half where it
+    stands and leaves the rest to the next one.
+    """
+    rows = con.execute("SELECT id FROM collections ORDER BY id").fetchall()
+    STATE["collections"] = len(rows)
+    for row in rows:
+        if STATE["paused"]:
+            return
+        try:
+            summary = metadata.refresh_collection(con, row["id"])
+        except metadata.Throttle:
+            STATE["paused"] = True
+            STATE["last"] = ("Wikimedia kept refusing - the collections "
+                             "pass stopped")[:120]
+            return
+        except Exception as exc:            # one bad series, not the pass
+            STATE["failed"] += 1
+            STATE["last"] = ("collection %d: %s" % (row["id"], exc))[:120]
+            time.sleep(max(pause, 1.0))
+            continue
+        STATE["collection_done"] += 1
+        filed = summary.get("filed") or []
+        STATE["collection_filed"] += len(filed)
+        if filed:
+            STATE["last"] = ("collection %d: filed %s"
+                             % (row["id"], ", ".join(filed[:3])))[:120]
+        time.sleep(pause)
+
+
 def _until_hour(hour):
     """Seconds until the next `hour`:00 local time (never less than a minute)."""
     now = time.localtime()
@@ -209,7 +259,7 @@ def _auto(db_path, hours, hour_of_day, limit, also):
         time.sleep(wait)
         AUTO["next"] = 0.0
         try:
-            start(db_path, limit=limit)
+            start(db_path, limit=limit, collections=True)
             if also:
                 also()
         except Exception as exc:        # a background pass must never die

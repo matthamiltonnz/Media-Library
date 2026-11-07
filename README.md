@@ -101,7 +101,12 @@ Full documentation: [media_collection/DOCS.md](media_collection/DOCS.md).
   lists the films in the series nobody here owns, so the gap in the shelf is
   written down rather than remembered - and *Refresh metadata* on the
   collection itself takes the paragraph and a poster from the series' Wikipedia
-  article, so a series page is not just a name until somebody types one.
+  article, so a series page is not just a name until somebody types one. All
+  three of those - the film list, the paragraph and the poster - are refreshed
+  by the daily pass and by *Refresh metadata* on the admin page as well, and a
+  refresh **files** the films it finds: a series that names a film the shelf
+  holds but nobody had filed gets it filed for you, while a film you put in
+  another collection is left where you put it.
 - **A duplicate is a question, not an accident.** Adding a title that is already
   on the shelf points at the existing row, because a second copy belongs there;
   adding a copy someone already owns in that format asks first. The admin page
