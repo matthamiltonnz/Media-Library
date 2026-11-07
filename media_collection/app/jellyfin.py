@@ -866,7 +866,7 @@ def start_sync(db_path):
         if STATE["running"]:
             return False
         STATE.update({"running": True, "counts": {}, "finished": None,
-                      "started": time.strftime("%Y-%m-%d %H:%M:%S")})
+                      "started": time.strftime("%Y-%m-%d %H:%M")})
     threading.Thread(target=_run_sync, args=(db_path,), daemon=True).start()
     return True
 
@@ -901,7 +901,7 @@ def _run_sync(db_path):
         print("jellyfin: tidy up skipped (%s)" % exc)
     with _LOCK:
         STATE.update({"running": False, "counts": counts,
-                      "finished": time.strftime("%Y-%m-%d %H:%M:%S")})
+                      "finished": time.strftime("%Y-%m-%d %H:%M")})
 
 
 

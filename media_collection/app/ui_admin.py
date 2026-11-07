@@ -175,16 +175,22 @@ def _refresh_block(base, refresh):
   var panel = document.getElementById('refresh-panel');
   if (!panel || panel.dataset.running !== '1') { return; }
   var url = panel.dataset.status;
+  // One clock format for the whole page, matching the server's own: the
+  // browser's locale gave "12:34 pm" beside the server's "23:34".
+  function clock(seconds) {
+    var d = new Date(seconds * 1000);
+    return ('0' + d.getHours()).slice(-2) + ':' +
+           ('0' + d.getMinutes()).slice(-2);
+  }
   function poll() {
     fetch(url, {headers: {'Accept': 'application/json'}, cache: 'no-store'})
       .then(function (r) { return r.json(); })
       .then(function (s) {
         if (!s.running) { window.location.reload(); return; }
         if (s.waiting) {
-          var when = new Date(s.next_try * 1000);
           document.getElementById('refresh-state').textContent =
             'Rate-limited at ' + s.done + '/' + s.total + ' — waiting until ' +
-            when.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}) +
+            (s.next_try_at || clock(s.next_try)) +
             ', then retrying by itself.';
         } else {
           document.getElementById('refresh-state').textContent =

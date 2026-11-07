@@ -3330,9 +3330,56 @@ def _check_page():
     PAGE.substitute({name: "" for name in ids})
 
 
+def _setup_timezone():
+    """Use the household's clock, not the container's.
+
+    The base image starts the app with a stripped environment (no `TZ`) and
+    carries no `/etc/localtime`, so Python - and therefore every stamp, the
+    nightly scheduler and the pause times - fell back to **UTC**: the 03:00 pass
+    ran at 4 pm here, and a pause the browser showed as "12:34 pm" printed as
+    "23:34". Ask Home Assistant what its time zone is and remember it, so a
+    restart with Home Assistant slow to answer still knows. `TZ` in the
+    environment wins, which is how a developer runs the code directly.
+    """
+    if os.environ.get("TZ", "").strip():
+        return
+    name = ""
+    try:
+        con = connect()
+        try:
+            try:
+                name = playback._call("/config", timeout=5).get("time_zone") or ""
+            except Exception:
+                name = ""
+            if name:
+                con.execute("INSERT INTO settings (key, value) VALUES (?, ?)"
+                            " ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                            ("timezone", name))
+                con.commit()
+            else:
+                row = con.execute("SELECT value FROM settings"
+                                  " WHERE key = 'timezone'").fetchone()
+                name = (row["value"] if row else "") or ""
+        finally:
+            con.close()
+    except Exception as exc:                  # a clock is not worth failing for
+        log("clock: could not read the time zone (%s)" % exc)
+        return
+    if not name:
+        log("clock: no time zone known - leaving the system clock alone")
+        return
+    os.environ["TZ"] = name
+    try:
+        time.tzset()
+    except AttributeError:                    # not a Unix clock; leave it alone
+        return
+    log("clock: %s, %s" % (name, time.strftime("%Y-%m-%d %H:%M")))
+
+
 def main():
     if not os.path.exists(DB_PATH):
         raise SystemExit("database missing at %s - run migrate.sh first" % DB_PATH)
+    _setup_timezone()
     _check_page()
     log("media collection listening on :%d (db=%s)" % (PORT, DB_PATH))
     scan.start(DB_PATH)

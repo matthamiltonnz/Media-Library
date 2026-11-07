@@ -84,7 +84,9 @@ Exports are per viewer: shared copies plus your own private ones.
   ticked by default) fetches it there and then, a new act's MusicBrainz record
   and biography included. For an act already on the shelf that last step costs a
   single row read. On top of that the whole pass repeats itself **once a day at
-  03:00** (`refresh_hours` - 24 daily, 168 weekly, 0 never; see *Options*),
+  03:00** the household's time - the app takes its clock from Home Assistant's
+  time zone, so this is 3 am where you are, not 3 am UTC
+  (`refresh_hours` - 24 daily, 168 weekly, 0 never; see *Options*),
   working through up to two hundred titles (and two hundred acts) a night, so a
   shelf nobody touches still drains its backlog. The start-up pass stays at
   sixty: a restart is cheap, a nightly sweep can afford to be patient.

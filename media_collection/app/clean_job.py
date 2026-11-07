@@ -26,7 +26,7 @@ def start(db_path):
         STATE.update({"running": True, "total": 0, "checked": 0, "gone": 0,
                       "routes": 0, "verified": 0, "skipped": [], "phase": "",
                       "pruned": 0,
-                      "started": time.strftime("%Y-%m-%d %H:%M:%S"),
+                      "started": time.strftime("%Y-%m-%d %H:%M"),
                       "finished": ""})
     threading.Thread(target=_run, args=(db_path,), daemon=True).start()
     return True
@@ -133,4 +133,4 @@ def _run(db_path):
         con.close()
         with _LOCK:
             STATE.update({"running": False,
-                          "finished": time.strftime("%Y-%m-%d %H:%M:%S")})
+                          "finished": time.strftime("%Y-%m-%d %H:%M")})

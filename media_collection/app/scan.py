@@ -425,7 +425,7 @@ def start(db_path, repair=False):
         counted.clear()
         STATE.update({"running": True, "counts": {},
                       "files": 0, "repair": repair,
-                      "started": time.strftime("%Y-%m-%d %H:%M:%S"),
+                      "started": time.strftime("%Y-%m-%d %H:%M"),
                       "finished": None})
     threading.Thread(target=_run, args=(db_path, repair), daemon=True).start()
     return True
@@ -447,4 +447,4 @@ def _run(db_path, repair=False):
         con.close()
     with _LOCK:
         STATE.update({"running": False, "counts": counts,
-                      "finished": time.strftime("%Y-%m-%d %H:%M:%S")})
+                      "finished": time.strftime("%Y-%m-%d %H:%M")})

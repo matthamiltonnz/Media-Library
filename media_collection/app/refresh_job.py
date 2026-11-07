@@ -27,6 +27,13 @@ def status():
     state = dict(STATE)
     state["auto_hours"] = AUTO["hours"]
     state["auto_next"] = AUTO["next"]
+    # The clock the page prints for a pause is formatted **here**, by the same
+    # code that formats every other time on that page: a browser in another
+    # timezone (or one that prefers 12-hour time) then cannot render the same
+    # moment as "12:34 pm" beside the server's "23:34".
+    state["next_try_at"] = (time.strftime("%H:%M",
+                                         time.localtime(state["next_try"]))
+                            if state.get("next_try") else "")
     return state
 
 
@@ -55,7 +62,7 @@ def start(db_path, force=False, pause=1.2, limit=None, collections=False):
                      updated=0, filed=0, failed=0, throttled=0, last="", paused=False,
                      waiting=False, next_try=0, finished=None,
                      collections=0, collection_done=0, collection_filed=0,
-                     started=time.strftime("%Y-%m-%d %H:%M:%S"))
+                     started=time.strftime("%Y-%m-%d %H:%M"))
     threading.Thread(target=_run, args=(db_path, targets, pause, collections),
                      daemon=True).start()
     return True
@@ -180,7 +187,7 @@ def _run(db_path, targets, pause, collections=False):
     finally:
         con.close()
         STATE["running"] = False
-        STATE["finished"] = time.strftime("%Y-%m-%d %H:%M:%S")
+        STATE["finished"] = time.strftime("%Y-%m-%d %H:%M")
 
 
 def _run_collections(con, pause):
