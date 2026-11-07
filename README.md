@@ -85,9 +85,10 @@ Full documentation: [media_collection/DOCS.md](media_collection/DOCS.md).
   edition's own cover, not the standard one's.
 - **Browsing.** One mode at a time — Movies, TV, Music, Artists — with an owner
   filter, format pills, search that matches the artist as well as the title,
-  list and poster views, and tallies that add up. A search also offers the
-  artist or the collection itself as a card, so "alien" gives you the series
-  before the six films inside it. Titles file under the first letter of the
+  list and poster views, and tallies that all count the same thing — titles, so
+  a format pill reading 175 beside "Movies 175" is the same 175 films. A search
+  also offers the artist or the collection itself as a card, so "alien" gives
+  you the series before the six films inside it. Titles file under the first letter of the
   name with *The* / *A* / *An* moved to the end, and numbers sort
   by value (2 before 10).
 - **Collections.** A film series - *Fast &amp; Furious* (eleven films, one of

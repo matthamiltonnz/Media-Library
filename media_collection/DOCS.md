@@ -358,7 +358,7 @@ Titles whose only copies are files used to be hidden from the catalogue, with a
 link under the tallies to bring them back; that switch was only ever there while
 the first import was being sorted out and is gone. Every title is listed, and the
 tallies count real copies: a `ripped` file is the disc's own file, not a second
-copy, so the format pills and the headline agree.
+copy, so nothing is counted twice.
 
 ## Play
 
@@ -551,9 +551,12 @@ current mode; other people's private copies never appear, whichever filter is ac
 Within a mode the page shows the title/copy counts, and a **format pill row** sits
 between the mode pills and the owner chips (CD, 3D Blu-ray, Blu-ray, 4K Blu-ray, …).
 A pill applies the moment it is clicked; pick several to see "Blu-ray **or** 4K" at
-once, and the count inside each pill is what that format holds under the current
-filters. Picking a pill never removes the others, so a second format is one more
-click away; clicking the current pill clears it.
+once, and the count inside each pill is the number of **titles** with a copy in that
+format under the current filters — the same unit as the mode pills, the owner chips
+and the headline's first number, so picking 4K reads the same number in all three
+rows. A title holding a 4K and a Blu-ray is in both pills; hover a pill to see how
+many copies its titles hold. Picking a pill never removes the others, so a second
+format is one more click away; clicking the current pill clears it.
 Format pills stack on top of the search and owner filters, and a poster keeps showing
 every format its title holds even while the shelf is narrowed to one of them.
 The search box and the list/poster toggle sit under the counts, and **+ Add a copy** sits

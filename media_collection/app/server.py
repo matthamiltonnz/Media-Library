@@ -381,9 +381,17 @@ def library_stats(con, viewer_id, query="", kind="", owner=None,
     # pill row must keep every format, or picking "CD" would leave "CD" as the
     # only pill on the page. The kind and owner chips are counted the same way,
     # each leaving its own dimension out of the tally.
+    #
+    # A row counts **titles**, like every other chip on the page and like the
+    # headline's first number - a pill reading 200 beside "Movies 175" and
+    # "Everyone 175" for the same 175 films was counting copies, which is
+    # neither the unit of the cards below it nor of any chip beside it. The
+    # copies are still counted, for the pill's tooltip (one title can hold a
+    # 4K and a Blu-ray, so the copies are not the titles).
     loose, loose_extra = visible_clause(query, kind, owner, "", only)
     formats = con.execute(
-        "SELECT i.format AS fmt, COUNT(*) AS n FROM items i"
+        "SELECT i.format AS fmt, COUNT(DISTINCT i.title_id) AS n,"
+        "       COUNT(*) AS copies FROM items i"
         " JOIN titles t ON t.id = i.title_id WHERE " + loose +
         " AND (i.format IS NULL OR i.format <> 'ripped')"
         " GROUP BY fmt ORDER BY n DESC",
@@ -975,9 +983,13 @@ def render_index(con, viewer, base, error=None, query="",
         return tally_link(",".join(chosen))
 
     format_tabs = "".join(
-        '<a class="%s" href="%s">%s<span class="n">%d</span></a>'
+        '<a class="%s" href="%s" title="%s">%s<span class="n">%d</span></a>'
         % ("current" if row["fmt"] in picked else "",
            html.escape(format_link(row["fmt"])),
+           html.escape("%d title%s, %d cop%s"
+                       % (row["n"], "" if row["n"] == 1 else "s",
+                          row["copies"], "y" if row["copies"] == 1
+                          else "ies")),
            html.escape(FORMAT_LABELS.get(row["fmt"], row["fmt"])),
            row["n"])
         for row in formats if row["fmt"] != "ripped")
