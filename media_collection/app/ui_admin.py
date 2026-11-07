@@ -7,15 +7,21 @@ import stores
 import ui
 
 
-def _panel(title, body, name=""):
+def _panel(title, body, name="", folded=False):
     """One block of the admin page: a heading, then its controls.
 
     `name` gives the section an id, so a form in it can redirect back to
     `admin#name` and land where it was rather than at the top of the page.
+    `folded` starts the block closed - a `<details>` whose summary is the
+    heading - for a section that is set up once and then left alone.
     """
+    ident = ' id="%s"' % html.escape(name, quote=True) if name else ""
+    if folded:
+        return ('<details class="panel fold"%s>\n<summary>%s</summary>\n%s'
+                '</details>'
+                % (ident, html.escape(title), body))
     return ('<section class="panel"%s>\n<h2>%s</h2>\n%s</section>'
-            % (' id="%s"' % html.escape(name, quote=True) if name else "",
-               html.escape(title), body))
+            % (ident, html.escape(title), body))
 
 
 def confirm_root(base, root, files, copies):
@@ -222,22 +228,10 @@ def _device_options(targets, chosen=""):
 
 
 SHOP_KINDS = (("digital", "digital shop"), ("retail", "retail shop"))
-PLAYER_KINDS = (("media_player", "media_player (turn on + app)"),
-                ("remote", "remote (turn the device on)"),
-                ("input_select", "input_select (fires an automation)"),
-                ("script", "script"), ("automation", "automation"))
-
-
 def _kind_options(chosen):
     return "".join('<option value="%s"%s>%s</option>'
                    % (value, " selected" if value == chosen else "", text)
                    for value, text in SHOP_KINDS)
-
-
-def _player_kind_options(chosen):
-    return "".join('<option value="%s"%s>%s</option>'
-                   % (value, " selected" if value == chosen else "", text)
-                   for value, text in PLAYER_KINDS)
 
 
 def _player_options(rows):
@@ -293,6 +287,7 @@ def _link_app(row, player, entities):
     if not app or not info:
         return app, ""
     listed = info.get("sources") or []
+    picks = (info.get("domain") or "").lower() in ("select", "input_select")
     integration = (info.get("integration") or "").lower()
     if "." in app and " " not in app:
         if integration == "androidtv_remote":
@@ -309,8 +304,13 @@ def _link_app(row, player, entities):
     if app in listed:
         return app, ""
     if listed:
-        return app, ("%s lists %s, not %s" % (entity, ", ".join(listed[:4]),
-                                              app))
+        return app, ("%s %s %s, not %s" % (entity,
+                                          "offers" if picks else "lists",
+                                          ", ".join(listed[:4]), app))
+    if picks:
+        return app, ("%s offers no options to pick - set one in Home"
+                     " Assistant, or give this player a script instead"
+                     % entity)
     return app, ("%s publishes no app list - give this player an Android"
                  " package instead" % entity)
 
@@ -392,25 +392,65 @@ def _store_dialog(base, row, opened, targets, entities=None):
            html.escape(hint or "Apple TV or com.example.app", quote=True)))
 
 
-def _player_dialog(base, row, entities):
-    """The edit sheet for one player: what it is called and what it drives."""
+def _entity_options(entities, chosen=""):
+    """Every entity a player can point at, grouped by domain.
 
-    names = "".join('<option value="%s">' % html.escape(entity["entity_id"],
-                                                         quote=True)
-                    for entity in entities or ())
+    A `<select>`, not the `<input list>` this used to be: a datalist offers
+    only what matches the text already in the box, so a field holding
+    `input_select.lounge_activity` suggested exactly that one entity and the
+    Harmony Hub's `select.lounge_activities` looked absent from the list.
+    """
+    chosen = (chosen or "").strip()
+    rows = list(entities or ())
+    groups = {}
+    for entity in rows:
+        groups.setdefault(entity.get("domain") or "other", []).append(entity)
+    out = []
+    if chosen and chosen not in {entity["entity_id"] for entity in rows}:
+        # An entity nothing reports right now (its integration is off) has to
+        # survive a save, so it rides along as the selected option.
+        out.append('<option value="%s" selected>%s - not reported by Home'
+                   ' Assistant</option>'
+                   % (html.escape(chosen, quote=True), html.escape(chosen)))
+    elif not rows:
+        out.append('<option value="%s">%s</option>'
+                   % (html.escape(chosen, quote=True),
+                      html.escape(chosen or "-")))
+    for domain in sorted(groups):
+        out.append('<optgroup label="%s">' % html.escape(domain))
+        for entity in groups[domain]:
+            label = "%s \u00b7 %s" % (entity.get("name") or entity["entity_id"],
+                                     entity["entity_id"])
+            if entity.get("integration"):
+                label += " \u00b7 %s" % entity["integration"]
+            out.append('<option value="%s"%s>%s</option>'
+                       % (html.escape(entity["entity_id"], quote=True),
+                          " selected" if entity["entity_id"] == chosen else "",
+                          html.escape(label)))
+        out.append("</optgroup>")
+    return "".join(out)
+
+
+def _player_dialog(base, row, entities):
+    """The edit sheet for one player: what it is called and what it drives.
+
+    No Kind box: a player's kind *is* its entity's domain (`select.` picks an
+    option, `media_player.` turns on and opens an app, `script.` runs), and the
+    handler derives it from the posted entity. Asking for it again could only
+    contradict the entity.
+    """
+
+    options = _entity_options(entities, row["ha_entity_id"])
     return (
         '<dialog class="sheet" id="player-%d">'
         "<h2>Edit %s</h2>"
         '<form method="post" action="%sstores/device/%d">'
         '<div class="grid">'
         '<label>Name<input name="name" value="%s"></label>'
-        '<label>Entity<input name="ha_entity_id" value="%s" list="ent-%d"'
-        ' placeholder="media_player.apple_tv"></label>'
-        '<label>Kind<select name="kind">%s</select></label>'
-        '<label>Option (an input_select)<input name="input_source"'
+        '<label>Entity<select name="ha_entity_id">%s</select></label>'
+        '<label>Option (a select or input_select)<input name="input_source"'
         ' value="%s" placeholder="Blu-ray"></label>'
         "</div>"
-        '<datalist id="ent-%d">%s</datalist>'
         '<p><button type="submit">Save</button></p>'
         "</form>"
         '<form method="dialog"><p><button type="submit">Close</button></p>'
@@ -419,10 +459,8 @@ def _player_dialog(base, row, entities):
         % (row["id"], html.escape(row["name"]),
            html.escape(base), row["id"],
            html.escape(row["name"], quote=True),
-           html.escape(row["ha_entity_id"] or "", quote=True), row["id"],
-           _player_kind_options(row["kind"]),
-           html.escape(row["input_source"] or "", quote=True),
-           row["id"], names))
+           options,
+           html.escape(row["input_source"] or "", quote=True)))
 
 
 def _stores_block(base, store_rows, targets, entities=()):
@@ -518,19 +556,19 @@ def _stores_block(base, store_rows, targets, entities=()):
     devices = []
     for row in targets:
         devices.append(
-            '<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td>'
+            '<tr><td>%s</td><td>%s</td><td>%s</td>'
             '<td class="actions">'
             '<button type="button" data-open="player-%d">Edit</button> '
             '<form method="post" action="%sstores/device/%d/delete">'
             '<button type="submit" class="danger">Remove</button>'
             "</form></td></tr>"
-            % (html.escape(row["name"]), html.escape(row["kind"]),
+            % (html.escape(row["name"]),
                html.escape(row["ha_entity_id"] or ""),
                html.escape(", ".join(shops_of.get(row["id"]) or []))
                or '<span class="muted">-</span>',
                row["id"], html.escape(base), row["id"]))
 
-    device_table = ('<table class="grid"><tr><th>Player</th><th>Kind</th>'
+    device_table = ('<table class="grid"><tr><th>Player</th>'
                     "<th>Entity</th><th>Opens</th><th></th></tr>%s</table>"
                     % "".join(devices) if devices else
                     '<p class="muted">No players yet - a player is what a'
@@ -556,7 +594,7 @@ def _stores_block(base, store_rows, targets, entities=()):
         '<label>Entity<select name="ha_entity_id">%s</select></label>'
         '<label>Name<input name="name" placeholder="blank to use its own">'
         "</label>"
-        '<label>Option (an input_select)<input name="input_source"'
+        '<label>Option (a select or input_select)<input name="input_source"'
         ' placeholder="Blu-ray"></label>'
         "</div>"
         '<p><button type="submit">Add</button>'
@@ -600,7 +638,8 @@ def _build_stamp():
 
 def render(base, viewer, stats, message=None, refresh=None, duplicates=0,
            roots=(), jellyfin=None, scan_message="", players=(), chosen=None,
-           jobs=None, store_rows=(), targets=(), entities=(), confirm=""):
+           jobs=None, store_rows=(), targets=(), entities=(), confirm="",
+           open_players=False):
     jobs = jobs or {}
     parts = []
     if confirm:
@@ -649,8 +688,9 @@ def render(base, viewer, stats, message=None, refresh=None, duplicates=0,
                         name="stores"))
 
     if players:
-        parts.append(_panel("Players", _players_block(base, players, chosen),
-                            name="players"))
+        parts.append(_panel("Home Assistant Players",
+                            _players_block(base, players, chosen),
+                            name="players", folded=not open_players))
 
     parts.append(_panel("Import and export", """
 <p class="sub">A Blu-ray.com or iTunes style CSV is staged for review first,

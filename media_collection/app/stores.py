@@ -10,8 +10,8 @@ A store is also somewhere you can go to play it, and one shop is not one device:
 the Apple TV app runs on the Apple TV, on an Android/Google TV and on a phone.
 `store_targets` is that many-to-many, and the Play sheet lists every player
 attached to a store. `playback.open_on()` then drives whichever kind it is -
-a media_player, an input_select that fires an automation, a script, an
-automation.
+a media_player, an input_select or a select (a Harmony Hub's activities), a
+script, an automation.
 
 A 'system' store (jellyfin, rip) is a key the app writes itself and is never
 offered in a picker. A key with no row at all still renders: old rows win.

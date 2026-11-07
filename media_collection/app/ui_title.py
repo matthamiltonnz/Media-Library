@@ -42,6 +42,18 @@ def _text(value):
     return html.escape(str(value))
 
 
+def _quality(source):
+    """What a Jellyfin file is, as the sync recorded it.
+
+    The rows here are `sqlite3.Row`, which has no `.get()` and no attribute
+    access - a column the query did not select has to be asked for by name.
+    """
+    keys = source.keys() if hasattr(source, "keys") else source
+    if "media_quality" not in keys:
+        return ""
+    return (source["media_quality"] or "").strip()
+
+
 def _facts(row, base=""):
     """The one-line summary under the title: year, kind, artist, runtime ...
 
@@ -158,48 +170,102 @@ def _badges(items, digital, labels, base=None, title_id=None):
     return "".join(badges)
 
 
+def _picks_option(player):
+    """True when the player is *set* to an option, not woken and told an app.
+
+    A Harmony Hub offers its activities as the options of a `select`, and a
+    helper `input_select` fires an automation the same way; neither is an app
+    the device opens, so the Play sheet must not say it opened one.
+    """
+    kind = (player.get("kind") or "").lower()
+    entity = (player.get("ha_entity_id") or "").lower()
+    return kind in ("select", "input_select") or entity.startswith(
+        ("select.", "input_select."))
+
+
 def _store_plays(base, row, shops):
-    """One section per shop, with a button for each player it opens on.
+    """The shops and formats this title can be started on, split in two.
 
     `shops` is [(store_row, [player rows], app_name)] from
-    stores.playable_stores(). A shop is not one device - the Apple TV app runs
-    on the Apple TV, an Android TV and a phone - so every attached player gets
-    its own button, and each posts the store *and* the player. The app lives on
-    the player now, since that is what actually gets launched.
+    stores.playable_stores(). One shop can run on several players - the Apple
+    TV app on the Apple TV, an Android TV and a phone, or three activities on
+    one Harmony Hub - so a section with more than one renders a **player
+    picker**; a single player keeps its own one-button form.
 
-    The button wakes that player and opens the app; a bought title cannot be
-    deep-linked, so the sheet says so rather than pretending otherwise.
+    Returns `(digital, physical)`: the apps a bought copy opens in, and the
+    players that get the room ready for a disc. The Play sheet shows them under
+    two headings, so a vinyl title cannot read as though it could be streamed.
     """
-    if not shops:
-        return ""
-    parts = []
+    digital, physical = [], []
     for store, players, app in shops:
-        buttons = []
         apps = set()
         packaged = False
         for player in players:
-            buttons.append(
-                '<form method="post" action="%stitle/%s/store">'
-                '<input type="hidden" name="store" value="%s">'
-                '<input type="hidden" name="target" value="%s">'
-                '<button type="submit">%s</button></form>'
-                % (_text(base), row["id"], _text(store["key"]), player["id"],
-                   _text(player.get("name") or player["ha_entity_id"] or "")))
             named = (player.get("app") or "").strip()
             if "." in named:            # a package id reads badly on the page
                 packaged = True
                 named = ""
-            apps.add(_text(named) or _text(app or "") or _text(store["label"]))
+            if named or app:
+                apps.add(_text(named) or _text(app))
         wanted = apps.pop() if len(apps) == 1 else ""
-        if "kind" in store.keys() and store["kind"] == "format":
-            # A disc cannot be deep-linked - the format's players are there to
-            # get the room ready (amp input, screen, a script), so the heading
-            # is the format itself rather than "On <shop>".
-            heading = _text(store["label"])
-            note = "Wakes the player and gets it ready"
-            tail = " &#8212; put the disc in."
+        picks = bool(players) and all(_picks_option(p) for p in players)
+        several = len(players) > 1
+        # A select/input_select player is *set to* its own option. Name it only
+        # when every player sets the same one - with three activities on one
+        # disc the choice is the viewer's, and naming one of them was wrong.
+        options = sorted({(p.get("input_source") or "").strip() for p in players}
+                         - {""})
+        option = options[0] if len(options) == 1 else ""
+        disc = (store.get("kind") or "") == "format"
+
+        if several:
+            # One control for several players: pick the one to wake, then press.
+            action = ("Set the room up" if disc
+                      else "Open %s" % _text(store["label"]))
+            buttons = ('<form class="play-on" method="post"'
+                       ' action="%stitle/%s/store">'
+                       '<input type="hidden" name="store" value="%s">'
+                       '<label>Player<select name="target">%s</select></label>'
+                       '<button type="submit">%s</button></form>'
+                       % (_text(base), row["id"], _text(store["key"]),
+                          "".join('<option value="%s">%s</option>'
+                                  % (player["id"],
+                                     _text(player.get("name")
+                                           or player["ha_entity_id"] or ""))
+                                  for player in players), action))
         else:
-            heading = "On " + _text(store["label"])
+            player = players[0]
+            buttons = ('<form method="post" action="%stitle/%s/store">'
+                       '<input type="hidden" name="store" value="%s">'
+                       '<input type="hidden" name="target" value="%s">'
+                       '<button type="submit">%s</button></form>'
+                       % (_text(base), row["id"], _text(store["key"]),
+                          player["id"],
+                          _text(player.get("name")
+                                or player["ha_entity_id"] or "")))
+
+        heading = (_text(store["label"]) if disc
+                   else "On " + _text(store["label"]))
+        if disc:
+            # A disc cannot be deep-linked: its players are there to set the
+            # room up - an amp input, a screen, a script - and then you put the
+            # record on.
+            if option:
+                note = "Sets the player to %s" % _text(option)
+            elif picks:
+                note = ("Sets the player you pick" if several
+                        else "Sets the player up")
+            else:
+                note = "Gets the room ready"
+            tail = " &#8212; put the disc in."
+        elif picks:
+            if option:
+                note = "Sets the player to %s" % _text(option)
+            else:
+                note = ("Sets the player you pick" if several
+                        else "Sets the player up")
+            tail = " &#8212; pick the title there."
+        else:
             note = (("Wakes the player and opens %s" % wanted) if wanted
                     else "Wakes the player")
             tail = (" &#8212; pick the title there."
@@ -207,14 +273,21 @@ def _store_plays(base, row, shops):
                     " appears, its integration refused that link - <em>Admin"
                     " &rarr; Stores</em> says why." if packaged
                     else " &#8212; pick the title there.")
-        parts.append(
-            '<section class="store-play">'
-            "<h3>%s</h3>"
-            '<div class="players">%s</div>'
-            '<p class="muted">%s%s</p>'
-            "</section>"
-            % (heading, "".join(buttons), note, tail))
-    return "\n".join(parts)
+        unset = sorted({_text(player.get("name")
+                             or player["ha_entity_id"] or "")
+                        for player in players
+                        if _picks_option(player)
+                        and not (player.get("input_source") or "").strip()})
+        if unset:
+            tail += (" Set an option for %s in <em>Admin &rarr; Players</em>."
+                     % ", ".join(unset))
+        block = ('<section class="store-play">'
+                 "<h4>%s</h4>"
+                 "%s"
+                 '<p class="sub">%s%s</p>'
+                 "</section>" % (heading, buttons, note, tail))
+        (physical if disc else digital).append(block)
+    return "".join(digital), "".join(physical)
 
 
 def _play_block(base, row, items, digital, players, last_player,
@@ -280,7 +353,7 @@ def _play_block(base, row, items, digital, players, last_player,
         if not playable:
             shelf = ""
         else:
-            shelf = ('<h3>From Media folder</h3>'
+            shelf = ('<h4>From Media folder</h4>'
                      '<p class="sub">Home Assistant opens the file on a player'
                      ' you choose.</p>'
                      '<form method="post" action="%stitle/%d/play">'
@@ -297,6 +370,13 @@ def _play_block(base, row, items, digital, players, last_player,
         ' track.</span></p>' if music
         else '<p><button type="submit">Play in Jellyfin</button></p>')
     picker = _version_picker(digital, items)
+    # What the file is - "4K · Dolby Vision · TrueHD Atmos 7.1 · 24.2 GB" - so the
+    # sheet itself answers "is this as good as the disc?". With several versions
+    # each one carries its own in the picker instead.
+    routes = [source for source in digital if source["provider"] == "jellyfin"]
+    quality = _quality(routes[0]) if len(routes) == 1 else ""
+    quality_line = ('<p class="quality">%s</p>' % _text(quality)
+                    if quality else "")
     if not jellyfin_ready:
         jellyfin = ""
     elif sessions:
@@ -307,7 +387,8 @@ def _play_block(base, row, items, digital, players, last_player,
                " \u00b7 " + _text(session["user"])
                if session.get("user") else "")
             for session in sessions)
-        jellyfin = ('<h3>On the Jellyfin server</h3>'
+        jellyfin = ('<h4>On the Jellyfin server</h4>'
+                    '%s'
                     '<p class="sub">Starts it on a Jellyfin app that is open'
                     ' right now.</p>'
                     '<form method="post" action="%stitle/%d/jellyfin"'
@@ -316,12 +397,14 @@ def _play_block(base, row, items, digital, players, last_player,
                     '</select></label>'
                     '%s'
                     '%s'
-                    '</form>' % (_text(base), row["id"],
+                    '</form>' % (quality_line, _text(base), row["id"],
                                           session_options, picker, play_button))
     else:
-        jellyfin = ('<h3>On the Jellyfin server</h3>'
+        jellyfin = ('<h4>On the Jellyfin server</h4>'
+                    '%s'
                     '<p class="muted">No Jellyfin app is open at the moment -'
-                    ' start it on the device you want and press Play again.</p>')
+                    ' start it on the device you want and press Play again.</p>'
+                    % quality_line)
 
     if not shelf and not jellyfin and not shops:
         return ("", "")     # nothing to play: no button, no sheet
@@ -330,21 +413,60 @@ def _play_block(base, row, items, digital, players, last_player,
     # modal, so where its markup sits in the document does not matter.
     button = ('<p class="play-row"><button type="button" class="primary"'
               ' data-open="play">Play</button></p>')
+    shop_digital, shop_physical = _store_plays(base, row, shops)
+
+    # Two ways to play, said out loud: a file that is already there, and the
+    # disc on the shelf. A section with nothing in it is not drawn at all, so a
+    # title held only on vinyl never offers a file heading.
+    digital = ""
+    if shelf or jellyfin or shop_digital:
+        # A Jellyfin or media-folder file is a *file*, not necessarily a shop
+        # purchase: most of them are rips of a disc we own. The heading says so
+        # instead of claiming an owned digital copy.
+        has_file = bool(shelf or jellyfin)
+        heading = ("Ripped or downloaded copy" if has_file else "Digital copy")
+        if has_file:
+            note = ("A file that is ready to play &#8212; ripped from a disc"
+                    " you own, or downloaded from a shop.")
+        else:
+            note = ("Your copy from a shop &#8212; wake a player and pick the"
+                    " title there.")
+        digital = ('<section class="play-way">'
+                   "<h3>%s</h3>"
+                   '<p class="sub">%s</p>'
+                   "%s%s%s</section>" % (heading, note, shelf, jellyfin,
+                                         shop_digital))
+    physical = ""
+    if shop_physical:
+        physical = ('<section class="play-way">'
+                    "<h3>Physical copy</h3>"
+                    '<p class="sub">The disc or record on the shelf &#8212; the'
+                    " player gets the room ready, then you put it in.</p>"
+                    "%s</section>" % shop_physical)
+
     sheet = ("""<dialog id="play" class="sheet">
   <h2>Play %s</h2>
   %s
   %s
-  %s
   <form method="dialog"><p><button type="submit">Close</button></p></form>
-</dialog>""" % (_text(row["name"]), shelf, jellyfin, _store_plays(base, row, shops)))
+</dialog>""" % (_text(row["name"]), digital, physical))
     return button, sheet
 
 
 def _format_options(formats, labels, chosen):
+    """The Format select, keeping a value the picker no longer offers.
+
+    A copy saved as "Other" before 0.23.144 is not in `formats` any more, and
+    without an <option> of its own the browser would show the first format and
+    the next save would silently rewrite the copy.
+    """
+    keys = [fmt for fmt in formats]
+    if chosen and chosen not in keys:
+        keys.insert(0, chosen)
     return "".join('<option value="%s"%s>%s</option>'
                    % (_text(fmt), " selected" if fmt == chosen else "",
                       _text(labels.get(fmt, fmt)))
-                   for fmt in formats)
+                   for fmt in keys)
 
 
 def _store_options(chosen):
@@ -732,8 +854,20 @@ def _version_picker(digital, items):
     if len(copies) == 1:
         return ('<input type="hidden" name="source_id" value="%d">'
                 % copies[0]["id"])
+    def _label(source):
+        name = editions.get(source["item_id"]) or ""
+        quality = _quality(source)
+        if quality and name:
+            # An "edition" that is really the file's quality ("2160p Dolby
+            # Vision") says nothing the file line does not say better.
+            for token in name.lower().split():
+                if token.endswith("p") and token[:-1].isdigit():
+                    name = ""
+                    break
+        bits = [one for one in (name, quality) if one]
+        return _text(" \u00b7 ".join(bits) or "default")
+
     return ('<label>Version<select name="source_id">%s</select></label>'
             % "".join('<option value="%d">%s</option>'
-                      % (source["id"],
-                         _text(editions.get(source["item_id"]) or "default"))
+                      % (source["id"], _label(source))
                       for source in copies))

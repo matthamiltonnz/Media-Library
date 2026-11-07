@@ -16,10 +16,15 @@ titles 1───n items 1───n digital_sources
   `bluray_com_id`, `condition`, `location`, `visibility`.
 - **digital_sources** — how to reach that copy in a library: `provider`
   (a `stores.key` - `appletv`, `applemusic`, … - or `jellyfin` / `rip`),
-  `library_id`, `external_id`, `media_source_id`.
+  `library_id`, `external_id`, `media_source_id`, and `media_quality` - what the
+  file is, as the sync read it from Jellyfin: `1080p · DTS-HD MA 5.1 · 8.6 GB`,
+  or `FLAC 2.0 · 975 kbps · 27 MB` for an album (whose files hang off its
+  tracks, not the album item; an item holding one or two tracks says so -
+`FLAC 2.0 · 975 kbps · 27 MB · 1 track` - because a single-file album would
+otherwise look like a sizing bug).
 - **playback_targets** — the devices a later "play this" action will drive:
   `kind` (the entity's own domain: media_player / remote / input_select /
-  script / automation), `ha_entity_id`, `input_source`, `app_name`.
+  select / script / automation), `ha_entity_id`, `input_source`, `app_name`.
 - **stores** — the shops and platforms a copy came from or can be opened on:
   `key`, `label`, `kind` (`digital`, `retail`, `format`, `system`).
 - **store_targets** — which player opens which shop, and the app it opens
@@ -250,20 +255,39 @@ because starting a film should not mean scrolling past every copy of it first.
 A title with nothing playable shows a plain hint in that same place ("No file to
 play yet — rip the disc to a media folder…") and no button at all. The button
 opens a small window with two labelled halves:
-**From the shelf** picks a Home Assistant player and then the copy to start, and
-**On the Jellyfin server** picks the Jellyfin app that is open right now (Apple TV,
-Vero, a phone) and starts the linked item there. Nothing lists sessions on the page
-itself - the picker is where they belong. Only players that accept a file
-(`play_media`) and are reachable are listed, and **Admin → Players** narrows that
-list to the handful you actually use.
+**Ripped or downloaded copy** - drawn only when one is linked, and named *Digital
+copy* when a shop is all there is - plays a file that is already there: a Jellyfin
+route or a media-folder file, ripped from a disc you own or downloaded from a shop.
+**From Media folder** picks a Home Assistant player
+and the file to start, **On the Jellyfin server** picks the Jellyfin app that is open
+right now (Apple TV, Vero, a phone) and starts the linked item there, and a shop
+attached to a player wakes that player and opens its app. Under the Jellyfin
+heading the sheet also prints **what the file is** - `4K · Dolby Vision · DTS-HD MA
+5.1 · 73.1 GB`, or `FLAC 2.0 · 975 kbps · 27 MB` for an album - so you can decide
+whether the rip is as good as the disc before walking to the shelf; a title with
+several Jellyfin versions says it for each one in the version picker. **Physical
+copy** plays the disc or record on the shelf: a **Player** picker when the format
+has several players (three activities on one Harmony Hub, say), a single button
+when it has one. The player sets the room up - *Turntable Speakers* on a vinyl
+copy - and the sheet tells you to put the disc in.
+Nothing lists sessions on the page itself - the picker is where they belong. Only
+players that accept a file
+(`play_media`) and are reachable are listed, and **Admin → Home Assistant
+Players** narrows that list to the handful you actually use.
 
 Below those halves sits a section per **shop** that names a player (Apple TV,
 Apple Music, Google TV, …) and one per **physical format** that does (Blu-ray,
 vinyl, …). A shop's button wakes that player and opens the app the shop runs
 there - an Android package (`com.example.app`) or a name the device lists; a
-disc's says what it is doing and asks you to put the disc in, because a disc
-cannot be deep-linked. Admin → **Stores and platforms** is where a shop, a
-format and their players are wired together, each link carrying its own app.
+disc's sets the room up and asks you to put the disc in, because a disc
+cannot be deep-linked. A section with **several** players shows one
+**Player** picker and a single button (three activities on one Harmony Hub),
+instead of a button for each; with one player the button is labelled with
+its name. The note underneath names the option when every player sets the
+same one ("Sets the player to Turntable Speakers"), says *Sets the player
+you pick* when they differ, and warns when a `select` player has no option
+stored at all. Admin → **Stores and platforms** is where a shop, a format
+and their players are wired together, each link carrying its own app.
 
 Playback asks Home Assistant to play
 `media-source://media_source/local/<path under /media>` through
@@ -411,10 +435,13 @@ The catalogue page opens in one **mode at a time** — **Movies**, **TV** or **M
 lists **Everyone** and every household member who owns a copy (even with nothing in
 the current mode, where the count shows 0), each with their copy count inside the
 current mode; other people's private copies never appear, whichever filter is active.
-Within a mode the page shows the title/copy counts with a per-format breakdown (CD,
-3D Blu-ray, Blu-ray, 4K Blu-ray, Ripped file, …) as tick boxes — tick several to see
-"Blu-ray **or** 4K" at once, and the count beside each box is what that format holds.
-Tick boxes stack on top of the search and owner filters, and a poster keeps showing
+Within a mode the page shows the title/copy counts, and a **format pill row** sits
+between the mode pills and the owner chips (CD, 3D Blu-ray, Blu-ray, 4K Blu-ray, …).
+A pill applies the moment it is clicked; pick several to see "Blu-ray **or** 4K" at
+once, and the count inside each pill is what that format holds under the current
+filters. Picking a pill never removes the others, so a second format is one more
+click away; clicking the current pill clears it.
+Format pills stack on top of the search and owner filters, and a poster keeps showing
 every format its title holds even while the shelf is narrowed to one of them.
 The search box and the list/poster toggle sit under the counts, and **+ Add a copy** sits
 above them: it opens a form for a new title in the mode you are in. For music that form
@@ -638,7 +665,8 @@ lists two add-ons with the same slug.
 on each start and records applied files in `schema_migrations`. The schema is one
 file, `migrations/0001_schema.sql`, which builds a brand-new database on its own;
 a database that already has tables is recorded as having it and left alone. Add a
-new `0002_*.sql` beside it for a change, and never edit a file that has run.
+new `00nn_*.sql` beside them for a change - the next number in
+sequence - and never edit a file that has run.
 
 Foreign keys are per-connection in SQLite and default **off** — the app and
 `migrate.sh` both enable them. Deleting an owner with copies aborts
@@ -664,5 +692,7 @@ Requests without ingress headers map to a single `local` profile.
 4. ~~Open a shop's app on a device~~ (done - an Android package, or a name the
    device lists)
 5. Still open: browsing a Jellyfin server's media folders from the link page
-   (only search is offered), and a prebuilt image so an install does not have to
-   compile on your own machine.
+   (only search is offered); picking the fuller of two Jellyfin items that
+   carry the same album (a one-track folder can shadow the real release);
+   and a prebuilt image so an install does not have to compile on your own
+   machine.

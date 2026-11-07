@@ -54,7 +54,10 @@ MAX_COVER_BYTES = 6 * 1024 * 1024
 ADD_LOCK = threading.Lock()
 
 FORMATS = ["bluray_3d", "bluray", "uhd_4k", "dvd", "digital", "ripped", "cd", "vinyl", "sacd",
-           "cassette", "vhs", "other"]
+           "cassette", "vhs"]
+# "other" is not one of them: a disc with no proper format is an unknown, not a
+# category, and it only ever became one because the picker offered it. The label
+# stays in FORMAT_LABELS so a copy saved before 0.23.144 still prints.
 # A digital copy's store is a row in `stores` (see stores.py); a ripped file
 # has none.
 
@@ -349,9 +352,17 @@ def library_stats(con, viewer_id, query="", kind="", owner=None,
     titles = con.execute("SELECT COUNT(DISTINCT t.id) " + base, params).fetchone()[0]
     copies = con.execute("SELECT COUNT(*) " + counted, params).fetchone()[0]
     # one entry per stored format: a file is "ripped" whatever disc it came from
+    # One row per stored format, counted **without** the format filter: the
+    # pill row must keep every format, or picking "CD" would leave "CD" as the
+    # only pill on the page. The kind and owner chips are counted the same way,
+    # each leaving its own dimension out of the tally.
+    loose, loose_extra = visible_clause(query, kind, owner, "", only)
     formats = con.execute(
-        "SELECT i.format AS fmt, COUNT(*) AS n " + counted +
-        " GROUP BY fmt ORDER BY n DESC", params).fetchall()
+        "SELECT i.format AS fmt, COUNT(*) AS n FROM items i"
+        " JOIN titles t ON t.id = i.title_id WHERE " + loose +
+        " AND (i.format IS NULL OR i.format <> 'ripped')"
+        " GROUP BY fmt ORDER BY n DESC",
+        [viewer_id] + loose_extra).fetchall()
     return titles, copies, formats
 
 def owner_totals(con):
@@ -382,13 +393,6 @@ PAGE = Template("""<!doctype html>
   h1 { font-size: 1.3rem; margin: 0 0 .2rem; }
   h1 .admin { font-size: .72rem; font-weight: 600; letter-spacing: .04em;
               margin-left: .6rem; opacity: .6; text-transform: uppercase; }
-  form.tally { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center;
-               margin: 0 0 1rem; }
-  .tallybox { display: inline-flex; gap: .35rem; align-items: center;
-              border: 1px solid #8886; border-radius: 6px;
-              padding: .15rem .45rem; font-size: .8rem; cursor: pointer; }
-  .tallybox input { margin: 0; }
-  .tallybox .n { opacity: .6; }
   h2 { font-size: 1rem; margin: 1.6rem 0 .6rem; }
   .sub { opacity: .7; margin: 0 0 1rem; }
   table { border-collapse: collapse; width: 100%; }
@@ -488,8 +492,9 @@ PAGE = Template("""<!doctype html>
                 font-size: .9rem; }
   nav.modes a.current { background: #2f6f4f; border-color: #2f6f4f; color: #fff; }
   nav.modes .n { opacity: .7; font-weight: 400; margin-left: .3rem; font-size: .82rem; }
-  nav.owners { margin-top: -.35rem; }
-  nav.owners a { font-size: .8rem; padding: .22rem .6rem; font-weight: 500; }
+  nav.formats, nav.owners { margin-top: -.35rem; }
+  nav.formats a, nav.owners a { font-size: .8rem; padding: .22rem .6rem;
+                                font-weight: 500; }
   nav.owners .n { font-size: .76rem; }
   .banner { padding: .5rem .7rem; border-radius: 6px; background: #c33;
             color: #fff; margin-bottom: 1rem; }
@@ -510,6 +515,7 @@ PAGE = Template("""<!doctype html>
 <h1>Media Collection<a class="admin" href="${base}admin">admin</a></h1>
 <p class="sub"><button type="button" onclick="addcopy.showModal()">+ Add a title</button></p>
 $modes
+<nav class="modes formats">$format_tabs</nav>
 <nav class="modes owners">$owner_tabs</nav>
 <form class="search" method="get" action="$base">
   <input name="q" value="$q" placeholder="Search title or barcode">
@@ -523,7 +529,6 @@ $modes
 $notice
 $error
 <h2>$heading$scope</h2>
-<div class="sub">$totals</div>
 $library
 
 <dialog id="addcopy">
@@ -881,27 +886,24 @@ def render_index(con, viewer, base, error=None, query="",
         return '<input type="hidden" name="%s" value="%s">' % (
             name, html.escape(str(value)))
 
-    # one box per format: ticking several adds several ?format= values, so the
-    # shelf can be narrowed to "Blu-ray or 4K" instead of one format at a time
-    carry = "".join(hidden(name, value) for name, value in (
-        ("q", query), ("kind", kind), ("owner", owner),
-        ("view", view if view != "list" else ""),
-        ("only", 1 if only else "")) if value not in ("", None, 0))
-    boxes = "".join(
-        '<label class="tallybox"><input type="checkbox" name="format"'
-        ' value="%s"%s onchange="this.form.submit()"> %s'
-        '<span class="n">%d</span></label>'
-        % (html.escape(row["fmt"]),
-           " checked" if row["fmt"] in picked else "",
+    def format_link(fmt):
+        """This page with `fmt` added to, or taken out of, the format filter.
+
+        The pills apply on the click, like the kind and owner chips: a format
+        is a filter, not a form to fill in and then post.
+        """
+        chosen = [f for f in picked if f != fmt]
+        if fmt not in picked:
+            chosen.append(fmt)
+        return tally_link(",".join(chosen))
+
+    format_tabs = "".join(
+        '<a class="%s" href="%s">%s<span class="n">%d</span></a>'
+        % ("current" if row["fmt"] in picked else "",
+           html.escape(format_link(row["fmt"])),
            html.escape(FORMAT_LABELS.get(row["fmt"], row["fmt"])),
            row["n"])
         for row in formats if row["fmt"] != "ripped")
-    totals = ('<form class="tally" method="get" action="%s">%s%s'
-              '<button type="submit">Apply</button>%s</form>'
-              % (html.escape(base), carry,
-                 boxes or '<span class="muted">nothing yet</span>',
-                 ' <a href="%s">clear</a>' % html.escape(tally_link(""))
-                 if picked else ""))
     mode_counts = {row["kind"]: row["n"] for row in con.execute(
         "SELECT t.kind AS kind, COUNT(DISTINCT t.id) AS n FROM items i"
         " JOIN titles t ON t.id = i.title_id"
@@ -1061,10 +1063,8 @@ def render_index(con, viewer, base, error=None, query="",
         notice=notice,
         count=len(rows),
         heading=heading,
-        totals=totals,
-        format_hidden="".join(
-            '<input type="hidden" name="format" value="%s">' % html.escape(f)
-            for f in picked),
+        format_tabs=format_tabs,
+        format_hidden="".join(hidden("format", f) for f in picked),
         kind=kind,
         owner=owner or "",
         modes="<nav class=\"modes\">%s</nav>" % modes,
@@ -1719,7 +1719,11 @@ class Handler(BaseHTTPRequestHandler):
                           "clean": clean_job.status()},
                     store_rows=with_players(con),
                     targets=stores.targets(con),
-                    confirm=confirm)
+                    confirm=confirm,
+                    # a saved player list keeps the panel open (the redirect
+                    # carries `?players=…`, empty when everything was unticked)
+                    open_players="players=" in (urlparse(self.path).query
+                                                or ""))
                 return self.respond(200, page)
 
             if route.rstrip("/").endswith("/export.csv"):

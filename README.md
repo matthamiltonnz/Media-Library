@@ -95,17 +95,25 @@ Full documentation: [media_collection/DOCS.md](media_collection/DOCS.md).
   point at anything.
 - **Playback.** Register a Jellyfin server in the admin page and sync: every
   title it holds is matched and recorded as a playable copy, extra versions and
-  editions included, and the Play sheet lists the devices that can take it. A
-  pinned bar follows what is playing — play/pause, stop, previous, next, rewind
-  and fast-forward — and tracks a second player in another room as well.
+  editions included, and the Play sheet lists the devices that can take it and
+  says what the file itself is — `4K · Dolby Vision · DTS-HD MA 5.1 · 73.1 GB`,
+  or `FLAC 2.0 · 975 kbps · 27 MB` for an album — so you can see whether the rip
+  matches the disc on the shelf before walking over to it. A pinned bar follows
+  what is playing — play/pause, stop, previous, next, rewind and fast-forward —
+  and tracks a second player in another room as well.
 - **A disc gets a player too.** A physical copy has no app to open, but the room
   still has to be set: attach a `media_player`, `remote`, `input_select`,
-  `script` or `automation` to a format (Blu-ray, vinyl, …) and the Play sheet
-  wakes it. For a shop, attach a player and give it the app that shop opens —
-  an Android package (`com.example.app`) or a name the device itself lists.
+  `select` (a Harmony Hub's activities) or `automation` to a format
+  (Blu-ray, vinyl, …) and the Play sheet
+  sets it — one button when the format has one player, a **Player** picker when
+  it has several, so three activities on one Harmony Hub are a choice rather than
+  three buttons. For a shop, attach a player and give it the app that shop opens
+  — an Android package (`com.example.app`) or a name the device itself lists.
 - **Barcode scanning.** Type a UPC/EAN or scan it with a phone camera; the
   lookup fills only the boxes you left empty and says so when the code is
-  already on a copy.
+  already on a copy. A disc code no free database carries is put to a shop that
+  files discs by barcode, which usually answers with the title and year, and then
+  to a web search rather than a shrug.
 
 ## Reaching it directly (a TV app, Kodi, the barcode scanner)
 

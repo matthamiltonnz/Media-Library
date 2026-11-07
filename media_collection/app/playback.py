@@ -66,8 +66,8 @@ def _call(path, method="GET", payload=None, timeout=10):
     return json.loads(body) if body.strip() else {}
 
 
-PLAYER_DOMAINS = ("media_player", "remote", "input_select", "script",
-                  "automation")
+PLAYER_DOMAINS = ("media_player", "remote", "input_select", "select",
+                  "script", "automation")
 
 
 def entities(refresh=False):
@@ -78,6 +78,10 @@ def entities(refresh=False):
     disc player is an `input_select` that fires an automation, and either can be
     a script. Each entry carries its integration, so the list can say which one
     is the Apple TV and which is a Chromecast.
+
+    A `select` is here for the same reason as the `input_select`: an activity
+    based remote (a Harmony Hub, for one) offers its activities as the options
+    of a `select`, and picking one starts it.
     """
     if not token():
         return []
@@ -101,8 +105,12 @@ def entities(refresh=False):
             "state": state.get("state") or "",
             "domain": entity_id.split(".", 1)[0],
             "integration": registry.get(entity_id, ""),
+            # `source_list` is a media_player's apps; a `select` and an
+            # `input_select` publish their choices as `options` instead - the
+            # same idea for this picker (what can this player be told to do).
             "sources": [str(app) for app in
-                        (attributes.get("source_list") or [])],
+                        (attributes.get("source_list")
+                         or attributes.get("options") or [])],
         })
     found.sort(key=lambda item: item["name"].lower())
     return found
@@ -300,6 +308,8 @@ def open_on(target, app_name="", timeout=8):
       media_player   media_player.turn_on, then select_source(app)
       input_select   input_select.select_option - how an automation is fired
                      in most setups ("source: Disc player")
+      select         select.select_option - a Harmony Hub's activities, and
+                     the shape most activity-based remotes use
       script         script.turn_on
       automation     automation.trigger
 
@@ -329,11 +339,16 @@ def open_on(target, app_name="", timeout=8):
         _call("/services/remote/turn_on", "POST", {"entity_id": entity_id},
               timeout=timeout)
         return "Woke %s." % label
-    if kind == "input_select" or domain == "input_select":
+    if kind in ("input_select", "select") or domain in ("input_select",
+                                                         "select"):
+        # `input_select` is a helper whose option an automation watches;
+        # `select` is an entity the integration owns - a Harmony Hub offers its
+        # activities as the options. Same service call, different domain.
+        service = "select" if domain == "select" else "input_select"
         option = (target.get("input_source") or "").strip()
         if not option:
-            raise ValueError("that input_select player has no option set")
-        _call("/services/input_select/select_option", "POST",
+            raise ValueError("that %s player has no option set" % service)
+        _call("/services/%s/select_option" % service, "POST",
               {"entity_id": entity_id, "option": option}, timeout=timeout)
         return "Set %s to %s." % (label, option)
 

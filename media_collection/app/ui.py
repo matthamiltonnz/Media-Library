@@ -123,6 +123,18 @@ SHELL = """<!doctype html>
                  padding-bottom: calc(.5rem + env(safe-area-inset-bottom, 0px)); }
   dialog.sheet::backdrop { background: #0008; }
   dialog.sheet h2 { margin-top: 0; }
+  /* the Play sheet: two ways to play, digital on top, the disc below */
+  dialog.sheet .play-way h3 { margin: 1.3rem 0 .25rem; padding-top: 1rem;
+                border-top: 1px solid #8883; }
+  dialog.sheet .play-way:first-of-type h3 { border-top: 0; padding-top: 0; }
+  dialog.sheet form.play-on { display: flex; align-items: center; gap: .5rem;
+               flex-wrap: wrap; margin: .5rem 0 .2rem; }
+  dialog.sheet form.play-on label { display: inline-flex; align-items: center;
+               gap: .4rem; margin: 0; }
+  dialog.sheet form.play-on button { margin: 0; }
+  dialog.sheet h4 { margin: .9rem 0 .3rem; font-size: .95rem; opacity: .85; }
+  /* what the file is: 4K · Dolby Vision · TrueHD Atmos 7.1 · 24.2 GB */
+  dialog.sheet p.quality { margin: 0 0 .35rem; font-weight: 600; opacity: .95; }
   dialog.sheet p.copy-play { display: flex; align-items: center; gap: .6rem;
                              flex-wrap: wrap; margin: .5rem 0; }
   /* poster grid + virtual cases, shared by every page that shows cards */
@@ -221,6 +233,14 @@ SHELL = """<!doctype html>
   .panel details.add > summary::-webkit-details-marker { display: none; }
   .panel details.add > summary::before { content: "+ "; }
   .panel details.add[open] > summary::before { content: "\u2212 "; }
+  /* a panel that starts folded - the summary is its heading and the
+     `+`/`-` prefix says whether there is anything to open */
+  .panel.fold > summary { cursor: pointer; list-style: none;
+      margin: .9rem 0 .2rem; font-size: 1.4em; font-weight: bold; }
+  .panel.fold > summary::-webkit-details-marker { display: none; }
+  .panel.fold > summary::before { content: "+ "; }
+  .panel.fold[open] > summary::before { content: "\u2212 "; }
+  .panel.fold[open] > summary { margin-bottom: .5rem; }
 </style>
 </head>
 <body>

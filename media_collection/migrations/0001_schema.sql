@@ -298,5 +298,4 @@ INSERT INTO stores (key, label, kind) VALUES
     ('vinyl',     'Vinyl',      'format'),
     ('sacd',      'SACD',       'format'),
     ('cassette',  'Cassette',   'format'),
-    ('vhs',       'VHS',        'format'),
-    ('other',     'Other',      'format');
+    ('vhs',       'VHS',        'format');

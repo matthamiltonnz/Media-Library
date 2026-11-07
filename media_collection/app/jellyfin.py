@@ -930,6 +930,130 @@ def _version_of(name):
     return head, (tail.split(",")[0].strip() or tail.strip())
 
 
+def _size_label(size):
+    """A byte count a person can weigh: "24.2 GB", "350 MB"."""
+    if size >= 1000000000:
+        return "%.1f GB" % (size / 1000000000.0)
+    if size >= 1000000:
+        return "%d MB" % round(size / 1000000.0)
+    return ""
+
+
+def _resolution_of(width, height):
+    """The name a file's picture goes by: 4K, 1080p, 720p, else its height.
+
+    Two hints disagree on letterboxed and 4:3 transfers - 1920x800 is a 1080p
+    film, 1440x1080 is too - so each side is put in a tier and the better one
+    wins. Only when neither reaches 720p does the raw height get printed.
+    """
+    tiers = ("", "720p", "1080p", "4K")
+    rank = {name: place for place, name in enumerate(tiers)}
+    by_width = ("4K" if width >= 3400 else "1080p" if width >= 1800
+                else "720p" if width >= 1200 else "")
+    by_height = ("4K" if height >= 1600 else "1080p" if height >= 900
+                 else "720p" if height >= 650 else "")
+    best = max((by_width, by_height), key=lambda name: rank[name])
+    return best or ("%dp" % height if height else "")
+
+
+def _sound_of(stream):
+    """The audio track, named the way a person would: "DTS-HD MA 5.1"."""
+    profile = (stream.get("Profile") or "").strip()
+    codec = (stream.get("Codec") or "").upper()
+    layout = (stream.get("ChannelLayout") or "").strip()
+    if layout.lower() in ("stereo", "mono"):
+        layout = "2.0" if layout.lower() == "stereo" else "1.0"
+    name = profile if len(profile) > 3 else codec
+    low = name.lower()
+    if "atmos" in low:                      # "Dolby TrueHD with Dolby Atmos"
+        name = "TrueHD Atmos" if "truehd" in low else "Atmos"
+    elif "truehd" in low:
+        name = "TrueHD"
+    elif low.startswith(("dolby digital plus", "eac3", "e-ac-3")):
+        name = "DD+"
+    elif low.startswith(("dolby digital", "ac3", "ac-3")):
+        name = "DD"
+    if not name:
+        name = (stream.get("DisplayTitle") or "").split(" - ")[0].strip()
+    return " ".join(one for one in (name, layout) if one)
+
+
+def _quality_of(source, size=None):
+    """What one file is, in a line worth weighing up against the disc.
+
+    Jellyfin describes the streams, so the picture (2160p Dolby Vision), the
+    sound (TrueHD Atmos 7.1) and the size (24.2 GB) can be said properly. An
+    item that carries no streams falls back to its MediaSource name, which is
+    usually the same thing spelled out ("... - 2160p Dolby Vision, HDR10").
+    """
+    streams = source.get("MediaStreams") or []
+    video = next((one for one in streams
+                  if (one.get("Type") or "").lower() == "video"), {})
+    audio = next((one for one in streams
+                  if (one.get("Type") or "").lower() == "audio"), {})
+    parts = []
+    height = video.get("Height") or 0
+    picture = _resolution_of(video.get("Width") or 0, height)
+    if picture:
+        parts.append(picture)
+    kind = (video.get("VideoRangeType") or video.get("VideoRange") or "").upper()
+    if kind.startswith("DOVI"):
+        parts.append("Dolby Vision + HDR10" if "HDR10" in kind else "Dolby Vision")
+    elif kind.startswith("HDR10PLUS"):
+        parts.append("HDR10+")
+    elif kind.startswith("HDR10"):
+        parts.append("HDR10")
+    elif kind == "HLG":
+        parts.append("HLG")
+    sound = _sound_of(audio) if audio else ""
+    if sound:
+        parts.append(sound)
+    rate = source.get("BitRate") or audio.get("BitRate") or 0
+    if not height and rate >= 100000:       # no picture: the rate is the story
+        parts.append("%d kbps" % round(rate / 1000.0))
+    label = _size_label(source.get("Size") or 0 if size is None else size)
+    if label:
+        parts.append(label)
+    if not parts:                       # no streams: the name is all we have
+        return _version_of(source.get("Name") or "")[1].strip()
+    return " \u00b7 ".join(parts)
+
+
+def _track_sources(base, key, jf_id):
+    """The MediaSources of an album's tracks.
+
+    A Jellyfin MusicAlbum has no files of its own: the Audio items under it do.
+    One request per album, and only while its routes still have no quality.
+    """
+    import json
+    import urllib.request
+    url = ("%s/Items?ParentId=%s&IncludeItemTypes=Audio&Fields=MediaSources"
+           "&SortBy=ParentIndexNumber,IndexNumber&Limit=200&apiKey=%s"
+           % (base, jf_id, key))
+    with urllib.request.urlopen(url, timeout=30) as response:
+        data = json.load(response)
+    found = []
+    for track in data.get("Items") or []:
+        found.extend(one for one in (track.get("MediaSources") or [])
+                     if one.get("Id"))
+    return found
+
+
+def _album_quality(base, key, jf_id):
+    """What an album's files are, from its first track and the total size."""
+    tracks = _track_sources(base, key, jf_id)
+    if not tracks:
+        return ""
+    total = sum((one.get("Size") or 0) for one in tracks)
+    line = _quality_of(tracks[0], size=total)
+    if len(tracks) <= 2:
+        # A file-per-album rip, or a library that indexed one track of a
+        # folder it holds: without the count the small size looks like a bug.
+        line += " \u00b7 %d track%s" % (len(tracks),
+                                     "" if len(tracks) == 1 else "s")
+    return line
+
+
 def expand_versions(con, server, log=print):
     """A Jellyfin item can hold several files: give each one its own copy."""
     try:
@@ -953,6 +1077,35 @@ def expand_versions(con, server, log=print):
             log("jellyfin: versions for %s skipped (%s)"
                 % (jf_id[:6], exc))
             continue
+        if not sources:                 # an album: its tracks hold the files
+            try:
+                quality = _album_quality(base, key, jf_id)
+            except Exception as exc:
+                quality = ""
+                log("jellyfin: tracks for %s skipped (%s)"
+                    % (jf_id[:6], exc))
+            if quality:
+                con.execute(
+                    "UPDATE digital_sources SET media_quality = ?"
+                    " WHERE provider = 'jellyfin' AND external_id = ?"
+                    "   AND (media_quality IS NULL OR media_quality <> ?)",
+                    (quality, jf_id, quality))
+            continue
+        # What each file is, stamped on the route that reaches it. This runs
+        # *before* the "single file" early return below: that is most of the
+        # shelf, and the Play sheet needs the answer for exactly those. The
+        # update is skipped when the text has not changed, so a re-encode or a
+        # better spelling reaches the page on the next sync without rewriting
+        # a thousand rows every time.
+        for source in sources:
+            quality = _quality_of(source)
+            if quality:
+                con.execute(
+                    "UPDATE digital_sources SET media_quality = ?"
+                    " WHERE provider = 'jellyfin' AND external_id = ?"
+                    "   AND (media_source_id = ? OR media_source_id IS NULL)"
+                    "   AND (media_quality IS NULL OR media_quality <> ?)",
+                    (quality, jf_id, source.get("Id"), quality))
         if len(sources) < 2:
             continue
         loose = [row for row in have if not row["media_source_id"]]
