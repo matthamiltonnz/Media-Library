@@ -1003,21 +1003,55 @@ def render_index(con, viewer, base, error=None, query="",
         "SELECT t.kind AS kind, COUNT(DISTINCT t.id) AS n FROM items i"
         " JOIN titles t ON t.id = i.title_id"
         " WHERE " + mode_clause +
-        " AND i.owner_id IN (SELECT id FROM users"
-        "   WHERE username <> 'rips')"
         " GROUP BY t.kind", [viewer["id"]] + mode_extra)}
     extra = "".join([   # the filters a kind or owner chip has to keep
         "&amp;q=" + quote(query) if query else "",
         "&amp;format=" + quote(format) if format else "",
         "&amp;view=grid" if view == "grid" else "",
     ])
+    # A kind chip's number is what **that view** would hold with the current
+    # filters, which is not what a reader takes it for: with 4K and Digital
+    # picked, "Music 14" was read as "14 music titles are on this page". So once
+    # a filter narrows the shelf only the media type you are looking at carries
+    # a count; the others stay plain links, with their number in a tooltip where
+    # it cannot be mistaken for a count of the page.
+    narrowed = bool(query or picked or owner)
+
+    def mode_chip(value, label):
+        count = mode_counts.get(value, 0)
+        current = value == kind
+        href = "%s?kind=%s%s" % (html.escape(base), value, extra)
+        if current or not narrowed:
+            return ('<a class="%s" href="%s">%s<span class="n">%d</span></a>'
+                    % ("current" if current else "", href, label, count))
+        if count:
+            tip = "%d title%s in %s match these filters" % (
+                count, "" if count == 1 else "s", label)
+        else:
+            tip = "No titles in %s match these filters" % label
+        return ('<a href="%s" title="%s">%s</a>'
+                % (href, html.escape(tip), label))
+
     modes = "".join(
-        '<a class="%s" href="%s?kind=%s%s">%s<span class="n">%d</span></a>'
-        % ("current" if value == kind else "", html.escape(base), value,
-           extra, label,
-           mode_counts.get(value, 0))
+        mode_chip(value, label)
         for value, label in (MODES + (("other", "Other"),)
                              if mode_counts.get("other") else MODES))
+    # An empty view must not be a dead end: if the filters match nothing of this
+    # media type but do match another, say so here with a link that keeps the
+    # filters - the number moved into a tooltip above would otherwise be
+    # invisible to a reader who needed it most.
+    if not titles:
+        elsewhere = [(value, label) for value, label in MODES
+                     if value != kind and mode_counts.get(value)]
+        if elsewhere:
+            modes += ('<p class="sub">Nothing in %s &mdash; %s.</p>'
+                      % (html.escape(dict(MODES).get(kind, kind) or kind),
+                         " and ".join(
+                             "%d in %s" % (mode_counts[value],
+                                           '<a href="%s?kind=%s%s">%s</a>'
+                                           % (html.escape(base), value, extra,
+                                              html.escape(label)))
+                             for value, label in elsewhere)))
     # every household member appears, even with nothing in this mode, so a shared
     # library never disappears from the filter
     owner_rows = con.execute(
@@ -1037,9 +1071,7 @@ def render_index(con, viewer, base, error=None, query="",
     everyone = con.execute(
         "SELECT COUNT(DISTINCT t.id) FROM items i"
         " JOIN titles t ON t.id = i.title_id"
-        " WHERE " + owner_clause +
-        "   AND i.owner_id IN (SELECT id FROM users"
-        "                   WHERE username <> 'rips')",
+        " WHERE " + owner_clause,
         [viewer["id"]] + owner_extra).fetchone()[0]
     owner_tabs = "".join(
         ['<a class="%s" href="%s?kind=%s%s">Everyone<span class="n">%d</span></a>'

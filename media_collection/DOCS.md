@@ -544,10 +544,17 @@ a Blu-ray.com export. The start-up call runs only when `FILMS_PATH` and
 ## Browsing
 
 The catalogue page opens in one **mode at a time** — **Movies**, **TV** or **Music**
-(an *Other* pill appears only if such titles exist). Under it, a second row of pills
+(an *Other* pill appears only if such titles exist). The mode you are in carries the
+count of what is on the page; once a search, an owner or a format narrows the shelf,
+the other modes are plain links with their number in a tooltip, because a number
+there reads as part of the page and it is not — it is how many titles *that* mode
+would hold. Under the modes, a second row of pills
 lists **Everyone** and every household member who owns a copy (even with nothing in
 the current mode, where the count shows 0), each with their copy count inside the
 current mode; other people's private copies never appear, whichever filter is active.
+When the filters match nothing in this mode but do match another, the mode row says so
+and links straight there — *Nothing in Movies — 4 in Music* — so a narrow search that
+only hit albums is not a dead end.
 Within a mode the page shows the title/copy counts, and a **format pill row** sits
 between the mode pills and the owner chips (CD, 3D Blu-ray, Blu-ray, 4K Blu-ray, …).
 A pill applies the moment it is clicked; pick several to see "Blu-ray **or** 4K" at
