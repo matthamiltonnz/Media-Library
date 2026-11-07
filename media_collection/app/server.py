@@ -388,7 +388,10 @@ def library_stats(con, viewer_id, query="", kind="", owner=None,
     # neither the unit of the cards below it nor of any chip beside it. The
     # copies are still counted, for the pill's tooltip (one title can hold a
     # 4K and a Blu-ray, so the copies are not the titles).
-    loose, loose_extra = visible_clause(query, kind, owner, "", only)
+    # The format row sits **above** the owner row, so it counts the shelf for
+    # this media type and ignores the owner filter - filtering runs top down,
+    # and no row is narrowed by a row below it.
+    loose, loose_extra = visible_clause(query, kind, None, "", only)
     formats = con.execute(
         "SELECT i.format AS fmt, COUNT(DISTINCT i.title_id) AS n,"
         "       COUNT(*) AS copies FROM items i"
@@ -982,23 +985,33 @@ def render_index(con, viewer, base, error=None, query="",
             chosen.append(fmt)
         return tally_link(",".join(chosen))
 
+    tally = [(row["fmt"], row["n"], row["copies"]) for row in formats
+             if row["fmt"] != "ripped"]
+    known = set(fmt for fmt, _, _ in tally)
+    # A format that is picked but holds nothing of this media type would vanish
+    # from the row, and with it the only way to click it off - which is exactly
+    # the state that empties the page (3D Blu-ray on the music shelf).
+    tally += [(fmt, 0, 0) for fmt in picked
+              if fmt not in known and fmt != "rip"]
     format_tabs = "".join(
-        '<a class="%s" href="%s" title="%s">%s<span class="n">%d</span></a>'
-        % ("current" if row["fmt"] in picked else "",
-           html.escape(format_link(row["fmt"])),
-           html.escape("%d title%s, %d cop%s"
-                       % (row["n"], "" if row["n"] == 1 else "s",
-                          row["copies"], "y" if row["copies"] == 1
-                          else "ies")),
-           html.escape(FORMAT_LABELS.get(row["fmt"], row["fmt"])),
-           row["n"])
-        for row in formats if row["fmt"] != "ripped")
-    # Every row of pills leaves its own dimension out of its tally, so the
-    # numbers agree with one another: the formats (above) count the search,
-    # the kind and the owner; the kind chips count the search, the owner and
-    # the formats; the owners count the search, the kind and the formats. A
-    # search that finds four albums must not sit under "Music 560".
-    mode_clause, mode_extra = visible_clause(query, "", owner, format, only)
+        '<a class="%s" %s>%s<span class="n">%d</span></a>'
+        % ("current" if fmt in picked else "", 'href="%s" title="%s"'
+           % (html.escape(format_link(fmt)),
+              html.escape("%d title%s, %d cop%s"
+                          % (n, "" if n == 1 else "s", copies,
+                             "y" if copies == 1 else "ies"))),
+           html.escape(FORMAT_LABELS.get(fmt, fmt)), n)
+        for fmt, n, copies in tally)
+    # Filtering runs **top down**: each row of pills leaves its own dimension
+    # out (clicking CD must still offer Vinyl) and is not narrowed by a row
+    # below it. So the formats count the search and the kind, the owners count
+    # the search, the kind and the formats, and the media types count the search
+    # alone - a search that finds four albums must not sit under "Music 560".
+    # ...and the media type row is the top one: it counts the shelf per medium
+    # under the search alone, so it is never narrowed by the format or the owner
+    # picked below it. "Music 560" beside "CD 526" is a map of what each row can
+    # reach, not a claim about the page.
+    mode_clause, mode_extra = visible_clause(query, "", None, "", only)
     mode_counts = {row["kind"]: row["n"] for row in con.execute(
         "SELECT t.kind AS kind, COUNT(DISTINCT t.id) AS n FROM items i"
         " JOIN titles t ON t.id = i.title_id"
@@ -1009,49 +1022,17 @@ def render_index(con, viewer, base, error=None, query="",
         "&amp;format=" + quote(format) if format else "",
         "&amp;view=grid" if view == "grid" else "",
     ])
-    # A kind chip's number is what **that view** would hold with the current
-    # filters, which is not what a reader takes it for: with 4K and Digital
-    # picked, "Music 14" was read as "14 music titles are on this page". So once
-    # a filter narrows the shelf only the media type you are looking at carries
-    # a count; the others stay plain links, with their number in a tooltip where
-    # it cannot be mistaken for a count of the page.
-    narrowed = bool(query or picked or owner)
-
-    def mode_chip(value, label):
-        count = mode_counts.get(value, 0)
-        current = value == kind
-        href = "%s?kind=%s%s" % (html.escape(base), value, extra)
-        if current or not narrowed:
-            return ('<a class="%s" href="%s">%s<span class="n">%d</span></a>'
-                    % ("current" if current else "", href, label, count))
-        if count:
-            tip = "%d title%s in %s match these filters" % (
-                count, "" if count == 1 else "s", label)
-        else:
-            tip = "No titles in %s match these filters" % label
-        return ('<a href="%s" title="%s">%s</a>'
-                % (href, html.escape(tip), label))
-
+    # The media type row is the top row, so it counts the shelf per medium
+    # under the search alone: no format and no owner picked below it may narrow
+    # it. "Music 560" beside "CD 526" is a map of what each row can reach, not a
+    # claim about what is on the page - the headline and the owner row say that.
     modes = "".join(
-        mode_chip(value, label)
+        '<a class="%s" href="%s?kind=%s%s">%s<span class="n">%d</span></a>'
+        % ("current" if value == kind else "", html.escape(base), value,
+           extra, label, mode_counts.get(value, 0))
         for value, label in (MODES + (("other", "Other"),)
                              if mode_counts.get("other") else MODES))
-    # An empty view must not be a dead end: if the filters match nothing of this
-    # media type but do match another, say so here with a link that keeps the
-    # filters - the number moved into a tooltip above would otherwise be
-    # invisible to a reader who needed it most.
-    if not titles:
-        elsewhere = [(value, label) for value, label in MODES
-                     if value != kind and mode_counts.get(value)]
-        if elsewhere:
-            modes += ('<p class="sub">Nothing in %s &mdash; %s.</p>'
-                      % (html.escape(dict(MODES).get(kind, kind) or kind),
-                         " and ".join(
-                             "%d in %s" % (mode_counts[value],
-                                           '<a href="%s?kind=%s%s">%s</a>'
-                                           % (html.escape(base), value, extra,
-                                              html.escape(label)))
-                             for value, label in elsewhere)))
+
     # every household member appears, even with nothing in this mode, so a shared
     # library never disappears from the filter
     owner_rows = con.execute(
@@ -1125,6 +1106,17 @@ def render_index(con, viewer, base, error=None, query="",
                 '<td colspan="5" class="muted">%s</td></tr>'
                 % (html.escape(base), href, html.escape(row["name"]),
                    html.escape(span), label, html.escape(count)))
+    # An empty page has two different reasons and should say which: nothing on
+    # the shelf yet, or nothing that survives the filters above it.
+    if query or picked or owner:
+        empty = ('<p class="empty">Nothing matches these filters. '
+                 '<a href="%s?kind=%s">Clear them</a>.</p>'
+                 % (html.escape(base), kind))
+    else:
+        empty = '<p class="empty">Nothing yet \u2014 add your first disc.</p>'
+    empty_rows = ('<tr><td colspan="8" class="empty">%s</td></tr>'
+                  % empty[len('<p class="empty">'):-len("</p>")])
+
     place_cards = "".join(place_cards)
     place_rows = "".join(place_rows)
 
@@ -1198,7 +1190,7 @@ def render_index(con, viewer, base, error=None, query="",
                     ])))
                 , back_suffix
             )
-            for card in cards) or ("" if place_cards else '<p class="empty">Nothing yet — add your first disc.</p>'))
+            for card in cards) or ("" if place_cards else empty))
     else:
         body = "".join(
             ROW.substitute(
@@ -1220,7 +1212,7 @@ def render_index(con, viewer, base, error=None, query="",
                 ),
             )
             for r in rows
-        ) or ("" if place_rows else '<tr><td colspan="8" class="empty">Nothing yet — add your first disc.</td></tr>')
+        ) or ("" if place_rows else empty_rows)
         library = ("<table><thead><tr><th>Title</th><th>Year</th><th>Format</th>"
                    "<th>Owner</th><th>Barcode</th><th>Watched</th><th>Where</th>"
                    "<th></th></tr></thead><tbody>%s</tbody></table>"

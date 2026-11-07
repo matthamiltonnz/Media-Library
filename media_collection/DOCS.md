@@ -544,26 +544,31 @@ a Blu-ray.com export. The start-up call runs only when `FILMS_PATH` and
 ## Browsing
 
 The catalogue page opens in one **mode at a time** — **Movies**, **TV** or **Music**
-(an *Other* pill appears only if such titles exist). The mode you are in carries the
-count of what is on the page; once a search, an owner or a format narrows the shelf,
-the other modes are plain links with their number in a tooltip, because a number
-there reads as part of the page and it is not — it is how many titles *that* mode
-would hold. Under the modes, a second row of pills
+(an *Other* pill appears only if such titles exist). Filtering runs **top down**:
+the search narrows every row beneath it, the mode you pick narrows the formats and the
+owners, and a format narrows the owners — but no row is narrowed by a row below it. So
+each row is a map of what you can reach from there: the mode row always carries the
+shelf's **full title counts** (Movies 634 · TV 4 · Music 560), the format row counts
+that mode's titles, and the owner row counts the titles left after the search, the mode
+and the formats. *What is actually on the page* is the headline above the cards —
+"N titles · M copies". Under the modes, a second row of pills
 lists **Everyone** and every household member who owns a copy (even with nothing in
 the current mode, where the count shows 0), each with their copy count inside the
 current mode; other people's private copies never appear, whichever filter is active.
-When the filters match nothing in this mode but do match another, the mode row says so
-and links straight there — *Nothing in Movies — 4 in Music* — so a narrow search that
-only hit albums is not a dead end.
+When nothing survives the filters the page says so instead of claiming the shelf is
+empty — *Nothing matches these filters. Clear them.* — and a format you have picked
+stays in its row even when this mode has none of it (3D Blu-ray on the music shelf
+reads **3D Blu-ray 0**, and clicking it takes the filter off), so an empty page always
+shows which pill to press.
 Within a mode the page shows the title/copy counts, and a **format pill row** sits
 between the mode pills and the owner chips (CD, 3D Blu-ray, Blu-ray, 4K Blu-ray, …).
 A pill applies the moment it is clicked; pick several to see "Blu-ray **or** 4K" at
-once, and the count inside each pill is the number of **titles** with a copy in that
-format under the current filters — the same unit as the mode pills, the owner chips
-and the headline's first number, so picking 4K reads the same number in all three
-rows. A title holding a 4K and a Blu-ray is in both pills; hover a pill to see how
-many copies its titles hold. Picking a pill never removes the others, so a second
-format is one more click away; clicking the current pill clears it.
+once, and the count inside each pill is the number of **titles** of this mode with a
+copy in that format — the search and the mode narrow it, a format or an owner picked
+below does not (that is what top-down means). A title holding a 4K and a Blu-ray is in
+both pills, and hover a pill to see how many copies its titles hold. Picking a pill
+never removes the others, so a second format is one more click away; clicking the
+current pill clears it.
 Format pills stack on top of the search and owner filters, and a poster keeps showing
 every format its title holds even while the shelf is narrowed to one of them.
 The search box and the list/poster toggle sit under the counts, and **+ Add a copy** sits
