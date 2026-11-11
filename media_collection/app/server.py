@@ -168,6 +168,42 @@ def refresh_hours():
         return 24
 
 
+def refresh_time():
+    """What time of day the automatic pass runs: (hour, minute), 03:00 default.
+
+    `refresh_time` is an "HH:MM" add-on option, so a household whose router
+    restarts at 3 am can move the pass to an hour that is actually quiet;
+    MC_REFRESH_TIME overrides it for a developer running the code directly.
+    """
+    value = os.environ.get("MC_REFRESH_TIME")
+    if value is None:
+        value = load_options().get("refresh_time", "03:00")
+    try:
+        hour, _, minute = str(value).strip().partition(":")
+        hour, minute = int(hour), int(minute or 0)
+    except (TypeError, ValueError):
+        return 3, 0
+    if 0 <= hour <= 23 and 0 <= minute <= 59:
+        return hour, minute
+    return 3, 0
+
+
+def refresh_retry_minutes():
+    """How long before a second try at a pass that wrote nothing (0 = never).
+
+    A pass where every lookup failed is usually a network that is still down -
+    the router restarting at 3 am is the usual reason - so it is worth one more
+    attempt shortly afterwards instead of waiting a whole day.
+    """
+    value = os.environ.get("MC_REFRESH_RETRY")
+    if value is None:
+        value = load_options().get("refresh_retry_minutes", 30)
+    try:
+        return max(0, min(720, int(value)))
+    except (TypeError, ValueError):
+        return 30
+
+
 OPTIONS = load_options()
 DEFAULT_VISIBILITY = OPTIONS.get("default_visibility", "shared")
 LOG_LEVEL = OPTIONS.get("log_level", "info")
@@ -241,6 +277,16 @@ def short_name(text):
 def ensure_user(con, username, display_name):
     """Create the row on first sight, so a new HA user needs no admin step."""
     display_name = short_name(display_name)
+    known = con.execute(
+        "SELECT id, display_name FROM users WHERE lower(username) = lower(?)",
+        (username,),
+    ).fetchone()
+    if known is not None and (not display_name
+                              or known["display_name"] == display_name):
+        # Nothing to write. Every GET used to INSERT OR IGNORE + commit, which
+        # takes the database's write lock: with a tab open, each page load
+        # queued behind whatever the background jobs were holding.
+        return known
     con.execute(
         "INSERT OR IGNORE INTO users (username, display_name) VALUES (?, ?)",
         (username, display_name),
@@ -524,6 +570,12 @@ PAGE = Template("""<!doctype html>
   .thumb.case-jewel::before { content: ""; position: absolute; left: 12%; top: 0;
       bottom: 0; width: 1px; background: #ffffffcc; }
   .thumb.case-jewel img { border: 0; box-shadow: none; }
+  /* an artist's photograph is not a cover: square, rounded, no sleeve */
+  .thumb.face { aspect-ratio: 1 / 1; border-radius: 6px; overflow: hidden;
+                padding: 0; background: #8882; }
+  .thumb.face img { width: 100%; height: 100%; object-fit: cover;
+                    border-radius: 0; box-shadow: none; }
+
   /* a vinyl sleeve is the artwork, edge to edge - no frame around it */
   .thumb.case-sleeve { aspect-ratio: 1 / 1; border-radius: 3px;
                        overflow: hidden; padding: 0; background: none; }
@@ -532,6 +584,16 @@ PAGE = Template("""<!doctype html>
                         display: grid; grid-template-rows: auto auto; }
   .thumb.case-digital img { width: 100%; height: auto; aspect-ratio: 2 / 3;
                             object-fit: cover; }
+  /* A digital *album* is one square, like the jewel case it sits beside: the
+     shop's band takes its strip at the top and the artwork fills the rest, so
+     the card is never taller than every other record on the wall. A digital
+     film keeps the band + 2:3 case. */
+  .thumb.case-digital.case-music { aspect-ratio: 1 / 1; display: flex;
+                                   flex-direction: column; }
+  .thumb.case-digital.case-music > .band { flex: 0 0 auto; }
+  .thumb.case-digital.case-music img { flex: 1 1 auto; min-height: 0;
+                                       width: 100%; height: auto;
+                                       aspect-ratio: auto; }
   .thumb .band.plain { background: #fff; color: #111; border-bottom-color: #ccc; }
   .thumb.case-digital { background: #8881; }
   .card .cap { padding: .4rem .5rem; font-size: .82rem; display: grid; gap: .15rem; }
@@ -905,6 +967,9 @@ def _span(row):
 
 def _place_cover(base, row):
     """The picture for a card that stands for a page rather than a copy."""
+    picture = (row["image_url"] if "image_url" in row.keys() else "") or ""
+    if picture.strip():                 # an act's own photograph, not a sleeve
+        return ui.cover_url(base, picture)
     if "jf_id" in row.keys() and row["jf_id"]:
         return base + "art/" + row["jf_id"]
     poster = (row["poster_url"] if "poster_url" in row.keys() else "") or ""
@@ -913,7 +978,7 @@ def _place_cover(base, row):
     return ui.cover_url(base, poster)
 
 
-def _place_card(base, href, cover, name, caption, stack=False):
+def _place_card(base, href, cover, name, caption, stack=False, face=False):
     """A card shaped like a title's, whose link opens an act or a series.
 
     `stack=True` draws the thumbnail as a stack of cases - the cover in front,
@@ -925,7 +990,8 @@ def _place_card(base, href, cover, name, caption, stack=False):
     return ('<a class="card" href="%s%s"><div class="thumb%s">%s</div>'
             '<div class="cap"><strong>%s</strong>'
             '<span class="muted">%s</span></div></a>'
-            % (html.escape(base), href, " stack" if stack else "", thumb,
+            % (html.escape(base), href,
+               " stack" if stack else " face" if face else "", thumb,
                html.escape(name), html.escape(caption)))
 
 
@@ -1099,7 +1165,7 @@ def render_index(con, viewer, base, error=None, query="",
             place_cards.append(_place_card(
                 base, href, _place_cover(base, row), row["name"],
                 " \u00b7 ".join(filter(None, [label, count, span])),
-                stack=(label == "Collection")))
+                stack=(label == "Collection"), face=(label == "Artist")))
             place_rows.append(
                 '<tr><td><a href="%s%s">%s</a></td><td class="muted">%s</td>'
                 '<td><span class="tag">%s</span></td>'
@@ -1976,6 +2042,16 @@ class Handler(BaseHTTPRequestHandler):
                     "grid" if want == "grid" else "list", search,
                     owner_rows, owner_id, total))
 
+            mbid = re.search(r"/artist/(\d+)/mbid/?$", route)
+            if mbid:
+                return self.artist_mbid(con, base,
+                                        int(mbid.group(1)))
+
+            art = re.search(r"/artist/(\d+)/art/?$", route)
+            if art:
+                return self.artist_art(con, viewer, base,
+                                       int(art.group(1)))
+
             match = re.search(r"/artist/(\d+)/?$", route)
             if match:
                 artist = artists.get(con, int(match.group(1)))
@@ -2097,6 +2173,37 @@ class Handler(BaseHTTPRequestHandler):
                    title_id, html.escape(term), html.escape(note), rows))
         return ui.page(base, "Link to Jellyfin", body,
                        back="title/%d" % title_id)
+
+    def artist_mbid(self, con, base, artist_id):
+        """Find the right MusicBrainz entry for an act whose id is wrong."""
+        artist = artists.get(con, artist_id)
+        if artist is None:
+            return self.respond(404, "<h1>No such artist</h1>")
+        asked = parse_qs(urlparse(self.path).query).get("q")
+        query = (asked[0] if asked else artist["name"]) or artist["name"]
+        matches, note = [], ""
+        try:
+            matches = metadata.musicbrainz_artist_matches(query)
+            if not matches:
+                note = "MusicBrainz has no artist called %r." % query
+        except Exception as exc:            # a lookup must not kill the page
+            note = "MusicBrainz could not be asked: %s" % exc
+        page = ui_artists.render_mbid(base, artist, matches, note, query)
+        return self.respond(200, page)
+
+    def artist_art(self, con, viewer, base, artist_id, note="", bad=False):
+        """Every picture the lookup found for an act, plus an upload form."""
+        artist = artists.get(con, artist_id)
+        if artist is None:
+            return self.respond(404, "<h1>No such artist</h1>")
+        choices = artists.image_choices(con, artist_id)
+        if not choices and not note:
+            # first visit: ask the free sources once and keep what they say
+            found, note = artists.refresh_art(con, artist_id)
+            choices = artists.image_choices(con, artist_id)
+            bad = bool(note)
+        page = ui_artists.render_art(base, artist, choices, note, bad)
+        return self.respond(200, page)
 
     def cover_page(self, con, viewer, base, title_id, term=""):
         """Every cover the keyless sources hold for one title, to pick from.
@@ -2406,11 +2513,66 @@ class Handler(BaseHTTPRequestHandler):
                         {"ok": False, "note": str(exc)}), "application/json")
                 return self.respond(200, json.dumps({"ok": True}),
                                     "application/json")
+            art = re.search(r"/artist/(\d+)/art/?$", route_path(self))
+            if art:
+                artist_id = int(art.group(1))
+                action = (field(form, "action") or "").strip()
+                url = (field(form, "url") or "").strip()
+                here = base_path(self) + "artist/%d" % artist_id
+                if action == "use" and url:
+                    artists.set_image(con, artist_id, url)
+                    where = here
+                else:
+                    if action == "forget" and url:
+                        artists.forget_image(con, artist_id, url)
+                        _forget_cover_file(url)  # an upload of ours, if it was
+                    else:
+                        artists.refresh_art(con, artist_id)
+                    where = here + "/art"
+                return self.respond(303, "", extra={"Location": where})
+
+            cover = re.search(r"/artist/(\d+)/cover/?$", route_path(self))
+            if cover:
+                artist_id = int(cover.group(1))
+                blob = (form.get("image") or [b""])[0]
+                if not isinstance(blob, bytes):
+                    blob = b""
+                ext, kind = image_ext(blob)
+                if not ext:
+                    return self.artist_art(
+                        con, viewer, base_path(self), artist_id,
+                        note="That file is not an image - use a PNG, JPEG, "
+                             "GIF or WebP.", bad=True)
+                if len(blob) > MAX_COVER_BYTES:
+                    return self.artist_art(
+                        con, viewer, base_path(self), artist_id,
+                        note="That image is %.1f MB - the limit is %d MB."
+                             % (len(blob) / 1048576.0,
+                                MAX_COVER_BYTES // 1048576), bad=True)
+                try:
+                    os.makedirs(COVERS_DIR, exist_ok=True)
+                    name = ("a%d-%d%s"
+                            % (artist_id, int(time.time() * 1000), ext))
+                    with open(os.path.join(COVERS_DIR, name), "wb") as out:
+                        out.write(blob)
+                except OSError as exc:
+                    return self.artist_art(
+                        con, viewer, base_path(self), artist_id,
+                        note="Could not save the picture: %s" % exc, bad=True)
+                row = con.execute("SELECT image_url FROM artists WHERE id = ?",
+                                  (artist_id,)).fetchone()
+                _forget_cover_file(row[0] if row else "")
+                artists.set_image(con, artist_id, "/cover/" + name)
+                return self.respond(
+                    303, "", extra={"Location": base_path(self)
+                                    + "artist/%d" % artist_id})
+
             asked = re.search(r"/artist/(\d+)/bio/?$", route_path(self))
             if asked:
                 artist_id = int(asked.group(1))
                 try:
                     artists.fill_bio(con, artist_id=artist_id)
+                    artists.fill_images(con, artist_id=artist_id)
                 except Exception as exc:       # a lookup must not kill the page
                     print("artists: %s" % exc)
                 return self.respond(303, "", extra={
@@ -2424,8 +2586,19 @@ class Handler(BaseHTTPRequestHandler):
                     artists.rename(con, artist_id, wanted)
                 elif field(form, "action") == "mbid":
                     # the id form; a blank box clears it on purpose
-                    ok, message = artists.set_mbid(con, artist_id,
-                                                   field(form, "musicbrainz_id"))
+                    before = con.execute(
+                        "SELECT musicbrainz_id, image_url FROM artists WHERE id = ?",
+                        (artist_id,)).fetchone()
+                    wanted_id = (field(form, "musicbrainz_id") or "").strip().lower()
+                    ok, message = artists.set_mbid(con, artist_id, wanted_id)
+                    changed = before is None or (before[0] or "") != wanted_id
+                    if ok and changed:
+                        # the old act's picture is not this act's; its file goes
+                        _forget_cover_file(before[1] if before else "")
+                        made = artists.enrich_one(con, artist_id)
+                        message = message + (
+                            " Details fetched again for the new id."
+                            if made else " Nothing came back for that id.")
                     where += "?%s=%s" % ("mbid" if ok else "mbid_error",
                                         quote(message))
                 return self.respond(303, "", extra={"Location": where})
@@ -3398,7 +3571,10 @@ def main():
     # the same pass then repeats itself every day (or week), working through a
     # couple of hundred titles a night, so a shelf nobody touches still tidies
     # itself - and the artist fill rides along
-    refresh_job.start_auto(DB_PATH, hours=refresh_hours(), limit=200,
+    hour, minute = refresh_time()
+    refresh_job.start_auto(DB_PATH, hours=refresh_hours(),
+                           hour_of_day=hour, minute_of_day=minute, limit=200,
+                           retry_minutes=refresh_retry_minutes(),
                            also=lambda: artists.start(DB_PATH, limit=200))
     # Direct LAN access wants HTTPS - a barcode scanner is only handed the
     # camera on a secure origin - while Home Assistant's ingress proxy and the

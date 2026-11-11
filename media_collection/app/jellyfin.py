@@ -360,7 +360,15 @@ def sync_links(con, log=print, server=None):
         for one in found:
             part = sync_links(con, log=log, server=one)
             copies = materialise(con, one, log=log)
+            # Commit between the phases. Each one below talks to Jellyfin -
+            # expand_versions() asks about every route's files, editions()
+            # re-reads the whole library, dedupe_versions() asks each route's
+            # year - and a page's `ensure_user` insert is a writer too. Held
+            # open across those requests the lock outlived the 60 s a request
+            # waits, which is how a restart dropped the first page loads.
+            con.commit()
             expand_versions(con, one, log=log)
+            con.commit()
             try:
                 more = editions(con, one, log=log)
                 if more:
@@ -371,9 +379,11 @@ def sync_links(con, log=print, server=None):
                     % (one["label"], exc))
             if copies:
                 log("jellyfin[%s]: %d copies added" % (one["label"], copies))
+            con.commit()            # editions() is done: let its lock go
             # whatever was just linked belongs to the server we just read
             con.execute("UPDATE jellyfin_links SET server_id = ?"
                         " WHERE server_id IS NULL", (one["id"],))
+            con.commit()            # dedupe_versions() asks about every route
             # editions() above can attach a second library's item again,
             # so the dedupe has to be the last word
             dedupe_versions(con, one, log=log)
@@ -407,11 +417,15 @@ def sync_links(con, log=print, server=None):
 
     stats = {"copies": 0, "by_path": 0, "by_name": 0, "unmatched": 0}
     con.execute("DELETE FROM jellyfin_links")
+    # The rows are in memory already, so the matches can be committed in
+    # batches: a single transaction around a thousand rows holds the write
+    # lock for the whole match while pages are trying to write as well.
     PROGRESS.update(phase="matching copies", total=len(rows), done=0)
     for row in rows:
         stats["copies"] += 1
         if stats["copies"] % 100 == 0:
             PROGRESS["done"] = stats["copies"]
+            con.commit()            # a batch at a time: pages write too
         found, matched_by = None, "path"
         if row["root_path"] and row["rel_path"]:
             absolute = _key(os.path.join(row["root_path"], row["rel_path"]))
@@ -502,7 +516,13 @@ def editions(con, server, log=print, dry_run=False):
         " WHERE d.provider = 'jellyfin' AND d.server_id = ?",
         (server["id"],)).fetchall()
     made = 0
+    seen = 0
     for title in titles:
+        seen += 1
+        if seen % 100 == 0:
+            # the match below is a long CPU scan over every item, so commit as
+            # it goes: a match found early must not hold the lock for the rest
+            con.commit()
         want = _norm(title["name"])
         if not want:
             continue
@@ -872,8 +892,11 @@ def start_sync(db_path):
 
 
 def _run_sync(db_path):
-    con = sqlite3.connect(db_path, timeout=30)
+    # 60 s and a busy timeout, like server.connect(): the sync writes while the
+    # household's pages read and write, and a lost lock is a dropped request
+    con = sqlite3.connect(db_path, timeout=60)
     con.row_factory = sqlite3.Row
+    con.execute("PRAGMA busy_timeout = 60000")
     try:
         if not config(con)[1]:
             counts = {}                     # no key yet: nothing to refresh
@@ -1070,7 +1093,13 @@ def expand_versions(con, server, log=print):
     for row in rows:
         mine.setdefault(row["external_id"], []).append(row)
     made = 0
+    seen = 0
     for jf_id, have in mine.items():
+        seen += 1
+        if seen % 25 == 0:
+            # every route below asks the server about its files, so the batch
+            # before it is as long as the write lock should ever be held
+            con.commit()
         try:
             sources = _media_sources(base, key, jf_id)
         except Exception as exc:            # one bad id must not stop us
@@ -1133,6 +1162,7 @@ def expand_versions(con, server, log=print):
                 continue
             made += _copy_of(con, have[0], jf_id, source_id, name,
                              edition or quality)
+    con.commit()
     if made:
         log("jellyfin[%s]: %d further versions" % (server["id"], made))
     return made
@@ -1186,6 +1216,7 @@ def dedupe_versions(con, server, log=print):
     info = {}
     dropped = 0
     for row in titles:
+        con.commit()            # the previous title's HTTP is finished
         routes = {}
         for route in con.execute(
                 "SELECT ds.id, ds.item_id, ds.external_id"
@@ -1227,6 +1258,7 @@ def dedupe_versions(con, server, log=print):
             for route in routes[jf_id]:
                 if _drop_copy(con, route["item_id"], route["id"]):
                     dropped += 1
+    con.commit()
     if dropped:
         log("jellyfin[%s]: %d duplicate copies dropped"
             % (server["id"], dropped))

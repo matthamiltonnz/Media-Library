@@ -86,6 +86,13 @@ SHELL = """<!doctype html>
   .bio .portrait { width: 9rem; flex: 0 0 auto; border-radius: 8px;
                    box-shadow: 0 6px 18px #0003; }
   .bio div { min-width: 0; }
+  /* the portrait keeps its pencil on the corner, like a title's cover */
+  .bio .pfw { position: relative; flex: 0 0 auto; }
+  .bio .pfw .portrait { display: block; height: 9rem; object-fit: cover; }
+  /* Fetch details and Change the picture sit on one line */
+  .acts { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center;
+          margin: .5rem 0 .7rem; }
+
   /* the films a series holds that the shelf does not: a plain list, because it
      is a want-list rather than part of the collection */
   ul.gaps { list-style: none; padding: 0; margin: .3rem 0 .6rem; }
@@ -94,6 +101,7 @@ SHELL = """<!doctype html>
   @media (max-width: 34rem) {
     .bio { flex-direction: column; }
     .bio .portrait { width: 6rem; }
+    .bio .pfw .portrait { width: 6rem; height: 6rem; }
   }
   .artpicks { display: flex; flex-wrap: wrap; gap: .5rem; margin: 0 0 1rem; }
   .artpick { margin: 0; display: grid; gap: .2rem; justify-items: center; }
@@ -212,6 +220,12 @@ SHELL = """<!doctype html>
   .thumb.case-jewel::before { content: ""; position: absolute; left: 12%; top: 0;
       bottom: 0; width: 1px; background: #ffffffcc; }
   .thumb.case-jewel img { border: 0; box-shadow: none; }
+  /* an artist's photograph is not a cover: square, rounded, no sleeve */
+  .thumb.face { aspect-ratio: 1 / 1; border-radius: 6px; overflow: hidden;
+                padding: 0; background: #8882; }
+  .thumb.face img { width: 100%; height: 100%; object-fit: cover;
+                    border-radius: 0; box-shadow: none; }
+
   /* a vinyl sleeve is the artwork, edge to edge - no frame around it */
   .thumb.case-sleeve { aspect-ratio: 1 / 1; border-radius: 3px;
                        overflow: hidden; padding: 0; background: none; }
@@ -221,6 +235,16 @@ SHELL = """<!doctype html>
                         background: #8881; }
   .thumb.case-digital img { width: 100%; height: auto; aspect-ratio: 2 / 3;
                             object-fit: cover; }
+  /* A digital *album* is one square, like the jewel case it sits beside: the
+     shop's band takes its strip at the top and the artwork fills the rest, so
+     the card is never taller than every other record on the wall. A digital
+     film keeps the band + 2:3 case. */
+  .thumb.case-digital.case-music { aspect-ratio: 1 / 1; display: flex;
+                                   flex-direction: column; }
+  .thumb.case-digital.case-music > .band { flex: 0 0 auto; }
+  .thumb.case-digital.case-music img { flex: 1 1 auto; min-height: 0;
+                                       width: 100%; height: auto;
+                                       aspect-ratio: auto; }
   .thumb .band.plain { background: #fff; color: #111; border-bottom-color: #ccc; }
   .card .cap { padding: .4rem .5rem; font-size: .82rem; display: grid; gap: .15rem; }
   .card .cap .muted { font-size: .74rem; }
@@ -526,6 +550,35 @@ NOW_PLAYING = """<style>
 """
 
 
+def thumb_url(url, width=500):
+    """A Wikimedia picture at a size a card can use; anything else as given.
+
+    Wikipedia hands over the *original* file (often several megabytes) or a
+    pre-rendered `.../3840px-...` thumbnail; Wikimedia only serves the sizes it
+    has rendered, and an invented one (`400px-`) is answered with **400**, which
+    a browser shows as a broken image. 500 px is rendered for every file and is
+    twice the width of a card. A Jellyfin proxy path, an uploaded cover or any
+    other host is returned untouched.
+    """
+    prefix = "https://upload.wikimedia.org/wikipedia/"
+    other = "https://thumb.wikimedia.org/wikipedia/"
+    url = (url or "").strip()
+    if url.startswith(other):
+        url = prefix + url[len(other):]
+    if not url.startswith(prefix):
+        return url
+    bits = url[len(prefix):].split("?")[0].split("#")[0].split("/")
+    if len(bits) == 4:                      # commons/5/5b/File.jpg
+        project, one, two, name = bits
+        tail = name + ".png" if name.lower().endswith(".svg") else name
+    elif len(bits) == 6 and bits[1] == "thumb":
+        project, _, one, two, name, sized = bits
+        tail = sized.split("px-", 1)[1] if "px-" in sized else name
+    else:
+        return url
+    return (prefix + "%s/thumb/%s/%s/%s/%dpx-%s"
+            % (project, one, two, name, width, tail))
+
 def cover_url(base, url):
     """Where a stored poster url is actually served from.
 
@@ -538,7 +591,7 @@ def cover_url(base, url):
     if url.startswith("/cover/"):
         return base + url[1:]
     if not url or url.startswith(("http://", "https://", "/")):
-        return url
+        return thumb_url(url)
     return base + url
 
 

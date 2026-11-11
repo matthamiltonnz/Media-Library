@@ -10,17 +10,6 @@ configuration:
     description: >-
       How much the add-on writes to the Supervisor log. "debug" is very noisy
       and is only useful while something is being fixed.
-  films_path:
-    name: Ripped films folder
-    description: >-
-      Optional. A folder inside the media share (one folder per film) imported
-      on every start, so a newly ripped disc appears without anyone typing a
-      path. Leave it empty to import by hand instead.
-  films_owner:
-    name: Whose films those are
-    description: >-
-      The display name of the person who owns the copies films_path imports.
-      Ignored when films_path is empty.
   refresh_hours:
     name: Automatic metadata pass
     description: >-
@@ -29,3 +18,18 @@ configuration:
       collections - without anyone pressing a button. 24 is daily, 168 is
       weekly, 0 turns it off. A bounded handful is also looked up every time
       the add-on starts, however this is set.
+  refresh_time:
+    name: Time of the automatic pass
+    description: >-
+      The time of day the automatic metadata pass runs, as HH:MM on the clock
+      the app takes from Home Assistant - "03:00" by default. Move it if
+      something else on the network is busy then, such as a router that
+      restarts at 3 am. Used when the pass is set to daily or weekly; every
+      other interval counts from the run instead.
+  refresh_retry_minutes:
+    name: Retry a pass that wrote nothing
+    description: >-
+      Minutes to wait before trying an automatic pass again when it managed to
+      look nothing up - usually a network that was still down, which is what a
+      router restarting at 3 am looks like. 30 is the default; 0 never retries
+      and leaves the backlog for the next scheduled pass.

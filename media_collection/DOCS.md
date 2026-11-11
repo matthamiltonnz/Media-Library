@@ -83,12 +83,16 @@ Exports are per viewer: shared copies plus your own private ones.
   up in the background, and adding a title with *Look up metadata* ticked (it is
   ticked by default) fetches it there and then, a new act's MusicBrainz record
   and biography included. For an act already on the shelf that last step costs a
-  single row read. On top of that the whole pass repeats itself **once a day at
-  03:00** the household's time - the app takes its clock from Home Assistant's
-  time zone, so this is 3 am where you are, not 3 am UTC
-  (`refresh_hours` - 24 daily, 168 weekly, 0 never; see *Options*),
-  working through up to two hundred titles (and two hundred acts) a night, so a
-  shelf nobody touches still drains its backlog. The start-up pass stays at
+  single row read. On top of that the whole pass repeats itself **on a
+  schedule** - once a day by default, at the time `refresh_time` names (03:00
+  unless you move it: the app takes its clock from Home Assistant's time zone,
+  so this is 3 am where you are, not 3 am UTC). `refresh_hours` sets how often -
+  24 daily, 168 weekly, 0 never - and each pass works through up to two hundred
+  titles (and two hundred acts) a night, so a shelf nobody touches still drains
+  its backlog. A pass that managed to look nothing up at all - usually a network
+  that was still down, which is what a router restarting at 3 am looks like - is
+  tried once more `refresh_retry_minutes` later (30 by default, 0 never) instead
+  of being left for the next day. The start-up pass stays at
   sixty: a restart is cheap, a nightly sweep can afford to be patient.
 
   **Collections are refreshed by that button and by the nightly pass too.** For
@@ -211,10 +215,19 @@ the year the act started, then its Wikipedia biography; a few are filled in
 automatically on each start, and adding an album fills a brand-new act at once.
 Its progress
 line sits on that panel only while the fill is running, so the page carries no
-stale count. Since an artist
-has no picture of its own, the page and the cover wall borrow the art of their
-first album - Jellyfin's image when that album is linked, otherwise the Cover Art
-Archive picture MusicBrainz gave it.
+stale count. Each act gets its own photograph where a free source has one:
+**Fill artist details** stores Wikipedia's lead image for the act, and falls
+back to the act's Wikidata item (`P18`) when the article has no picture. A
+portrait is looked up once per act and remembered, so an act nobody has
+photographed is not asked about again on every refresh; the artist wall and the
+catalogue's search cards show it, and only fall back to the first album's
+artwork - Jellyfin's image when that album is linked, otherwise the Cover Art
+Archive picture MusicBrainz gave it - for the 22 or so acts with no picture of
+their own. The pencil on a portrait (or **Choose a picture** when there is
+none) opens a page of every picture a lookup can find - the article's lead
+image, its Wikidata image, the pages a name search turns up - where you pick one
+or upload your own; an upload is capped at 6 MB and served from the add-on's own
+`/data/covers` folder, exactly like a title's cover.
 
 A biography sits above the albums. MusicBrainz has none — the only text it
 offers is a disambiguation line ("Group") — so **Fill artist details** looks each
@@ -692,7 +705,9 @@ catalogue fills that gap itself:
   found, so adding a missing copy is a single click rather than a typed path.
 * **Jellyfin**: press *Add a server* on the admin page — a label, its URL and a key
   (Dashboard → API Keys) — then *Sync with Jellyfin*, and every copy is linked
-  to the item Jellyfin already holds. The sync also runs once at start-up and
+  to the item Jellyfin already holds. It writes in batches between its phases
+  rather than keeping one long transaction open, so a background sync can never
+  hold the pages up. The sync also runs once at start-up and
   whenever you press
   the button, so films added since the last one get their button without a visit to
   Admin; names are matched loosely (`10,000 B.C.` finds *10,000 BC*, and a catalogue
@@ -747,6 +762,8 @@ fills blanks, so re-running is safe.
 | `default_visibility` | `shared` / `private` | `shared` |
 | `log_level` | `debug`/`info`/`warning`/`error` | `info` |
 | `refresh_hours` | hours between automatic metadata passes: `24` daily, `168` weekly, `0` only when asked | `24` |
+| `refresh_time` | time of day the pass runs, `HH:MM` on the clock the app takes from Home Assistant | `03:00` |
+| `refresh_retry_minutes` | minutes before a second try at a pass that looked nothing up; `0` never retries | `30` |
 
 ## Sharing
 

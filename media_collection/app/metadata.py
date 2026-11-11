@@ -47,6 +47,14 @@ def _key(text):
     return re.sub(r"[^a-z0-9]+", "", (text or "").lower())
 
 
+def _act_key(text):
+    """A name's loose key with a leading "The" dropped - "The Prodigy" == "Prodigy"."""
+    words = (text or "").strip().lower().split()
+    if len(words) > 1 and words[0] == "the":
+        words = words[1:]
+    return _key(" ".join(words))
+
+
 def _get(url, timeout=25):
     request = urllib.request.Request(
         url, headers={"User-Agent": UA, "Accept": "application/json"})
@@ -253,6 +261,17 @@ def _claim_text(entity, prop):
         if isinstance(value, dict) and value.get("text"):
             out.append(value["text"])
     return out
+
+
+def _claim_strings(entity, prop):
+    """The plain string values an item gives for one property (P18 and the like)."""
+    out = []
+    for claim in ((entity or {}).get("claims") or {}).get(prop, []):
+        value = ((claim.get("mainsnak") or {}).get("datavalue") or {}).get("value")
+        if isinstance(value, str) and value.strip():
+            out.append(value.strip())
+    return out
+
 
 
 def fill_series(con, title_id, force=False):
@@ -691,34 +710,72 @@ def cover_search(row, term="", artist_mbid=None):
     return covers[:COVER_LIMIT], " ".join(notes)
 
 
-def musicbrainz_artist(name):
-    """MusicBrainz' best guess at an artist: id, country, year they formed.
+def musicbrainz_artist_matches(name, limit=10):
+    """Every artist a MusicBrainz name search finds, best first.
 
-    Used to fill in the artists table from the act's name alone, so nothing here
-    depends on Jellyfin being present.
+    The search is Lucene, not equality, so `artist:"Bush"` also returns *Kate
+    Bush* - which is how this shelf filed the British band under her biography.
+    The caller decides which hit is the act; this only reports what the search
+    said, so the same list can back a "pick the right one" page.
     """
     if not name:
-        return None
+        return []
     params = urllib.parse.urlencode({
-        "query": 'artist:"%s"' % name.replace('"', ""),
-        "fmt": "json", "limit": 1})
+        "query": 'artist:"%s"' % name.replace('"', " "),
+        "fmt": "json", "limit": limit})
     time.sleep(MB_PAUSE)
     payload = _get(MB_ROOT + "/artist?" + params)
-    found = (payload.get("artists") or [None])[0]
-    if not found:
+    found = []
+    for row in (payload.get("artists") or []):
+        life = row.get("life-span") or {}
+        begin = (life.get("begin") or "")[:4]
+        end = (life.get("end") or "")[:4]
+        found.append({
+            "mbid": row.get("id") or "",
+            "name": row.get("name") or "",
+            "disambiguation": row.get("disambiguation") or "",
+            "country": row.get("country") or "",
+            "kind": row.get("type") or "",
+            "years": ("%s-%s" % (begin, end)) if begin and end else begin,
+            "score": row.get("score") or 0,
+        })
+    return found
+
+
+def musicbrainz_artist(name):
+    """MusicBrainz' best guess at an artist: id, country, start year, note.
+
+    Used to fill in the artists table from the act's own name, so nothing
+    depends on Jellyfin being present. Only a hit whose name is the act's own
+    counts (case, punctuation and a leading "The" aside): `artist:"Bush"`
+    returns Kate Bush first, and a wrong id is worse than none - it drags a
+    stranger's biography, portrait and links onto the shelf.
+    """
+    hits = musicbrainz_artist_matches(name, limit=10)
+    if not hits:
         return None
-    life = found.get("life-span") or {}
-    begin = life.get("begin") or ""
+    wanted = _act_key(name)
+    best, best_rank = None, 0
+    for hit in hits:
+        key = _act_key(hit["name"])
+        if key == wanted:
+            rank = 100
+        elif key.startswith(wanted) or key.endswith(wanted):
+            rank = 20
+        else:
+            rank = 0
+        if rank > best_rank:
+            best, best_rank = hit, rank
+    if best is None:
+        return None
+    years = best["years"]
     return {
-        "name": found.get("name") or name,
-        "mbid": found.get("id"),
-        "country": found.get("country"),
-        "formed_year": int(begin[:4]) if begin[:4].isdigit() else None,
-        "note": found.get("disambiguation") or found.get("type") or None,
+        "name": best["name"] or name,
+        "mbid": best["mbid"],
+        "country": best["country"] or None,
+        "formed_year": int(years[:4]) if years[:4].isdigit() else None,
+        "note": best["disambiguation"] or best["kind"] or None,
     }
-
-
-
 def musicbrainz_lookup(artist, album, year=None, artist_mbid=None):
     """Best release-group for one album: mbid, year, cover, title, credit, types."""
     album = ALBUM_YEAR.sub("", album or "").strip() or (album or "")
@@ -1418,6 +1475,138 @@ def artist_bio(name, mbid=None):
             "wiki_url": article,
             "links": links[:6]}
 
+
+def _wiki_title(url):
+    """The en.wikipedia page title inside an article url, or ""."""
+    head = "https://en.wikipedia.org/wiki/"
+    if not (url or "").startswith(head):
+        return ""
+    title = url[len(head):].split("#")[0].split("?")[0]
+    return urllib.parse.unquote(title).replace("_", " ")
+
+
+def _commons_file(file_name):
+    """A Wikimedia Commons file as a url that serves a picture.
+
+    Special:FilePath redirects to the file itself, and `width` asks Wikimedia
+    for a rendered thumbnail - a 6 MB photograph has no business on a card.
+    """
+    name = (file_name or "").strip()
+    if name.lower().startswith("file:"):
+        name = name[5:].strip()
+    if not name:
+        return ""
+    return ("https://commons.wikimedia.org/wiki/Special:FilePath/"
+            + urllib.parse.quote(name.replace(" ", "_")) + "?width=500")
+
+
+def artist_image(name, mbid=None, wiki_url=""):
+    """A photograph of an act, or "": Wikipedia's lead image, then Wikidata.
+
+    The article's own lead image is the best answer - it is the picture a
+    reader of the biography sees - and an act whose article has none (or whose
+    article nobody found) is asked of its Wikidata item's P18. `wiki_url` is
+    the article the biography lookup already resolved, so a filled act costs
+    one request rather than four.
+    """
+    title = _wiki_title(wiki_url)
+    qid = ""
+    if mbid:
+        try:
+            for url in (musicbrainz_url_rels(mbid).get("wikidata") or []):
+                qid = _qid_from_url(url) or ""
+                if qid:
+                    break
+        except Exception:
+            qid = ""
+    if not title:
+        try:
+            title = wikipedia_artist_name(name) or ""
+        except Exception:
+            title = ""
+    if title:
+        found = (_summary_or_empty(title).get("poster_url") or "").strip()
+        if found:
+            return found
+    if not qid and title:
+        qid = wikidata_qid(title) or ""
+    if qid:
+        entity = (_entities([qid]) or {}).get(qid) or {}
+        for file_name in _claim_strings(entity, "P18"):
+            picture = _commons_file(file_name)
+            if picture:
+                return picture
+    return ""
+
+
+
+
+def _search_pages(name, limit=6):
+    """The en.wikipedia page titles a plain name search finds, best first."""
+    params = urllib.parse.urlencode({"action": "query", "list": "search",
+                                     "srsearch": name, "srlimit": limit,
+                                     "format": "json"})
+    data = _get("https://en.wikipedia.org/w/api.php?" + params)
+    rows = ((data or {}).get("query") or {}).get("search") or []
+    return [row.get("title") or "" for row in rows if row.get("title")]
+
+
+def artist_cover_search(name, mbid="", wiki_url=""):
+    """([{source, url, label}], note) - pictures of an act to choose between.
+
+    The act's own article comes first (its lead image is the photograph a
+    reader of the biography sees), then its Wikidata item's P18, then the lead
+    images of the other Wikipedia pages a name search finds - which is how a
+    band whose article carries no photograph gets one from a festival or an
+    interview page. `note` is what is shown when nothing turns up.
+    """
+    found = []
+    seen = set()
+
+    def offer(source, url, label):
+        url = (url or "").strip()
+        if url and url not in seen:
+            seen.add(url)
+            found.append({"source": source, "url": url, "label": label})
+
+    title = _wiki_title(wiki_url)
+    if not title:
+        try:
+            title = wikipedia_artist_name(name) or ""
+        except Exception:
+            title = ""
+    qid = ""
+    if mbid:
+        try:
+            for url in (musicbrainz_url_rels(mbid).get("wikidata") or []):
+                qid = _qid_from_url(url) or ""
+                if qid:
+                    break
+        except Exception:
+            qid = ""
+    if title:
+        offer("Wikipedia", _summary_or_empty(title).get("poster_url"), title)
+    if not qid and title:
+        qid = wikidata_qid(title) or ""
+    if qid:
+        entity = (_entities([qid]) or {}).get(qid) or {}
+        for file_name in _claim_strings(entity, "P18"):
+            offer("Wikidata", _commons_file(file_name), "the act on Wikidata")
+    try:
+        pages = _search_pages(name)
+    except Exception:
+        pages = []
+    for page in pages:
+        if page == title:
+            continue
+        summary = _summary_or_empty(page)
+        if not _about_music(summary):
+            continue
+        offer("Wikipedia", summary.get("poster_url"), page)
+    if not found:
+        return [], ("No picture of %s was found by name - upload one, or paste "
+                    "a link to an image." % name)
+    return found, ""
 
 def series_item_for(con, collection_id, row):
     """The Wikidata item for a collection, resolved through its own films.

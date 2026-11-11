@@ -29,7 +29,15 @@ def _cover(base, jf_id, poster_url):
     return ui.cover_url(base, poster_url)
 
 
-def _thumb(base, jf_id, poster_url):
+def _thumb(base, jf_id, poster_url, portrait=""):
+    """The act's own photograph when there is one, else its first album's cover.
+
+    An artist card used to show the sleeve of whichever album came first, which
+    is how a wall of acts read as a wall of records.
+    """
+    if (portrait or "").strip():
+        return ('<div class="thumb face"><img src="%s" alt="" loading="lazy">'
+                '</div>' % _text(ui.cover_url(base, portrait)))
     cover = _cover(base, jf_id, poster_url)
     return '<div class="thumb case-jewel">%s</div>' % (
         '<img src="%s" alt="" loading="lazy">' % _text(cover) if cover else "")
@@ -97,7 +105,8 @@ def render_list(base, artists, view="grid", query="", owners=None,
             '<strong>%s</strong><span class="muted">%d album%s%s</span>'
             '</div></a>'
             % (_text(base), row["id"],
-               _thumb(base, row["jf_id"], row["poster_url"]),
+               _thumb(base, row["jf_id"], row["poster_url"],
+                      row["image_url"]),
                _text(row["name"]), row["albums"],
                "" if row["albums"] == 1 else "s",
                " · " + _years(row) if _years(row) else "")
@@ -166,20 +175,36 @@ def render_artist(base, artist, titles, labels, view="grid",
     # The biography sits above the albums: a portrait, what Wikipedia says,
     # and where to read more. MusicBrainz's one-word "overview" ("Group") is
     # not shown at all - only an act with a real article carries a wiki_url.
+    picture = (artist["image_url"] or "").strip()
+    if picture:
+        # the photograph, with the pencil that changes it on its corner
+        portrait = ('<span class="pfw"><img class="portrait" src="%s" alt=""'
+                    ' loading="lazy"><a class="coveredit" href="%sartist/%d/art"'
+                    ' title="Choose a picture">&#9998;</a></span>'
+                    % (_text(ui.cover_url(base, picture)), _text(base),
+                       artist["id"]))
+    else:
+        portrait = ""
     if (artist["overview"] or "").strip() and artist["wiki_url"]:
-        portrait = ('<img class="portrait" src="%s" alt="" loading="lazy">'
-                    % _text(artist["image_url"])) if artist["image_url"] else ""
         bio = ('<div class="bio">%s<div><p>%s</p>%s</div></div>'
                % (portrait, _text(artist["overview"]),
                   '<p class="sub">Read more: %s</p>' % sources
                   if sources else ""))
+    elif portrait:
+        bio = ('<div class="bio">%s<div><p class="muted">No biography yet - '
+               'press <em>Fetch details</em> and it is looked up on '
+               'Wikipedia.</p></div></div>' % portrait)
     else:
         bio = ('<p class="muted">No biography yet - press <em>Fetch details'
                '</em> and it is looked up on Wikipedia.</p>')
-    details = ('<form method="post" action="%sartist/%d/bio" class="sub">'
+    details = ('<div class="acts">'
+               '<form method="post" action="%sartist/%d/bio">'
                '<button type="submit">%s</button></form>'
+               '<a href="%sartist/%d/art">%s</a></div>'
                % (_text(base), artist["id"],
-                  "Fetch details again" if artist["wiki_url"] else "Fetch details"))
+                  "Fetch details again" if artist["wiki_url"] else "Fetch details",
+                  _text(base), artist["id"],
+                  "Change the picture" if picture else "Choose a picture"))
 
     rename = ('<form method="post" action="%sartist/%d" class="sub">'
               '<label>Name<input name="artist_name" value="%s"></label> '
@@ -196,9 +221,11 @@ def render_artist(base, artist, titles, labels, view="grid",
             '</label> <button type="submit">Save id</button>'
             '<span class="muted"> the 36-character uuid in the artist\'s own'
             ' MusicBrainz URL</span></form>'
+            ' <a href="%sartist/%d/mbid">Wrong act? Find the right entry</a>'
             % (_text(base), artist["id"],
                _text((artist["musicbrainz_id"] if "musicbrainz_id"
-                       in artist.keys() else "") or "")))
+                       in artist.keys() else "") or ""),
+               _text(base), artist["id"]))
 
     # `from` carries this page, so a title opened from here comes back here
     here = _text(urllib.parse.quote("artist/%d?view=%s"
@@ -245,3 +272,92 @@ def _formats(row, labels):
         mark = '▶'   # escaped by _text(), so a glyph, not a span
         text = text + " " + mark if text else mark
     return text
+
+
+def render_art(base, artist, choices, note="", bad=False):
+    """Pictures of one act: what the lookup found, and an upload of your own."""
+    name = _text(artist["name"])
+    current = (artist["image_url"] or "").strip()
+    here = _text(base) + "artist/%d" % artist["id"]
+    tiles = "".join(
+        '<form method="post" action="%s/art">'
+        '<input type="hidden" name="action" value="use">'
+        '<input type="hidden" name="url" value="%s">'
+        '<button type="submit" title="Use this picture">'
+        '<img src="%s" alt="" loading="lazy">'
+        '<span>%s</span></button></form>'
+        % (here, _text(item["url"]),
+           _text(ui.cover_url(base, item["url"])),
+           _text(item.get("label") or item.get("source") or ""))
+        for item in choices)
+    notice = ('<p class="banner %s">%s</p>'
+              % ("bad" if bad else "good", _text(note))) if note else ""
+    shown = ""
+    if current:
+        shown = ('<p class="sub">The picture on %s\'s page now:</p>'
+                 '<p><img class="portrait" src="%s" alt=""></p>'
+                 '<form method="post" action="%s/art">'
+                 '<input type="hidden" name="action" value="forget">'
+                 '<input type="hidden" name="url" value="%s">'
+                 '<button type="submit">Remove this picture</button>'
+                 '</form>'
+                 % (name, _text(ui.cover_url(base, current)), here,
+                    _text(current)))
+    body = ('%s%s<p class="sub">Pick one of these, or upload your own.</p>'
+            '<div class="covers">%s</div>'
+            '<form method="post" action="%s/art" class="sub">'
+            '<input type="hidden" name="action" value="search">'
+            '<button type="submit">Search again</button>'
+            '<span class="muted"> Wikipedia, Wikidata and the act\'s own '
+            'MusicBrainz links.</span></form>'
+            '<form class="upload" method="post" action="%s/cover"'
+            ' enctype="multipart/form-data">'
+            '<h3>Upload a picture</h3>'
+            '<label>Image file<input type="file" name="image"'
+            ' accept="image/png,image/jpeg,image/gif,image/webp"></label>'
+            ' <button type="submit">Upload</button>'
+            '<p class="sub">Your own photograph beats anything a lookup finds'
+            ' - up to 6 MB, PNG, JPEG, GIF or WebP.</p></form>'
+            % (notice, shown, tiles, here, here))
+    return ui.page(base, "Pictures of " + artist["name"], body,
+                   back="artist/%d" % artist["id"],
+                   back_label="\u2190 Back to the artist")
+
+
+def render_mbid(base, artist, matches, note="", query=""):
+    """Pick the right MusicBrainz entry for an act whose id is wrong.
+
+    MusicBrainz' search is a name search, not equality, so `Bush` answers with
+    Kate Bush first - the id this page is here to correct. Every hit is shown
+    with what MusicBrainz knows (type, country, years) so two bands of one name
+    can be told apart.
+    """
+    here = _text(base) + "artist/%d" % artist["id"]
+    rows = "".join(
+        '<tr><td><strong>%s</strong>%s</td><td class="muted">%s</td>'
+        '<td class="actions"><form method="post" action="%s">'
+        '<input type="hidden" name="action" value="mbid">'
+        '<input type="hidden" name="artist_mbid" value="%s">'
+        '<button type="submit">Use this</button></form></td></tr>'
+        % (_text(hit["name"]),
+           ' <span class="muted">%s</span>' % _text(hit["disambiguation"])
+           if hit["disambiguation"] else "",
+           _text(" \u00b7 ".join(filter(None, [hit["kind"], hit["country"],
+                                               hit["years"]]))),
+           here, _text(hit["mbid"]))
+        for hit in matches)
+    body = ('<form method="get" action="%s/mbid">'
+            '<label>Artist name<input name="q" value="%s" size="30"></label>'
+            ' <button type="submit">Search MusicBrainz</button></form>%s%s'
+            % (here, _text(query),
+               ('<p class="banner bad">%s</p>' % _text(note)) if note else "",
+               ('<table><thead><tr><th>Name</th><th>MusicBrainz says</th>'
+                '<th></th></tr></thead><tbody>%s</tbody></table>' % rows
+                if matches else
+                '<p class="sub">Nothing matched. Try the act\'s full name, or '
+                'paste its id from the MusicBrainz URL into the box on the '
+                'artist page.</p>')))
+    return ui.page(base, "MusicBrainz entry for " + artist["name"], body,
+                   back="artist/%d" % artist["id"],
+                   back_label="\u2190 Back to the artist")
+

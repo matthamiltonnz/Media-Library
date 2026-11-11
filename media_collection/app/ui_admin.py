@@ -133,14 +133,21 @@ def _refresh_block(base, refresh):
     last = refresh.get("last") or ""
     hours = refresh.get("auto_hours") or 0
     nxt = refresh.get("auto_next") or 0
+    at = refresh.get("auto_at") or "03:00"
+    retry_at = refresh.get("auto_retry_at") or ""
     if not hours:
         auto = ("The automatic pass is off - set refresh_hours to 24 for daily, "
                 "168 for weekly, or leave 0 to look things up only when asked.")
     else:
-        span = {24: "daily at 03:00", 168: "weekly"}.get(
+        span = {24: "daily at %s" % at, 168: "weekly at %s" % at}.get(
             hours, "every %d hours" % hours)
         auto = "Automatic pass %s." % span
-        if nxt:
+        auto += (" Set refresh_time in the add-on's Configuration to move it; "
+                 "the add-on picks it up on its next start.")
+        if retry_at:
+            auto += (" The last pass wrote nothing, so it tries again at %s - "
+                     "a router restarting can do that." % retry_at)
+        elif nxt:
             auto += " Next one %s." % time.strftime("%a %H:%M",
                                                     time.localtime(nxt))
     if refresh.get("collections"):

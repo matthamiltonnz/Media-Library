@@ -20,13 +20,18 @@ STATE = {
 }
 
 
-AUTO = {"hours": 0, "next": 0.0}
+AUTO = {"hours": 0, "next": 0.0, "at": "03:00", "retry": 0.0}
 
 
 def status():
     state = dict(STATE)
     state["auto_hours"] = AUTO["hours"]
     state["auto_next"] = AUTO["next"]
+    state["auto_at"] = AUTO.get("at", "")
+    state["auto_retry"] = AUTO.get("retry", 0.0)
+    state["auto_retry_at"] = (time.strftime("%H:%M",
+                                            time.localtime(state["auto_retry"]))
+                              if state["auto_retry"] else "")
     # The clock the page prints for a pause is formatted **here**, by the same
     # code that formats every other time on that page: a browser in another
     # timezone (or one that prefers 12-hour time) then cannot render the same
@@ -225,54 +230,101 @@ def _run_collections(con, pause):
         time.sleep(pause)
 
 
-def _until_hour(hour):
-    """Seconds until the next `hour`:00 local time (never less than a minute)."""
+def _until_hour(hour, minute=0):
+    """Seconds until the next `hour`:`minute` local time (at least a minute)."""
     now = time.localtime()
     when = list(now)[:6]
-    when[3], when[4], when[5] = int(hour), 0, 0
+    when[3], when[4], when[5] = int(hour), int(minute), 0
     target = time.mktime(tuple(when) + (0, 0, -1))
     while target <= time.time():
         target += 24 * 3600
     return max(60.0, target - time.time())
 
 
-def start_auto(db_path, hours=24, hour_of_day=3, limit=200, also=None):
+def start_auto(db_path, hours=24, hour_of_day=3, minute_of_day=0, limit=200,
+               retry_minutes=30, also=None):
     """Run the same pass by itself, so a shelf nobody touches still gets tidied.
 
     `hours` is the interval - 24 daily, 168 weekly - and 0 turns it off. The
-    first run waits for the next `hour_of_day` (03:00 local) instead of firing
-    at start-up: `main()` already refreshes a bounded handful there, and two
-    passes at once is exactly the burst Wikimedia rate-limits. `limit` bounds a
-    night's work (a shelf holds hundreds of titles no lookup will ever fill);
-    `also` is called after each pass (the artist fill) and is allowed to fail.
+    first run waits for the next `hour_of_day`:`minute_of_day` local time
+    (03:00 unless the household moves it - a machine whose router reboots at
+    3 am wants a later hour - instead of firing at start-up: `main()` already
+    refreshes a bounded handful there, and two passes at once is exactly the
+    burst Wikimedia rate-limits. `limit` bounds a night's work (a shelf holds
+    hundreds of titles no lookup will ever fill); `also` is called after each
+    pass (the artist fill) and is allowed to fail.
+
+    `retry_minutes` covers the other failure a schedule can meet: a pass where
+    nothing at all was written is usually a network that is still asleep - or
+    still restarting - so that pass is tried once more after `retry_minutes`
+    instead of being left for the next day. 0 turns the retry off.
     """
     try:
         hours = int(hours)
     except (TypeError, ValueError):
         hours = 0
-    AUTO.update(hours=max(0, hours))
+    try:
+        hour_of_day = max(0, min(23, int(hour_of_day)))
+        minute_of_day = max(0, min(59, int(minute_of_day)))
+    except (TypeError, ValueError):
+        hour_of_day, minute_of_day = 3, 0
+    try:
+        retry_minutes = max(0, min(720, int(retry_minutes)))
+    except (TypeError, ValueError):
+        retry_minutes = 0
+    AUTO.update(hours=max(0, hours),
+                at="%02d:%02d" % (hour_of_day, minute_of_day))
     if hours <= 0:
         AUTO["next"] = 0.0
+        AUTO["retry"] = 0.0
         return False
     threading.Thread(target=_auto, daemon=True,
-                     args=(db_path, hours, hour_of_day, limit, also)).start()
+                     args=(db_path, hours, hour_of_day, minute_of_day, limit,
+                           retry_minutes, also)).start()
     return True
 
 
-def _auto(db_path, hours, hour_of_day, limit, also):
+def _auto(db_path, hours, hour_of_day, minute_of_day, limit, retry_minutes, also):
     while True:
-        wait = _until_hour(hour_of_day)
+        wait = _until_hour(hour_of_day, minute_of_day)
         AUTO["next"] = time.time() + wait
         time.sleep(wait)
         AUTO["next"] = 0.0
-        try:
-            start(db_path, limit=limit, collections=True)
-            if also:
-                also()
-        except Exception as exc:        # a background pass must never die
-            print("refresh_job: automatic pass failed (%s)" % exc)
+        ran = _sweep(db_path, limit, also)
+        if ran and retry_minutes and _stalled():
+            # A pass that wrote nothing at all is usually a network that is not
+            # up yet - a router restarting at 03:00 is exactly that - so try
+            # once more shortly instead of leaving the backlog for a day.
+            AUTO["retry"] = time.time() + retry_minutes * 60
+            time.sleep(retry_minutes * 60)
+            AUTO["retry"] = 0.0
+            _sweep(db_path, limit, also)
         if hours != 24:
-            # any other interval counts from this run, not from 03:00 again
+            # any other interval counts from this run, not from its time of day
             AUTO["next"] = time.time() + hours * 3600
             time.sleep(hours * 3600)
+
+
+def _sweep(db_path, limit, also):
+    """Run one automatic pass and wait it out; False when none was started."""
+    try:
+        ran = start(db_path, limit=limit, collections=True)
+        if also:
+            also()
+    except Exception as exc:        # a background pass must never die
+        print("refresh_job: automatic pass failed (%s)" % exc)
+        return False
+    while ran and STATE.get("running"):
+        time.sleep(5)               # the status endpoint answers meanwhile
+    return bool(ran)
+
+
+def _stalled():
+    """True when the pass that just finished wrote nothing at all."""
+    if STATE.get("running"):
+        return False
+    if not (STATE.get("total") or STATE.get("collections")):
+        return False
+    return not (STATE.get("updated") or STATE.get("filed")
+                or STATE.get("collection_filed"))
 

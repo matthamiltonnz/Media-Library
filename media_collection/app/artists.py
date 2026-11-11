@@ -6,6 +6,7 @@ pages then work from a plain join instead of re-splitting every row.
 """
 
 import argparse
+import json
 import re
 import sys
 import threading
@@ -172,7 +173,10 @@ def set_mbid(con, artist_id, value):
         return False, ("That is not a MusicBrainz id - it is the 36-character"
                        " uuid from the artist's own MusicBrainz URL.")
     if not value:
-        con.execute("UPDATE artists SET musicbrainz_id = NULL, link_urls = NULL,"
+        con.execute("UPDATE artists SET musicbrainz_id = NULL, country = NULL,"
+                    " formed_year = NULL, kind = NULL, overview = NULL,"
+                    " wiki_url = NULL, link_urls = NULL, image_url = NULL,"
+                    " image_at = NULL, image_candidates = NULL,"
                     " bio_at = NULL WHERE id = ?", (artist_id,))
         con.commit()
         return True, "MusicBrainz id cleared."
@@ -181,11 +185,28 @@ def set_mbid(con, artist_id, value):
     except Exception as exc:                 # offline, throttled, whatever
         details = {}
         print("artists: MusicBrainz said %s" % exc)
-    con.execute(
-        "UPDATE artists SET musicbrainz_id = ?, country = ?, formed_year = ?,"
-        " kind = ?, link_urls = NULL, bio_at = NULL WHERE id = ?",
-        (value, details.get("country") or None, details.get("year") or None,
-         details.get("kind") or None, artist_id))
+    # Everything derived from the *old* id goes with it: the biography, the
+    # portrait and the remembered pictures all belong to whichever act was
+    # there before, so keeping them shows one band with another's face. A save
+    # of the id already stored is left alone - the box holds the current id, so
+    # pressing Save again must not throw away a portrait somebody chose.
+    row = con.execute("SELECT musicbrainz_id FROM artists WHERE id = ?",
+                      (artist_id,)).fetchone()
+    if row is not None and (row[0] or "") == value:
+        con.execute(
+            "UPDATE artists SET country = COALESCE(?, country),"
+            " formed_year = COALESCE(?, formed_year),"
+            " kind = COALESCE(?, kind) WHERE id = ?",
+            (details.get("country") or None, details.get("year") or None,
+             details.get("kind") or None, artist_id))
+    else:
+        con.execute(
+            "UPDATE artists SET musicbrainz_id = ?, country = ?, formed_year = ?,"
+            " kind = ?, overview = NULL, wiki_url = NULL, link_urls = NULL,"
+            " image_url = NULL, image_at = NULL, image_candidates = NULL,"
+            " bio_at = NULL WHERE id = ?",
+            (value, details.get("country") or None, details.get("year") or None,
+             details.get("kind") or None, artist_id))
     con.commit()
     if not details:
         return True, "Saved, but MusicBrainz did not answer for that id."
@@ -283,6 +304,8 @@ def enrich(con, limit=None):
     # a biography comes from Wikipedia, not MusicBrainz - and only once the
     # MusicBrainz id above is there, because the links list it
     filled += fill_bio(con)
+    # and a portrait, for the acts that have none - the artist wall shows it
+    fill_images(con)
     _STATE["running"] = False
     return filled
 
@@ -294,7 +317,8 @@ def enrich_one(con, artist_id):
     album by an act already on the shelf costs one row read.
     """
     row = con.execute(
-        "SELECT id, name, musicbrainz_id, country, formed_year, kind, bio_at"
+        "SELECT id, name, musicbrainz_id, country, formed_year, kind, bio_at,"
+        "       image_url, image_at"
         "  FROM artists WHERE id = ?", (artist_id,)).fetchone()
     if row is None:
         return 0
@@ -304,6 +328,8 @@ def enrich_one(con, artist_id):
         made += _fill_from_musicbrainz(con, row)
     if row["bio_at"] is None:
         made += fill_bio(con, artist_id=artist_id)
+    if not (row["image_url"] or "").strip():
+        made += fill_images(con, artist_id=artist_id)
     return made
 
 
@@ -338,11 +364,16 @@ def fill_bio(con, artist_id=None, limit=None):
         except Exception:
             continue
         if found:
+            # a re-fetch must not wipe a portrait it cannot replace: the
+            # summary of a second look often has no lead image, and this used
+            # to write NULL over a picture that came from Wikidata
             con.execute(
-                "UPDATE artists SET overview = ?, image_url = ?, wiki_url = ?,"
-                " link_urls = ?, bio_at = datetime('now') WHERE id = ?",
-                (found["overview"], found["image_url"], found["wiki_url"],
-                 json.dumps(found["links"]), row["id"]))
+                "UPDATE artists SET overview = ?, wiki_url = ?,"
+                " link_urls = ?, bio_at = datetime('now'),"
+                " image_url = COALESCE(NULLIF(?, ''), image_url)"
+                " WHERE id = ?",
+                (found["overview"], found["wiki_url"],
+                 json.dumps(found["links"]), found["image_url"], row["id"]))
             made += 1
             _STATE["bios"] = (_STATE.get("bios") or 0) + 1
         else:
@@ -352,8 +383,122 @@ def fill_bio(con, artist_id=None, limit=None):
     return made
 
 
-_STATE = {"running": False, "filled": 0, "bios": 0, "at": None}
+def fill_images(con, artist_id=None, limit=None):
+    """Give acts without a portrait one - Wikipedia's lead image, then Wikidata.
 
+    The artist wall used to show the first album's sleeve for every act, so the
+    photograph the biography lookup already stored was never seen. `image_at`
+    is the stamp that makes this run once per act: an act nobody has a
+    photograph of is recorded as asked rather than re-asked on every refresh -
+    the same rule `fill_bio` follows.
+    """
+    import metadata
+    where = ("WHERE (image_url IS NULL OR TRIM(image_url) = '')"
+             " AND image_at IS NULL")
+    if artist_id is None:
+        rows = con.execute(
+            "SELECT id, name, musicbrainz_id, wiki_url FROM artists "
+            + where + " ORDER BY name").fetchall()
+    else:
+        rows = con.execute(
+            "SELECT id, name, musicbrainz_id, wiki_url FROM artists "
+            + where + " AND id = ?", (artist_id,)).fetchall()
+    made = 0
+    for row in rows:
+        if limit is not None and made >= limit:
+            break
+        try:
+            found = metadata.artist_image(row["name"], row["musicbrainz_id"],
+                                          row["wiki_url"])
+        except Exception as exc:            # a lookup must not stop the run
+            print("artists: %s" % exc, file=sys.stderr)
+            found = ""
+        if found:
+            con.execute("UPDATE artists SET image_url = ?,"
+                        " image_at = datetime('now') WHERE id = ?",
+                        (found, row["id"]))
+            made += 1
+            _STATE["images"] = (_STATE.get("images") or 0) + 1
+        else:
+            con.execute("UPDATE artists SET image_at = datetime('now')"
+                        " WHERE id = ?", (row["id"],))
+        con.commit()
+    return made
+
+
+
+_STATE = {"running": False, "filled": 0, "bios": 0, "images": 0, "at": None}
+
+
+
+def image_choices(con, artist_id):
+    """The pictures remembered for an act, newest last."""
+    row = con.execute("SELECT image_candidates FROM artists WHERE id = ?",
+                      (artist_id,)).fetchone()
+    try:
+        kept = json.loads(row[0]) if row and row[0] else []
+    except (TypeError, ValueError):
+        kept = []
+    return [item for item in kept
+            if isinstance(item, dict) and item.get("url")]
+
+
+def remember_images(con, artist_id, found, keep=12):
+    """Add pictures to the act's list, newest last and without duplicates."""
+    kept = image_choices(con, artist_id)
+    urls = {item["url"] for item in kept}
+    for item in found or []:
+        url = (item.get("url") or "").strip()
+        if url and url not in urls:
+            urls.add(url)
+            kept.append({"source": item.get("source") or "",
+                         "url": url,
+                         "label": item.get("label") or ""})
+    kept = kept[-keep:]
+    con.execute("UPDATE artists SET image_candidates = ? WHERE id = ?",
+                (json.dumps(kept), artist_id))
+    con.commit()
+    return kept
+
+
+def set_image(con, artist_id, url):
+    """Point the act's portrait at one picture."""
+    con.execute("UPDATE artists SET image_url = ?,"
+                " image_at = datetime('now') WHERE id = ?",
+                ((url or "").strip(), artist_id))
+    con.commit()
+
+
+def forget_image(con, artist_id, url):
+    """Drop one picture from the list; unset it when it is the one on show."""
+    url = (url or "").strip()
+    kept = [item for item in image_choices(con, artist_id)
+            if item["url"] != url]
+    con.execute("UPDATE artists SET image_candidates = ? WHERE id = ?",
+                (json.dumps(kept), artist_id))
+    row = con.execute("SELECT image_url FROM artists WHERE id = ?",
+                      (artist_id,)).fetchone()
+    if row and (row[0] or "").strip() == url:
+        # no picture at all again, and no stamp - a refresh may find another
+        con.execute("UPDATE artists SET image_url = NULL, image_at = NULL"
+                    " WHERE id = ?", (artist_id,))
+    con.commit()
+    return kept
+
+
+def refresh_art(con, artist_id):
+    """Search for pictures of an act, remember them, and return (found, note)."""
+    import metadata
+    row = con.execute(
+        "SELECT id, name, musicbrainz_id, wiki_url FROM artists WHERE id = ?",
+        (artist_id,)).fetchone()
+    if row is None:
+        return [], "No such artist."
+    found, note = metadata.artist_cover_search(row["name"],
+                                               row["musicbrainz_id"] or "",
+                                               row["wiki_url"] or "")
+    remember_images(con, artist_id, found)
+    return found, note
 
 def status():
     return dict(_STATE)
@@ -369,10 +514,11 @@ def summary():
                        state.get("filled") or 0))
         return "Filling artist details from MusicBrainz..."
     if state["at"]:
-        if state.get("bios"):
-            return ("Filled %d artist(s) from MusicBrainz and gave %d a"
-                    " Wikipedia biography on %s."
-                    % (state["filled"], state["bios"], state["at"]))
+        if state.get("bios") or state.get("images"):
+            return ("Filled %d artist(s) from MusicBrainz, gave %d a Wikipedia"
+                    " biography and %d a portrait on %s."
+                    % (state["filled"], state.get("bios") or 0,
+                       state.get("images") or 0, state["at"]))
         return ("Filled %d artist(s) from MusicBrainz on %s."
                 % (state["filled"], state["at"]))
     return ""
@@ -382,7 +528,7 @@ def start(db_path, limit=None):
     """Fill artist details in the background - MusicBrainz allows one call a second."""
     if _STATE["running"]:
         return False
-    _STATE.update(running=True, filled=0, bios=0)
+    _STATE.update(running=True, filled=0, bios=0, images=0)
 
     def _run():
         import datetime
